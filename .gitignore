@@ -1,0 +1,11 @@
+build/
+logs/
+reports/
+.Xil/
+data/generated/
+*.log
+*.jou
+*.wdb
+*.wcfg
+*.csv
+*.run_summary
