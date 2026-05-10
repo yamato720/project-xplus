@@ -15,6 +15,13 @@ void spmv_csr_kernel(const project_xplus_index_t* row_ptr,
                      project_xplus_data_t* y,
                      int n);
 
+void spmv_blocked_kernel(const project_xplus_index_t* row_ptr,
+                         const project_xplus_index_t* col_idx,
+                         const project_xplus_data_t* values,
+                         const project_xplus_data_t* x,
+                         project_xplus_data_t* y,
+                         int n);
+
 void init_pcg_kernel(const project_xplus_data_t* b,
                      const project_xplus_data_t* ax,
                      const project_xplus_data_t* m_inv,

@@ -18,6 +18,24 @@ inline void load_vector_local(const data_t* src, data_t* dst, const int n) {
     }
 }
 
+inline void spmv_reference_body(const index_t* row_ptr,
+                                const index_t* col_idx,
+                                const data_t* values,
+                                const data_t* x,
+                                data_t* y,
+                                const int n) {
+    data_t x_local[kMaxN];
+    load_vector_local(x, x_local, n);
+
+    for (int row = 0; row < n; ++row) {
+        data_t acc = 0.0;
+        for (int offset = row_ptr[row]; offset < row_ptr[row + 1]; ++offset) {
+            acc += values[offset] * x_local[col_idx[offset]];
+        }
+        y[row] = acc;
+    }
+}
+
 }  // namespace
 
 extern "C" {
@@ -34,19 +52,22 @@ void spmv_csr_kernel(const index_t* row_ptr,
         return;
     }
 
-    // 在 CPU 版里仍然先做一次 x 的局部缓存，
-    // 这样代码结构和硬件版更接近，便于对照调试。
-    data_t x_local[kMaxN];
-    load_vector_local(x, x_local, n);
+    spmv_reference_body(row_ptr, col_idx, values, x, y, n);
+}
 
-    for (int row = 0; row < n; ++row) {
-        // CSR 行扫描：一行聚合成一个输出元素。
-        data_t acc = 0.0;
-        for (int offset = row_ptr[row]; offset < row_ptr[row + 1]; ++offset) {
-            acc += values[offset] * x_local[col_idx[offset]];
-        }
-        y[row] = acc;
+void spmv_blocked_kernel(const index_t* row_ptr,
+                         const index_t* col_idx,
+                         const data_t* values,
+                         const data_t* x,
+                         data_t* y,
+                         int n) {
+    // 这是给后续“分块 SpMV”替换预留的本地占位实现。
+    // 当前先保持接口稳定，并退化为与 CSR 版一致的行为。
+    if (!valid_n(n)) {
+        return;
     }
+
+    spmv_reference_body(row_ptr, col_idx, values, x, y, n);
 }
 
 void init_pcg_kernel(const data_t* b,

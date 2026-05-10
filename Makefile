@@ -76,6 +76,15 @@ DEVICE_INDEX ?= 0
 HOST_ARGS ?=
 
 KERNEL_NAMES := spmv_csr_kernel init_pcg_kernel dot_kernel update_xrz_kernel update_p_kernel
+# 手动切换 SpMV 硬件实现时，改这里的源文件即可。
+# 默认使用 CSR 版本：
+#   SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_csr_kernel.cpp
+# 如需切到 blocked 占位实现，可以手动改成：
+#   SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_blocked_kernel.cpp
+# 也可以不改文件，直接在命令行覆盖：
+#   make build-sw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp
+#   make build-hw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp
+SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_csr_kernel.cpp
 XO_SP_MV := $(BUILD_DIR)/spmv_csr_kernel.xo
 XO_INIT := $(BUILD_DIR)/init_pcg_kernel.xo
 XO_DOT := $(BUILD_DIR)/dot_kernel.xo
@@ -126,6 +135,7 @@ help:
 	@echo ""
 	@echo "Build sw_emu xclbin:"
 	@echo "  make build-sw"
+	@echo "  make build-sw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp"
 	@echo ""
 	@echo "Run sw_emu:"
 	@echo "  make run-xrt TARGET=sw_emu"
@@ -134,6 +144,7 @@ help:
 	@echo ""
 	@echo "Build hardware xclbin:"
 	@echo "  make build-hw"
+	@echo "  make build-hw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp"
 	@echo "  make vivado-package-full"
 	@echo ""
 	@echo "Run hardware:"
@@ -161,7 +172,9 @@ $(LOCAL_HOST): $(HOST_DIR)/main.cpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/da
 $(XRT_HOST): $(HOST_DIR)/xrt_host.cpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/xrt_host.cpp -o $(XRT_HOST) $(XRT_LDFLAGS)
 
-$(XO_SP_MV): $(KERNEL_DIR)/spmv_csr_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_SP_MV): $(SPMV_KERNEL_SOURCE) $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+	# 这里统一按 -k spmv_csr_kernel 编译，对外保持原 kernel 名字不变。
+	# 因此切换到 blocked 版本时，只需要替换源文件，不需要改 xrt_host 或 connectivity。
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k spmv_csr_kernel -o $@ $<
 
 $(XO_INIT): $(KERNEL_DIR)/init_pcg_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env

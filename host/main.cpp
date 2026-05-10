@@ -71,8 +71,11 @@ int main(int argc, char** argv) {
 
         std::cout << "[xplus] dataset=" << options.dataset_dir << "\n";
 
+        // 如需切到分块 SpMV 占位实现，只需把这里改成 spmv_blocked_kernel。
+        const auto spmv_kernel_entry = spmv_csr_kernel;
         const project_xplus::cgsolver::MultiKernelResult xplus_result =
-            project_xplus::cgsolver::run_local_multi_kernel_solver(dataset, config, &std::cout);
+            project_xplus::cgsolver::run_local_multi_kernel_solver(
+                dataset, config, &std::cout, spmv_kernel_entry);
         // 仍然保留 CPU golden，确保本地多-kernel 逻辑没有偏离参考实现。
         const project_xplus::cgsolver::CpuReferenceResult golden_result =
             project_xplus::cgsolver::run_cpu_reference(dataset, config);

@@ -45,6 +45,13 @@ struct MultiKernelResult {
     bool converged = false;
 };
 
+using SpmvKernelFn = void (*)(const index_t* row_ptr,
+                              const index_t* col_idx,
+                              const data_t* values,
+                              const data_t* x,
+                              data_t* y,
+                              int n);
+
 inline data_t l2_norm_vec(const std::vector<data_t>& values) {
     data_t acc = 0.0;
     for (const data_t value : values) {
@@ -92,7 +99,8 @@ inline void log_iteration(std::ostream& output,
 
 inline MultiKernelResult run_local_multi_kernel_solver(const Dataset& dataset,
                                                        const SolverConfig& config,
-                                                       std::ostream* log_output = nullptr) {
+                                                       std::ostream* log_output = nullptr,
+                                                       SpmvKernelFn spmv_kernel_fn = spmv_csr_kernel) {
     // 这个函数是“host 直接调用 kernel 函数”的本地等价版：
     // 不涉及 XRT / BO / xclbin，但执行顺序与硬件版 host orchestration 保持一致。
     if (config.tau <= 0.0) {
@@ -126,12 +134,12 @@ inline MultiKernelResult run_local_multi_kernel_solver(const Dataset& dataset,
     // 初始化前两步：
     // 1. SpMV 算 ax = A*x0
     // 2. init kernel 生成 r/z/p 以及 rz/rr
-    spmv_csr_kernel(dataset.row_ptr().data(),
-                    dataset.col_idx().data(),
-                    dataset.values().data(),
-                    result.solution.data(),
-                    spmv_out.data(),
-                    dataset.n());
+    spmv_kernel_fn(dataset.row_ptr().data(),
+                   dataset.col_idx().data(),
+                   dataset.values().data(),
+                   result.solution.data(),
+                   spmv_out.data(),
+                   dataset.n());
     init_pcg_kernel(dataset.b().data(),
                     spmv_out.data(),
                     result.jacobi_inverse.data(),
@@ -150,12 +158,12 @@ inline MultiKernelResult run_local_multi_kernel_solver(const Dataset& dataset,
          ++iteration) {
         // 主循环严格跟硬件版一样：
         //   spmv -> dot -> host算alpha -> update_xrz -> host算beta -> update_p
-        spmv_csr_kernel(dataset.row_ptr().data(),
-                        dataset.col_idx().data(),
-                        dataset.values().data(),
-                        p.data(),
-                        spmv_out.data(),
-                        dataset.n());
+        spmv_kernel_fn(dataset.row_ptr().data(),
+                       dataset.col_idx().data(),
+                       dataset.values().data(),
+                       p.data(),
+                       spmv_out.data(),
+                       dataset.n());
         dot_kernel(p.data(), spmv_out.data(), dot_out, dataset.n());
 
         const data_t p_ap = dot_out[0];
