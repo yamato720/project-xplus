@@ -98,14 +98,18 @@ make run-xrt TARGET=sw_emu
 运行 `sw_emu` 并生成 `txt/json/html` 报告：
 
 ```bash
-make run-sw-report REPORT_BASENAME=sw_emu_n512
+make run-sw-report REPORT_BASENAME=n512
 ```
+
+终端默认只打印关键摘要，详细运行输出会写入同名 `.log` 文件。
 
 如果已经有编好的 `sw_emu` 产物，优先直接运行，不存在时再自动补编：
 
 ```bash
-make run-sw-report-existing REPORT_BASENAME=sw_emu_n512
+make run-sw-report-existing REPORT_BASENAME=n512
 ```
+
+软件报告实际文件名前会自动加 `SW_` 前缀。
 
 会同时生成两份 HTML：
 
@@ -134,14 +138,16 @@ make vivado-package-full
 硬件执行并生成 `hw` 报告：
 
 ```bash
-make run-hw-report REPORT_BASENAME_HW=hw_n512_report
+make run-hw-report REPORT_BASENAME_HW=n512_report
 ```
 
 如果已经有编好的硬件 bitstream，优先直接运行，不存在时再自动补编：
 
 ```bash
-make run-hw-report-existing REPORT_BASENAME_HW=hw_n512_report
+make run-hw-report-existing REPORT_BASENAME_HW=n512_report
 ```
+
+硬件报告实际文件名前会自动加 `HW_` 前缀。
 
 或：
 
@@ -169,6 +175,30 @@ data/generated/cgsolver/n512
 src/CsrDataset.hpp
 src/CgSolverGolden.hpp
 ```
+
+## 报告文件
+
+每次 `run-sw-report*` / `run-hw-report*` 默认会输出：
+
+```text
+SW_<basename>.json
+SW_<basename>.txt
+SW_<basename>.html
+SW_<basename>_static.html
+SW_<basename>.log
+
+HW_<basename>.json
+HW_<basename>.txt
+HW_<basename>.html
+HW_<basename>_static.html
+HW_<basename>.log
+```
+
+其中：
+
+1. 终端只保留关键摘要
+2. 详细构建/运行日志进入 `.log`
+3. 结构化结果进入 `json/txt/html`
 
 ## 后续实现边界
 

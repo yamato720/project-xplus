@@ -47,16 +47,20 @@ VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
 VIVADO_PACKAGE_DIR := $(BUILD_DIR)/packages
 VIVADO_PACKAGE_NAME ?= project-xplus-vivado-view
 VIVADO_PACKAGE_FULL := $(VIVADO_PACKAGE_DIR)/$(VIVADO_PACKAGE_NAME)-full.tar.gz
-REPORT_BASENAME ?= sw_emu_n512
-REPORT_JSON := $(REPORT_DIR)/$(REPORT_BASENAME).json
-REPORT_TXT := $(REPORT_DIR)/$(REPORT_BASENAME).txt
-REPORT_HTML := $(REPORT_DIR)/$(REPORT_BASENAME).html
-REPORT_HTML_STATIC := $(REPORT_DIR)/$(REPORT_BASENAME)_static.html
-REPORT_BASENAME_HW ?= hw_n512
-REPORT_JSON_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).json
-REPORT_TXT_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).txt
-REPORT_HTML_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).html
-REPORT_HTML_STATIC_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW)_static.html
+REPORT_BASENAME ?= n512
+REPORT_BASENAME_HW ?= n512
+REPORT_BASENAME_SW_FULL := SW_$(REPORT_BASENAME)
+REPORT_BASENAME_HW_FULL := HW_$(REPORT_BASENAME_HW)
+REPORT_JSON := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).json
+REPORT_TXT := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).txt
+REPORT_HTML := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).html
+REPORT_HTML_STATIC := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL)_static.html
+REPORT_LOG := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).log
+REPORT_JSON_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW_FULL).json
+REPORT_TXT_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW_FULL).txt
+REPORT_HTML_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW_FULL).html
+REPORT_HTML_STATIC_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW_FULL)_static.html
+REPORT_LOG_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW_FULL).log
 SW_XCLBIN := $(BUILD_DIR)/sw_emu/cgsolver_jacobi_pcg.xclbin
 HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 
@@ -97,6 +101,7 @@ VPP_LDFLAGS += --config $(CFG_DIR)/connectivity_u55c.cfg
 
 HOST_RUN_ARGS := $(HOST_ARGS)
 VITIS_ENV_CMD := source "$(VITIS_SETTINGS)" >/dev/null 2>&1 &&
+SUMMARY_GREP := ^(\\[xplus-xrt\\]|\\[init\\]|\\[done\\]|\\[check\\]|\\[host-timing-ms\\]|\\[kernel-timing-ms\\])
 
 ifneq ($(strip $(VITIS_ROOT)),)
 export XILINX_VITIS := $(VITIS_ROOT)
@@ -198,52 +203,74 @@ else
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) $(HOST_RUN_ARGS)
 endif
 
-run-sw-report: $(XRT_HOST) $(XCLBIN) generate
+run-sw-report:
 	@mkdir -p "$(REPORT_DIR)"
-	$(MAKE) $(EMCONFIG) TARGET=sw_emu
-	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS)
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)"
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)"
+	@: > "$(REPORT_LOG)"
+	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
+	@$(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1
+	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG)" 2>&1
+	@$(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1
+	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
+	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true
 	@echo "report json: $(REPORT_JSON)"
 	@echo "report txt : $(REPORT_TXT)"
 	@echo "report html: $(REPORT_HTML)"
 	@echo "report html static: $(REPORT_HTML_STATIC)"
+	@echo "report log : $(REPORT_LOG)"
 
-run-sw-report-existing: $(XRT_HOST) generate
+run-sw-report-existing:
 	@mkdir -p "$(REPORT_DIR)"
-	@test -f "$(SW_XCLBIN)" || ($(MAKE) build-sw)
-	@test -f "$(BUILD_DIR)/sw_emu/emconfig.json" || ($(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu)
-	$(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS)
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)"
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)"
+	@: > "$(REPORT_LOG)"
+	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
+	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG)" 2>&1
+	@test -f "$(SW_XCLBIN)" || ($(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1)
+	@test -f "$(BUILD_DIR)/sw_emu/emconfig.json" || ($(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1)
+	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
+	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true
 	@echo "report json: $(REPORT_JSON)"
 	@echo "report txt : $(REPORT_TXT)"
 	@echo "report html: $(REPORT_HTML)"
 	@echo "report html static: $(REPORT_HTML_STATIC)"
+	@echo "report log : $(REPORT_LOG)"
 
 run-hw-report:
 	$(MAKE) _run-hw-report TARGET=hw REPORT_BASENAME_HW="$(REPORT_BASENAME_HW)" DATASET_DIR="$(DATASET_DIR)" TAU="$(TAU)" MAX_ITERS="$(MAX_ITERS)" DEVICE_INDEX="$(DEVICE_INDEX)" HOST_ARGS='$(HOST_ARGS)'
 
-_run-hw-report: $(XRT_HOST) $(XCLBIN) generate
+_run-hw-report:
 	@mkdir -p "$(REPORT_DIR)"
-	$(VITIS_ENV_CMD) "$(XRT_HOST)" "$(XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS)
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
+	@: > "$(REPORT_LOG_HW)"
+	@$(MAKE) xrt-host >>"$(REPORT_LOG_HW)" 2>&1
+	@$(MAKE) build-hw >>"$(REPORT_LOG_HW)" 2>&1
+	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG_HW)" 2>&1
+	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)" "$(XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG_HW)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)" >>"$(REPORT_LOG_HW)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)" >>"$(REPORT_LOG_HW)" 2>&1
+	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG_HW)" || true
 	@echo "report json: $(REPORT_JSON_HW)"
 	@echo "report txt : $(REPORT_TXT_HW)"
 	@echo "report html: $(REPORT_HTML_HW)"
 	@echo "report html static: $(REPORT_HTML_STATIC_HW)"
+	@echo "report log : $(REPORT_LOG_HW)"
 
-run-hw-report-existing: $(XRT_HOST) generate
+run-hw-report-existing:
 	@mkdir -p "$(REPORT_DIR)"
-	@test -f "$(HW_XCLBIN)" || ($(MAKE) build-hw)
-	$(VITIS_ENV_CMD) "$(XRT_HOST)" "$(HW_XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS)
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
-	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
+	@: > "$(REPORT_LOG_HW)"
+	@$(MAKE) xrt-host >>"$(REPORT_LOG_HW)" 2>&1
+	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG_HW)" 2>&1
+	@test -f "$(HW_XCLBIN)" || ($(MAKE) build-hw >>"$(REPORT_LOG_HW)" 2>&1)
+	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)" "$(HW_XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG_HW)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)" >>"$(REPORT_LOG_HW)" 2>&1
+	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)" >>"$(REPORT_LOG_HW)" 2>&1
+	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG_HW)" || true
 	@echo "report json: $(REPORT_JSON_HW)"
 	@echo "report txt : $(REPORT_TXT_HW)"
 	@echo "report html: $(REPORT_HTML_HW)"
 	@echo "report html static: $(REPORT_HTML_STATIC_HW)"
+	@echo "report log : $(REPORT_LOG_HW)"
 
 render-report:
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)"

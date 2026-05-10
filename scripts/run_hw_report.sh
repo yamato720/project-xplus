@@ -2,4 +2,4 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-make run-hw-report "$@"
+make run-hw-report-existing "$@"
