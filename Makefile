@@ -42,6 +42,11 @@ CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
+VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
+VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
+VIVADO_PACKAGE_DIR := $(BUILD_DIR)/packages
+VIVADO_PACKAGE_NAME ?= project-xplus-vivado-view
+VIVADO_PACKAGE_FULL := $(VIVADO_PACKAGE_DIR)/$(VIVADO_PACKAGE_NAME)-full.tar.gz
 REPORT_BASENAME ?= sw_emu_n512
 REPORT_JSON := $(REPORT_DIR)/$(REPORT_BASENAME).json
 REPORT_TXT := $(REPORT_DIR)/$(REPORT_BASENAME).txt
@@ -52,6 +57,8 @@ REPORT_JSON_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).json
 REPORT_TXT_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).txt
 REPORT_HTML_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW).html
 REPORT_HTML_STATIC_HW := $(REPORT_DIR)/$(REPORT_BASENAME_HW)_static.html
+SW_XCLBIN := $(BUILD_DIR)/sw_emu/cgsolver_jacobi_pcg.xclbin
+HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 
 LOCAL_HOST := $(BUILD_DIR)/xplus_host
 XRT_HOST := $(BUILD_DIR)/xplus_xrt_host
@@ -96,7 +103,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env generate local-host xrt-host run run-local run-xrt run-sw-report run-hw-report _run-hw-report render-report render-hw-report build build-sw build-hw clean
+.PHONY: all help env generate local-host xrt-host run run-local run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-package-full build build-sw build-hw clean
 
 all: run-local
 
@@ -118,13 +125,16 @@ help:
 	@echo "Run sw_emu:"
 	@echo "  make run-xrt TARGET=sw_emu"
 	@echo "  make run-sw-report"
+	@echo "  make run-sw-report-existing"
 	@echo ""
 	@echo "Build hardware xclbin:"
 	@echo "  make build-hw"
+	@echo "  make vivado-package-full"
 	@echo ""
 	@echo "Run hardware:"
 	@echo "  make run-xrt TARGET=hw"
 	@echo "  make run-hw-report"
+	@echo "  make run-hw-report-existing"
 
 env:
 	@test -f "$(XPLATFORM)" || (echo "ERROR: platform not found: $(XPLATFORM)" && exit 1)
@@ -199,12 +209,35 @@ run-sw-report: $(XRT_HOST) $(XCLBIN) generate
 	@echo "report html: $(REPORT_HTML)"
 	@echo "report html static: $(REPORT_HTML_STATIC)"
 
+run-sw-report-existing: $(XRT_HOST) generate
+	@mkdir -p "$(REPORT_DIR)"
+	@test -f "$(SW_XCLBIN)" || ($(MAKE) build-sw)
+	@test -f "$(BUILD_DIR)/sw_emu/emconfig.json" || ($(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu)
+	$(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS)
+	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)"
+	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)"
+	@echo "report json: $(REPORT_JSON)"
+	@echo "report txt : $(REPORT_TXT)"
+	@echo "report html: $(REPORT_HTML)"
+	@echo "report html static: $(REPORT_HTML_STATIC)"
+
 run-hw-report:
 	$(MAKE) _run-hw-report TARGET=hw REPORT_BASENAME_HW="$(REPORT_BASENAME_HW)" DATASET_DIR="$(DATASET_DIR)" TAU="$(TAU)" MAX_ITERS="$(MAX_ITERS)" DEVICE_INDEX="$(DEVICE_INDEX)" HOST_ARGS='$(HOST_ARGS)'
 
 _run-hw-report: $(XRT_HOST) $(XCLBIN) generate
 	@mkdir -p "$(REPORT_DIR)"
 	$(VITIS_ENV_CMD) "$(XRT_HOST)" "$(XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS)
+	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
+	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
+	@echo "report json: $(REPORT_JSON_HW)"
+	@echo "report txt : $(REPORT_TXT_HW)"
+	@echo "report html: $(REPORT_HTML_HW)"
+	@echo "report html static: $(REPORT_HTML_STATIC_HW)"
+
+run-hw-report-existing: $(XRT_HOST) generate
+	@mkdir -p "$(REPORT_DIR)"
+	@test -f "$(HW_XCLBIN)" || ($(MAKE) build-hw)
+	$(VITIS_ENV_CMD) "$(XRT_HOST)" "$(HW_XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS)
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
 	@echo "report json: $(REPORT_JSON_HW)"
@@ -219,6 +252,19 @@ render-report:
 render-hw-report:
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
+
+vivado-package-full:
+	@test -d "$(BUILD_DIR)/hw/_x_temp/link/vivado/vpl" || (echo "ERROR: Vivado link directory not found: $(BUILD_DIR)/hw/_x_temp/link/vivado/vpl. Build hardware first with: make build-hw" && exit 1)
+	@test -d "$(BUILD_DIR)/hw/_x_temp/reports/link" || (echo "ERROR: hardware report directory not found: $(BUILD_DIR)/hw/_x_temp/reports/link. Build hardware first with: make build-hw" && exit 1)
+	@mkdir -p "$(VIVADO_PACKAGE_DIR)"
+	cd "$(ROOT_DIR)" && tar -czf "$(VIVADO_PACKAGE_FULL)" \
+		"build/hw/_x_temp/link/vivado/vpl" \
+		"build/hw/_x_temp/reports/link" \
+		"README.md" \
+		"docs/design/hls.md" \
+		"docs/design/hls_source_walkthrough_zh.md"
+	@echo "Created: $(VIVADO_PACKAGE_FULL)"
+	@ls -lh "$(VIVADO_PACKAGE_FULL)"
 
 clean:
 	rm -rf $(BUILD_DIR)

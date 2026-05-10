@@ -1,6 +1,6 @@
 # Project-XPlus
 
-`Project-XPlus` 是从 `Project-X` 内独立出来的 Jacobi-PCG 多 kernel HLS 子项目根目录。
+`Project-XPlus` 是一个面向 Jacobi-PCG 多 kernel HLS/XRT 的独立子项目。
 
 当前目标：
 
@@ -58,48 +58,53 @@ Project-XPlus/
 6. `sw_emu` / `hw` 报告输出链，包括 txt/json/interactive html/static html
 7. 关键 host 与 kernel 顶层中文注释，便于顺着看硬件执行流程
 
+## 文档
+
+- 设计基线：[docs/design/hls.md](/home/pyx/ProjectFS/Project-X/Project-XPlus/docs/design/hls.md)
+- HLS 源码解析：[docs/design/hls_source_walkthrough_zh.md](/home/pyx/ProjectFS/Project-X/Project-XPlus/docs/design/hls_source_walkthrough_zh.md)
+
 ## 用法
 
 直接运行本地多-kernel 基线：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make run-local
 ```
 
 指定数据集和迭代参数：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make run-local DATASET_DIR=data/generated/cgsolver/n512 TAU=1e-10 MAX_ITERS=0
 ```
 
 构建 XRT host：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make xrt-host
 ```
 
 构建 `sw_emu` xclbin：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make build-sw
 ```
 
 运行 `sw_emu`：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make run-xrt TARGET=sw_emu
 ```
 
 运行 `sw_emu` 并生成 `txt/json/html` 报告：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make run-sw-report REPORT_BASENAME=sw_emu_n512
+```
+
+如果已经有编好的 `sw_emu` 产物，优先直接运行，不存在时再自动补编：
+
+```bash
+make run-sw-report-existing REPORT_BASENAME=sw_emu_n512
 ```
 
 会同时生成两份 HTML：
@@ -110,29 +115,37 @@ make run-sw-report REPORT_BASENAME=sw_emu_n512
 构建硬件 bitstream：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make build-hw
 ```
 
 也可以用脚本：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 scripts/build_hw.sh
 scripts/build_hw_tmux.sh
+```
+
+如果需要打包完整的 Vivado `vpl` 目录：
+
+```bash
+make vivado-package-full
 ```
 
 硬件执行并生成 `hw` 报告：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 make run-hw-report REPORT_BASENAME_HW=hw_n512_report
+```
+
+如果已经有编好的硬件 bitstream，优先直接运行，不存在时再自动补编：
+
+```bash
+make run-hw-report-existing REPORT_BASENAME_HW=hw_n512_report
 ```
 
 或：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 scripts/run_hw_report.sh REPORT_BASENAME_HW=hw_n512_report
 ```
 
@@ -188,13 +201,11 @@ src/CgSolverGolden.hpp
 生成默认 `n512` 数据集：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 python3 scripts/generate_cg_dataset.py
 ```
 
 生成自定义规模：
 
 ```bash
-cd ~/ProjectFS/Project-X/Project-XPlus
 python3 scripts/generate_cg_dataset.py --size 1024 --output-dir data/generated/cgsolver/n1024
 ```
