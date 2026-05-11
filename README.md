@@ -19,6 +19,21 @@ Project-XPlus/
   docs/
     design/
       hls.md
+  DLC/
+    Cuper/
+      README.md
+      Makefile
+      cfg/
+      data/
+      docs/
+      host/
+      include/
+      kernels/
+      logs/
+      reports/
+      scripts/
+      src/
+      xrt.ini
   include/
     cg_common.hpp
     cg_kernels.hpp
@@ -57,6 +72,20 @@ Project-XPlus/
 5. XRT/Vitis 子工程的 host、kernel、connectivity 和运行脚本骨架
 6. `sw_emu` / `hw` 报告输出链，包括 txt/json/interactive html/static html
 7. 关键 host 与 kernel 顶层中文注释，便于顺着看硬件执行流程
+8. `DLC/Cuper` 独立 HLS 子项目骨架，便于作为迁移分支单独演进
+
+## DLC
+
+当前在 `DLC/` 下预留独立子项目区：
+
+- [DLC/Cuper/README.md](/home/pyx/ProjectFS/Project-X/Project-XPlus/DLC/Cuper/README.md)
+
+`Cuper` 当前按独立 HLS 子项目管理：
+
+- 先不接入根 `Makefile`
+- 自己维护 `host/kernel/include/cfg/scripts`
+- 自己维护 `build/logs/reports`
+- 等结构稳定后，再决定是否与上层工程共享更多公共部分
 
 ## 文档
 
