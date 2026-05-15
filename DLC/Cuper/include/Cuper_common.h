@@ -1,5 +1,5 @@
 #ifndef CUPER_COMMON
-#define CYPER_COMMON
+#define CUPER_COMMON
 
 #include <vector>
 #include <iostream>
@@ -416,23 +416,23 @@ void Sort_Slice_Row(Matrix_COO &sliceVal) {
     for(INDEX_TYPE i = 0; i < sliceVal.nnzR; ++i) {
         RowIdx_copy[i] = sliceVal.RowIdx[i];
     }
-
-    for(INDEX_TYPE i = 0; i < sliceVal.nnzR; ++i) {
-        if(((sliceVal.RowIdx[i] % 16) == 1) ||
-           ((sliceVal.RowIdx[i] % 16) == 3) ||
-           ((sliceVal.RowIdx[i] % 16) == 5) ||
-           ((sliceVal.RowIdx[i] % 16) == 7)
-           ) {
-            RowIdx_copy[i] = sliceVal.RowIdx[i] + 8;
-        }
-        if(((sliceVal.RowIdx[i] % 16) == 9)  ||
-           ((sliceVal.RowIdx[i] % 16) == 11) ||
-           ((sliceVal.RowIdx[i] % 16) == 13) ||
-           ((sliceVal.RowIdx[i] % 16) == 15)
-           ) {
-            RowIdx_copy[i] = sliceVal.RowIdx[i] - 8;
-        }
-    }
+return;
+  // for(INDEX_TYPE i = 0; i < sliceVal.nnzR; ++i) {
+        //if(((sliceVal.RowIdx[i] % 16) == 1) ||
+           //((sliceVal.RowIdx[i] % 16) == 3) ||
+           //((sliceVal.RowIdx[i] % 16) == 5) ||
+           //((sliceVal.RowIdx[i] % 16) == 7)
+           //) {
+          //  RowIdx_copy[i] = sliceVal.RowIdx[i] + 8;
+        //}
+        //if(((sliceVal.RowIdx[i] % 16) == 9)  ||
+          // ((sliceVal.RowIdx[i] % 16) == 11) ||
+           //((sliceVal.RowIdx[i] % 16) == 13) ||
+           //((sliceVal.RowIdx[i] % 16) == 15)
+           //) {
+         //   RowIdx_copy[i] = sliceVal.RowIdx[i] - 8;
+       // }
+   // }
     
     for(INDEX_TYPE i = 0; i < sliceVal.nnzR; ++i) {
         sliceVal.RowIdx[i] = RowIdx_copy[i];
@@ -500,7 +500,6 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                                        const INDEX_TYPE NUM_COLUMN,
                                        const INDEX_TYPE Slice_SIZE,
                                        const INDEX_TYPE BATCH_SIZE,
-
                                        SparseSlice &sliceMatrix,
                                        vector<vector<SpElement> > &SpElement_list_pes,
                                        vector<INDEX_TYPE> &SpElement_list_ptr,
@@ -519,14 +518,21 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
         for(INDEX_TYPE slicecolidx =  BATCH_SIZE * i; slicecolidx < min(BATCH_SIZE * (i + 1), numColSlices); ++slicecolidx) {
             for (INDEX_TYPE j = sliceMatrix.sliceColPtr[slicecolidx]; j < sliceMatrix.sliceColPtr[slicecolidx + 1]; ++j) {
                 INDEX_TYPE slicennzR = sliceMatrix.sliceVal[j].nnzR;
-                
                 Sort_Slice_Row(sliceMatrix.sliceVal[j]);
 
                 for(INDEX_TYPE k = 0; k < slicennzR; ++k) {
-                    INDEX_TYPE p = (sliceMatrix.sliceVal[j].RowIdx[k] / 2) % NUM_PE;
-                    INDEX_TYPE pos = temp_SpElement_list_pes[p].size();
-                    temp_SpElement_list_pes[p].resize(pos + 1);
-                    temp_SpElement_list_pes[p][pos] = SpElement(sliceMatrix.sliceVal[j].ColIdx[k], sliceMatrix.sliceVal[j].RowIdx[k], sliceMatrix.sliceVal[j].Val[k]); //将稀疏元素非配给PE
+                    // 【核心逻辑】：确保奇偶对齐
+                    INDEX_TYPE row = sliceMatrix.sliceVal[j].RowIdx[k];
+INDEX_TYPE packet_id = row / 2; // 每两个 float 组成一个 float_v2 包
+
+// 关键映射变换（根据硬件 Interleaving 步幅推导）
+INDEX_TYPE checker_id = packet_id % 8;        // 映射到 8 个 Checker
+INDEX_TYPE acc_offset = (packet_id / 8) % 2;   // 每个 Checker 内部轮询 2 个 Acc
+INDEX_TYPE pe_in_acc  = (packet_id / 16) % 8;  // 每个 Acc 内部轮询 8 个 PE
+
+// 重新组合物理 PE 编号
+INDEX_TYPE p = (checker_id * 2 + acc_offset) * 8 + pe_in_acc;
+                    temp_SpElement_list_pes[p].push_back(SpElement(sliceMatrix.sliceVal[j].ColIdx[k], sliceMatrix.sliceVal[j].RowIdx[k], sliceMatrix.sliceVal[j].Val[k]));
                 }
             }
         } 
@@ -534,16 +540,9 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
         for(INDEX_TYPE p = 0; p < NUM_PE; ++p) {
             INDEX_TYPE i_start = SpElement_list_pes[p].size();
             INDEX_TYPE base_col_index = i * BATCH_SIZE * Slice_SIZE;
-            Reordering(temp_SpElement_list_pes[p],
-                       SpElement_list_pes[p],
-                       base_col_index,
-                       i_start,
-                       NUM_ROW,
-                       NUM_PE,
-                       WINDOWS
-                      );
-
+            Reordering(temp_SpElement_list_pes[p], SpElement_list_pes[p], base_col_index, i_start, NUM_ROW, NUM_PE, WINDOWS);
         }
+        
         INDEX_TYPE max_len = 0;
         for(INDEX_TYPE p = 0; p < NUM_PE; ++p) {
             max_len = max((INDEX_TYPE) SpElement_list_pes[p].size(), max_len);
@@ -552,71 +551,55 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
         for(INDEX_TYPE p = 0; p < NUM_PE; ++p) {
             SpElement_list_pes[p].resize(max_len, SpElement(-1, -1, 0.0));
         }
-        
         SpElement_list_ptr[i + 1] = max_len;
     } 
-}
+} // <--- 确保这个函数结束的右括号存在
+
+// 紧接着下面应该是 Create_SpElement_list_for_all_channels
 
 void Create_SpElement_list_for_all_channels(const vector<vector<SpElement> > &SpElement_list_pes,
                                             const vector<INDEX_TYPE>         &SpElement_list_ptr,
                                             vector<vector<unsigned long, tapa::aligned_allocator<unsigned long> > > &Matrix_fpga_data,
-                                            const int HBM_CHANNEL_NUM = 8
+                                            const int HBM_CHANNEL_NUM = 16
                                            ) {
         
-    INDEX_TYPE Matrix_fpga_data_column_size = 8 * SpElement_list_ptr[SpElement_list_ptr.size() - 1] * 4 / 4;
-    INDEX_TYPE Matrix_fpga_data_channel_size  = ((Matrix_fpga_data_column_size + 512 - 1) / 512) * 512;
+    INDEX_TYPE max_len = SpElement_list_ptr[SpElement_list_ptr.size() - 1];
+    INDEX_TYPE Matrix_fpga_data_column_size = 8 * max_len; 
+    INDEX_TYPE Matrix_fpga_data_channel_size = ((Matrix_fpga_data_column_size + 511) / 512) * 512;
 
     for(INDEX_TYPE c = 0; c < HBM_CHANNEL_NUM; ++c) {
-        Matrix_fpga_data[c].resize(Matrix_fpga_data_channel_size, 0);
+        Matrix_fpga_data[c].assign(Matrix_fpga_data_channel_size, 0);
     }
     
-    for(INDEX_TYPE i = 0; i < SpElement_list_ptr[SpElement_list_ptr.size() - 1]; ++i) {
+    for(INDEX_TYPE i = 0; i < max_len; ++i) {
         for(INDEX_TYPE c = 0; c < HBM_CHANNEL_NUM; ++c) {
             for(INDEX_TYPE j = 0; j < 8; ++j) {
-                SpElement sp = SpElement_list_pes[j + c * 8][i];
+                // 【核心修改点】
+                // 这里的 pe_idx 必须和 Create_SpElement_list_for_all_PEs 的索引逻辑完全一致
+                // 即：物理通道 c 的第 j 个槽位，对应的就是 SpElement_list_pes 里的第 c*8 + j 个 PE
+                INDEX_TYPE pe_idx = c * 8 + j; 
+
+                SpElement sp = SpElement_list_pes[pe_idx][i];
 
                 unsigned long x = 0;
                 if (sp.rowIdx == -1) {
-                    x = 0x3FFFF;
-                    x = x << 32;
+                    x = 0x3FFFFULL << 32; // 空行标记
                 } else {
-                    unsigned long x_col = sp.colIdx;
-                    x_col = (x_col & 0x3FFF) << (32 + 18);
+                    unsigned int x_float_bits = *(unsigned int*)(&sp.val);
+                    unsigned long x_val_64 = (unsigned long)(x_float_bits & 0xFFFFFFFFULL);
                     
-                    unsigned long x_row = sp.rowIdx;
-                    x_row = (x_row & 0x3FFFF) << 32;
-                    VALUE_TYPE x_float = sp.val;
-                    
-                    unsigned int x_float_in_int = *((unsigned int*)(&x_float));
-                    unsigned long x_float_val_64 = ((unsigned long) x_float_in_int);
-                    x_float_val_64 = x_float_val_64 & 0xFFFFFFFF;
+                    // 注意这里的 rowIdx 变换：
+                    // 在 Reordering 函数里，rowIdx 被改成了 org_row_idx * 2 + (original_row % 2)
+                    // 我们直接打包转换后的 rowIdx
+                    unsigned long x_row = ((unsigned long)sp.rowIdx & 0x3FFFFULL) << 32;
+                    unsigned long x_col = ((unsigned long)sp.colIdx & 0x3FFFULL) << 50;
 
-                    x = x_col | x_row | x_float_val_64;
-
+                    x = x_col | x_row | x_val_64;
                 }
-                if(HBM_CHANNEL_NUM != 8 && HBM_CHANNEL_NUM != 16 && HBM_CHANNEL_NUM != 24) {
-                    cout << "Please check HBM_CHANNEL_NUM!" << endl;
-                    exit(1);
-                }
-                else if(HBM_CHANNEL_NUM == 8) {
-                    INDEX_TYPE pe_idx = j + c * 8;
-                    
-                    INDEX_TYPE pix_m8 = pe_idx % 8;
-                    Matrix_fpga_data[(pix_m8 % 8) * 1 + pix_m8 / 8][(pe_idx % 64) / 8 + i * 8] = x;
-                }
-                else if(HBM_CHANNEL_NUM == 16) {
-                    INDEX_TYPE pe_idx = j + c * 8;
-                    INDEX_TYPE pix_m16 = pe_idx % 16;
-                    Matrix_fpga_data[(pix_m16 % 8) * 2 + pix_m16 / 8][(pe_idx % 128) / 16 + i * 8] = x;
-                }
-                else if(HBM_CHANNEL_NUM == 24) {
-                    INDEX_TYPE pe_idx = j + c * 8;
-                    INDEX_TYPE pix_m24 = pe_idx % 24;
-                    Matrix_fpga_data[(pix_m24 % 8) * 3 + pix_m24 / 8][(pe_idx % 192) / 24 + i * 8] = x;
-                }
+                // 存入第 c 通道的第 i 个 512-bit beat 的第 j 个 64-bit 槽位
+                Matrix_fpga_data[c][j + i * 8] = x;
             }
         }
     }
 }
-
 #endif

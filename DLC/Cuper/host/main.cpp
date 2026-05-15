@@ -267,66 +267,50 @@ int main(int argc, char* argv[]) {
     INDEX_TYPE SpElement_list_ptr_max_len = SpElement_list_ptr[SpElement_list_ptr_size];
     cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] " << "Run SpMV On FPGA...";
 
+// --- 修正后的 FPGA 运行与校验部分 ---
+    
+    // 1. 运行内核
     double kernel_time = tapa::invoke(Cuper, 
                                       bitstream,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
                                       tapa::read_only_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
                                       tapa::write_only_mmap<float>(Y_fpga_data_out).reinterpret<float_v16>(),
-                                      
                                       SpElement_list_ptr_size,
                                       SpElement_list_ptr_max_len,
                                       m,
                                       n,
                                       ITERATION_NUM
                                      );
-    cout << "  \t\tDone" << endl;
     
+    cout << " \t\tDone" << endl;
+    
+    // 2. 性能计算
     kernel_time *= (1e-9 / ITERATION_NUM);
     double Gflops = 2.0 * nnzR / 1e+9 / kernel_time;
-    cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] " << "Execution Time: \t\t\t" << kernel_time * 1000 << " ms" << endl;
-    cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] " << "FPGA GFLOPS: \t\t\t" << Gflops << endl;
-cout << "--- Debug: First 16 elements comparison ---" << endl;
-for(int i = 0; i < 16; ++i) {
-    printf("Index [%d]: CPU(Row %d)=%f, Device(From FPGA)=%f\n", 
-            i, i, Y_CPU[i], Y_fpga_data_out[i]);
-}
-    // Verification
-    cout << "[" << setw(18) << setfill(' ') << "Verification" << "] " << "Verify the correctness of Y...";
-    
-    for(INDEX_TYPE i = 0; i < m; ++i) {
-        for (INDEX_TYPE i = 0; i < m; i++) {
-    INDEX_TYPE pack_base = (i / 16) * 16; // 找到当前对应的 v16 包起始位置
-    INDEX_TYPE inner_idx = i % 16;        // 在 v16 包内的偏移
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] Execution Time: \t" << kernel_time * 1000 << " ms" << endl;
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] FPGA GFLOPS: \t\t" << Gflops << endl;
 
-    if (inner_idx % 2 == 0) {
-        // 偶数行（Ping）：位置是正确的
-        Y_Device[i] = Y_fpga_data_out[i];
-    } else {
-        // 奇数行（Pong）：应用我们发现的循环偏移 (inner_idx + 8) % 16
-        // 映射关系：1->9, 3->11, 5->13, 7->15, 9->1, 11->3, 13->5, 15->7
-        INDEX_TYPE corrected_idx = pack_base + ((inner_idx + 8) % 16);
-        Y_Device[i] = Y_fpga_data_out[corrected_idx];
+    // 3. 结果提取（删除所有镜像补丁逻辑）
+    cout << "[" << setw(18) << "Verification" << "] Extracting Device Data...";
+    for (INDEX_TYPE i = 0; i < m; i++) {
+        Y_Device[i] = Y_fpga_data_out[i]; // 硬件已修好，此处直接赋值
     }
-}
+    cout << " Done" << endl;
+
+    // 4. Debug 打印（验证前 16 位）
+    cout << "--- Debug: First 16 elements comparison ---" << endl;
+    for(int i = 0; i < 16; ++i) {
+        printf("Index [%d]: CPU=%f, Device=%f\n", i, Y_CPU[i], Y_Device[i]);
     }
 
-    INDEX_TYPE error_num = Verify_correctness(m, Y_CPU, Y_Device, THRESHOLD);
+    // 5. 最终验证
+    INDEX_TYPE error_num = Verify_correctness(m, Y_CPU, Y_Device, 1e-4); 
 
-    cout << "  \tDone" << endl;
-
-    VALUE_TYPE diffpercent = 100.0 * (VALUE_TYPE)error_num / m;
-    bool ispass = (error_num == 0);
-
-    if(ispass)
-        cout << "[" << setw(18) << setfill(' ') << "Verification" << "] " << "Correctness Verification \t\t" << "Passed" << endl;
+    if(error_num == 0)
+        cout << "[" << setw(18) << "Verification" << "] Correctness Verification: \tPassed" << endl;
     else 
-        cout << "[" << setw(18) << setfill(' ') << "Verification" << "] " << "Correctness Verification \t\t" << "Failed" << endl;
+        cout << "[" << setw(18) << "Verification" << "] Correctness Verification: \tFailed" << endl;
     
-    cout << "[" << setw(18) << setfill(' ') << "Verification" << "] ";
-    printf("Error Num: \t\t\t%d\n", error_num);
-    cout << "[" << setw(18) << setfill(' ') << "Verification" << "] ";
-    printf("Error Percent: \t\t\t%.2f%%\n\n", diffpercent);
-
-    return 0;
+    printf("[%18s] Error Num: %d, Error Percent: %.2f%%\n", "Verification", error_num, 100.0 * error_num / m);
 }
