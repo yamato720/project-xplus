@@ -28,6 +28,7 @@ VITIS_VERSION := $(notdir $(VITIS_ROOT))
 XILINX_ROOT := $(patsubst %/Vitis/$(VITIS_VERSION),%,$(VITIS_ROOT))
 VIVADO_ROOT ?= $(if $(wildcard $(XILINX_ROOT)/Vivado/$(VITIS_VERSION)/bin/vivado),$(XILINX_ROOT)/Vivado/$(VITIS_VERSION))
 VPP ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/v++,v++)
+VIVADO ?= $(if $(VIVADO_ROOT),$(VIVADO_ROOT)/bin/vivado,vivado)
 EMCONFIGUTIL ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/emconfigutil,emconfigutil)
 VITIS_SETTINGS ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/settings64.sh)
 
@@ -44,11 +45,20 @@ REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
 VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
+ANALYSIS_TARGET ?= hw
+ANALYSIS_BUILD_DIR := $(BUILD_DIR)/$(ANALYSIS_TARGET)
+ANALYSIS_VIVADO_LINK_DIR := $(ANALYSIS_BUILD_DIR)/_x_temp/link/vivado/vpl
+ANALYSIS_REPORT_DIR ?= $(ANALYSIS_BUILD_DIR)/_x_temp/reports/analysis
+VIVADO_ANALYSIS_INPUT ?= $(ANALYSIS_VIVADO_LINK_DIR)
+VIVADO_ANALYSIS_RUN ?= impl_1
+VIVADO_ANALYSIS_REPORTS ?= all
+VIVADO_ANALYSIS_CFG := $(CFG_DIR)/vivado_analysis_reports.cfg
+ENABLE_VIVADO_ANALYSIS ?= 1
 VIVADO_PACKAGE_DIR := $(BUILD_DIR)/packages
 VIVADO_PACKAGE_NAME ?= project-xplus-vivado-view
 VIVADO_PACKAGE_FULL := $(VIVADO_PACKAGE_DIR)/$(VIVADO_PACKAGE_NAME)-full.tar.gz
-REPORT_BASENAME ?= n512
-REPORT_BASENAME_HW ?= n512
+REPORT_BASENAME ?= thermal2_n1024
+REPORT_BASENAME_HW ?= thermal2_n1024
 REPORT_BASENAME_SW_FULL := SW_$(REPORT_BASENAME)
 REPORT_BASENAME_HW_FULL := HW_$(REPORT_BASENAME_HW)
 REPORT_JSON := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).json
@@ -67,13 +77,9 @@ HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 LOCAL_HOST := $(BUILD_DIR)/xplus_host
 XRT_HOST := $(BUILD_DIR)/xplus_xrt_host
 
-DATASET_DIR ?= $(ROOT_DIR)/data/generated/cgsolver/n512
 SIZE ?= 512
 ASPECT_RATIO ?= 1.6
-TAU ?= 1e-10
-MAX_ITERS ?= 0
-DEVICE_INDEX ?= 0
-HOST_ARGS ?=
+DATASETS ?= thermal2_n1024
 
 KERNEL_NAMES := spmv_csr_kernel init_pcg_kernel dot_kernel update_xrz_kernel update_p_kernel
 # 手动切换 SpMV 硬件实现时，改这里的源文件即可。
@@ -107,8 +113,12 @@ VPP_FLAGS += -t $(TARGET) --platform $(XPLATFORM) --save-temps
 VPP_FLAGS += --temp_dir $(TARGET_BUILD_DIR)/_x_temp
 VPP_FLAGS += -I$(INCLUDE_DIR) -I$(KERNEL_DIR)
 VPP_LDFLAGS += --config $(CFG_DIR)/connectivity_u55c.cfg
+ifeq ($(TARGET),hw)
+ifeq ($(ENABLE_VIVADO_ANALYSIS),1)
+VPP_LDFLAGS += --config $(VIVADO_ANALYSIS_CFG)
+endif
+endif
 
-HOST_RUN_ARGS := $(HOST_ARGS)
 VITIS_ENV_CMD := source "$(VITIS_SETTINGS)" >/dev/null 2>&1 &&
 SUMMARY_GREP := ^(\\[xplus-xrt\\]|\\[init\\]|\\[done\\]|\\[check\\]|\\[host-timing-ms\\]|\\[kernel-timing-ms\\])
 
@@ -117,12 +127,13 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env generate local-host xrt-host run run-local run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-package-full build build-sw build-hw clean
+.PHONY: all help env vivado-env generate download-suitesparse-data list-suitesparse-data local-host xrt-host launcher menu run run-local run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw clean clean-reports
 
 all: run-local
 
 help:
 	@echo "Project-XPlus Jacobi-PCG multi-kernel project"
+	@echo "Default run parameters live in host/run_defaults.hpp."
 	@echo ""
 	@echo "Local reference path:"
 	@echo "  make run-local"
@@ -130,8 +141,14 @@ help:
 	@echo "Build XRT host only:"
 	@echo "  make xrt-host"
 	@echo ""
+	@echo "Interactive run launcher:"
+	@echo "  make launcher"
+	@echo ""
 	@echo "Generate dataset:"
 	@echo "  make generate"
+	@echo "  make download-suitesparse-data"
+	@echo "  make download-suitesparse-data DATASETS=all"
+	@echo "  make list-suitesparse-data"
 	@echo ""
 	@echo "Build sw_emu xclbin:"
 	@echo "  make build-sw"
@@ -144,8 +161,12 @@ help:
 	@echo ""
 	@echo "Build hardware xclbin:"
 	@echo "  make build-hw"
+	@echo "  make build-hw ENABLE_VIVADO_ANALYSIS=0"
 	@echo "  make build-hw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp"
 	@echo "  make vivado-package-full"
+	@echo "  make vivado-power-report"
+	@echo "  make vivado-analysis"
+	@echo "  make xrt-power-snapshot"
 	@echo ""
 	@echo "Run hardware:"
 	@echo "  make run-xrt TARGET=hw"
@@ -159,17 +180,35 @@ env:
 	@test -x "$(EMCONFIGUTIL)" || command -v "$(EMCONFIGUTIL)" >/dev/null || (echo "ERROR: emconfigutil not found" && exit 1)
 	@test -f "$(VITIS_SETTINGS)" || (echo "ERROR: Vitis settings script not found: $(VITIS_SETTINGS)" && exit 1)
 
+vivado-env: env
+	@test -x "$(VIVADO)" || command -v "$(VIVADO)" >/dev/null || (echo "ERROR: vivado not found" && exit 1)
+
 generate:
-	$(PYTHON) "$(SCRIPT_DIR)/generate_cg_dataset.py" --size $(SIZE) --aspect-ratio $(ASPECT_RATIO) --output-dir "$(DATASET_DIR)"
+	$(PYTHON) "$(SCRIPT_DIR)/generate_cg_dataset.py" --size $(SIZE) --aspect-ratio $(ASPECT_RATIO)
+
+download-suitesparse-data:
+	$(PYTHON) "$(SCRIPT_DIR)/download_suitesparse_data.py" --datasets $(DATASETS)
+
+list-suitesparse-data:
+	$(PYTHON) "$(SCRIPT_DIR)/download_suitesparse_data.py" --list
 
 local-host: $(LOCAL_HOST)
 
 xrt-host: $(XRT_HOST)
 
-$(LOCAL_HOST): $(HOST_DIR)/main.cpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(INCLUDE_DIR)/cg_kernels.hpp $(KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+launcher menu: $(LOCAL_HOST) $(XRT_HOST)
+	@$(PYTHON) "$(SCRIPT_DIR)/launcher.py" \
+		--vitis-settings "$(VITIS_SETTINGS)" \
+		--local-host "$(LOCAL_HOST)" \
+		--xrt-host "$(XRT_HOST)" \
+		--hw-xclbin "$(HW_XCLBIN)" \
+		--sw-xclbin "$(SW_XCLBIN)" \
+		--sw-emu-dir "$(BUILD_DIR)/sw_emu"
+
+$(LOCAL_HOST): $(HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(INCLUDE_DIR)/cg_kernels.hpp $(KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/main.cpp $(KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)
 
-$(XRT_HOST): $(HOST_DIR)/xrt_host.cpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+$(XRT_HOST): $(HOST_DIR)/xrt_host.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/xrt_host.cpp -o $(XRT_HOST) $(XRT_LDFLAGS)
 
 $(XO_SP_MV): $(SPMV_KERNEL_SOURCE) $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
@@ -205,15 +244,17 @@ build-hw:
 
 run: run-local
 
-run-local: $(LOCAL_HOST) generate
-	$(LOCAL_HOST) $(DATASET_DIR) --tau $(TAU) --max-iters $(MAX_ITERS)
+run-local: $(LOCAL_HOST)
+	$(LOCAL_HOST)
 
-run-xrt: $(XRT_HOST) $(XCLBIN) generate
+run-xrt: $(XRT_HOST)
 ifeq ($(TARGET),hw)
-	$(VITIS_ENV_CMD) $(XRT_HOST) $(XCLBIN) $(DATASET_DIR) --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) $(HOST_RUN_ARGS)
+	@test -f "$(XCLBIN)" || (echo "ERROR: xclbin not found: $(XCLBIN). Build it first with: make build-hw" && exit 1)
+	$(VITIS_ENV_CMD) $(XRT_HOST)
 else
+	@test -f "$(XCLBIN)" || (echo "ERROR: xclbin not found: $(XCLBIN). Build it first with: make build-sw" && exit 1)
 	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
-	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) $(HOST_RUN_ARGS)
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(XRT_HOST)"
 endif
 
 run-sw-report:
@@ -221,9 +262,8 @@ run-sw-report:
 	@: > "$(REPORT_LOG)"
 	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
 	@$(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1
-	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG)" 2>&1
 	@$(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1
-	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG)" 2>&1
+	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true
@@ -237,10 +277,9 @@ run-sw-report-existing:
 	@mkdir -p "$(REPORT_DIR)"
 	@: > "$(REPORT_LOG)"
 	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
-	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG)" 2>&1
 	@test -f "$(SW_XCLBIN)" || ($(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1)
 	@test -f "$(BUILD_DIR)/sw_emu/emconfig.json" || ($(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1)
-	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)" cgsolver_jacobi_pcg.xclbin "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON)" --txt-out "$(REPORT_TXT)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG)" 2>&1
+	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true
@@ -251,15 +290,14 @@ run-sw-report-existing:
 	@echo "report log : $(REPORT_LOG)"
 
 run-hw-report:
-	$(MAKE) _run-hw-report TARGET=hw REPORT_BASENAME_HW="$(REPORT_BASENAME_HW)" DATASET_DIR="$(DATASET_DIR)" TAU="$(TAU)" MAX_ITERS="$(MAX_ITERS)" DEVICE_INDEX="$(DEVICE_INDEX)" HOST_ARGS='$(HOST_ARGS)'
+	$(MAKE) _run-hw-report TARGET=hw REPORT_BASENAME_HW="$(REPORT_BASENAME_HW)"
 
 _run-hw-report:
 	@mkdir -p "$(REPORT_DIR)"
 	@: > "$(REPORT_LOG_HW)"
 	@$(MAKE) xrt-host >>"$(REPORT_LOG_HW)" 2>&1
 	@$(MAKE) build-hw >>"$(REPORT_LOG_HW)" 2>&1
-	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG_HW)" 2>&1
-	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)" "$(XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG_HW)" 2>&1
+	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)"; } >>"$(REPORT_LOG_HW)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)" >>"$(REPORT_LOG_HW)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)" >>"$(REPORT_LOG_HW)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG_HW)" || true
@@ -273,9 +311,8 @@ run-hw-report-existing:
 	@mkdir -p "$(REPORT_DIR)"
 	@: > "$(REPORT_LOG_HW)"
 	@$(MAKE) xrt-host >>"$(REPORT_LOG_HW)" 2>&1
-	@$(MAKE) generate DATASET_DIR="$(DATASET_DIR)" SIZE="$(SIZE)" ASPECT_RATIO="$(ASPECT_RATIO)" >>"$(REPORT_LOG_HW)" 2>&1
 	@test -f "$(HW_XCLBIN)" || ($(MAKE) build-hw >>"$(REPORT_LOG_HW)" 2>&1)
-	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)" "$(HW_XCLBIN)" "$(DATASET_DIR)" --tau $(TAU) --max-iters $(MAX_ITERS) --device-index $(DEVICE_INDEX) --timing --json-out "$(REPORT_JSON_HW)" --txt-out "$(REPORT_TXT_HW)" $(HOST_RUN_ARGS); } >>"$(REPORT_LOG_HW)" 2>&1
+	@{ $(VITIS_ENV_CMD) "$(XRT_HOST)"; } >>"$(REPORT_LOG_HW)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)" >>"$(REPORT_LOG_HW)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)" >>"$(REPORT_LOG_HW)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG_HW)" || true
@@ -293,21 +330,52 @@ render-hw-report:
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON_HW)" "$(REPORT_HTML_HW)"
 	$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON_HW)" "$(REPORT_HTML_STATIC_HW)"
 
+vivado-power-report:
+	$(MAKE) vivado-analysis VIVADO_ANALYSIS_REPORTS=power
+
+vivado-analysis: vivado-env
+	@mkdir -p "$(ANALYSIS_REPORT_DIR)"
+	$(VITIS_ENV_CMD) "$(VIVADO)" -mode batch -source "$(SCRIPT_DIR)/export_vivado_analysis.tcl" \
+		-tclargs "$(VIVADO_ANALYSIS_INPUT)" "$(ANALYSIS_REPORT_DIR)" "$(VIVADO_ANALYSIS_RUN)" "$(VIVADO_ANALYSIS_REPORTS)"
+	@echo "analysis reports: $(ANALYSIS_REPORT_DIR)"
+
+xrt-power-snapshot:
+	@mkdir -p "$(REPORT_DIR)/xrt"
+	@{ \
+		if ! command -v xbutil >/dev/null 2>&1; then \
+			if [ -f "$(VITIS_SETTINGS)" ]; then source "$(VITIS_SETTINGS)" >/dev/null 2>&1; fi; \
+		fi; \
+		if ! command -v xbutil >/dev/null 2>&1; then \
+			echo "ERROR: xbutil not found. Source XRT/Vitis settings first."; \
+			exit 1; \
+		fi; \
+		out="$(REPORT_DIR)/xrt/electrical_$$(date +%Y%m%d_%H%M%S).json"; \
+		if xbutil examine --report electrical --format JSON --output "$$out"; then \
+			echo "xrt electrical snapshot: $$out"; \
+		else \
+			echo "JSON electrical snapshot failed; printing text report instead."; \
+			xbutil examine --report electrical; \
+		fi; \
+	}
+
 vivado-package-full:
 	@test -d "$(BUILD_DIR)/hw/_x_temp/link/vivado/vpl" || (echo "ERROR: Vivado link directory not found: $(BUILD_DIR)/hw/_x_temp/link/vivado/vpl. Build hardware first with: make build-hw" && exit 1)
-	@test -d "$(BUILD_DIR)/hw/_x_temp/reports/link" || (echo "ERROR: hardware report directory not found: $(BUILD_DIR)/hw/_x_temp/reports/link. Build hardware first with: make build-hw" && exit 1)
 	@mkdir -p "$(VIVADO_PACKAGE_DIR)"
-	cd "$(ROOT_DIR)" && tar -czf "$(VIVADO_PACKAGE_FULL)" \
-		"build/hw/_x_temp/link/vivado/vpl" \
-		"build/hw/_x_temp/reports/link" \
-		"README.md" \
-		"docs/design/hls.md" \
-		"docs/design/hls_source_walkthrough_zh.md"
+	@cd "$(ROOT_DIR)" && { \
+		paths="build/hw/_x_temp/link/vivado/vpl README.md docs/design/hls.md docs/design/hls_source_walkthrough_zh.md"; \
+		if [ -d "build/hw/_x_temp/reports/link" ]; then paths="$$paths build/hw/_x_temp/reports/link"; fi; \
+		if [ -d "build/hw/_x_temp/reports/analysis" ]; then paths="$$paths build/hw/_x_temp/reports/analysis"; fi; \
+		tar -czf "$(VIVADO_PACKAGE_FULL)" $$paths; \
+	}
 	@echo "Created: $(VIVADO_PACKAGE_FULL)"
 	@ls -lh "$(VIVADO_PACKAGE_FULL)"
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+clean-reports:
+	rm -rf $(REPORT_DIR)
+	mkdir -p $(REPORT_DIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

@@ -100,11 +100,39 @@ Project-XPlus/
 make run-local
 ```
 
-指定数据集和迭代参数：
+默认数据集和迭代参数在源码中指定：
+
+- [host/run_defaults.hpp](/home/pyx/ProjectFS/Project-X/Project-XPlus/host/run_defaults.hpp)
+
+当前默认使用 `data/suitesparse/Schmid/csr/thermal2_n1024`。
+
+SuiteSparse 实际数据文件不提交到 Git。首次 clone 后先下载并转换默认数据：
 
 ```bash
-make run-local DATASET_DIR=data/generated/cgsolver/n512 TAU=1e-10 MAX_ITERS=0
+make download-suitesparse-data
 ```
+
+需要复现全部本地登记的数据集：
+
+```bash
+make download-suitesparse-data DATASETS=all
+```
+
+需要从完整 `thermal2` 生成其他尺寸的主子矩阵：
+
+```bash
+make download-suitesparse-data DATASETS=thermal2_n2048
+```
+
+数据来源、尺寸和 checksum 记录在 [data/suitesparse/SOURCES.md](/home/pyx/ProjectFS/Project-X/Project-XPlus/data/suitesparse/SOURCES.md)。
+
+交互式选择数据集和运行方式：
+
+```bash
+make launcher
+```
+
+launcher 首页也提供 `d. 数据集下载/生成`，可以直接按大小从完整 `thermal2` 生成 `thermal2_n<N>`。
 
 构建 XRT host：
 
@@ -127,7 +155,7 @@ make run-xrt TARGET=sw_emu
 运行 `sw_emu` 并生成 `txt/json/html` 报告：
 
 ```bash
-make run-sw-report REPORT_BASENAME=n512
+make run-sw-report
 ```
 
 终端默认只打印关键摘要，详细运行输出会写入同名 `.log` 文件。
@@ -135,7 +163,7 @@ make run-sw-report REPORT_BASENAME=n512
 如果已经有编好的 `sw_emu` 产物，优先直接运行，不存在时再自动补编：
 
 ```bash
-make run-sw-report-existing REPORT_BASENAME=n512
+make run-sw-report-existing
 ```
 
 软件报告实际文件名前会自动加 `SW_` 前缀。
@@ -151,11 +179,75 @@ make run-sw-report-existing REPORT_BASENAME=n512
 make build-hw
 ```
 
+默认硬件 link 会额外要求 Vivado 导出一组实现阶段分析报告：
+
+1. routed timing summary
+2. post-route physical optimization timing summary
+3. hierarchical utilization
+4. power estimate
+5. methodology
+6. DRC
+
+这些配置在 [cfg/vivado_analysis_reports.cfg](/home/pyx/ProjectFS/Project-X/Project-XPlus/cfg/vivado_analysis_reports.cfg)。如果只想按最简方式生成 bitstream，可以临时关闭：
+
+```bash
+make build-hw ENABLE_VIVADO_ANALYSIS=0
+```
+
 也可以用脚本：
 
 ```bash
 scripts/build_hw.sh
 scripts/build_hw_tmux.sh
+```
+
+如果已有 `build/hw` 并且 Vivado implemented run 还在，可以不重新生成 bitstream，尝试补导出功耗报告：
+
+```bash
+make vivado-power-report
+```
+
+导出所有可选 Vivado 分析报告：
+
+```bash
+make vivado-analysis
+```
+
+默认输出目录：
+
+```text
+build/hw/_x_temp/reports/analysis/
+```
+
+`vivado-analysis` 会逐项尝试导出：
+
+```text
+power
+utilization
+timing
+methodology
+drc
+route_status
+clock_utilization
+clock_interaction
+cdc
+design_analysis
+qor_suggestions
+high_fanout
+control_sets
+ram_utilization
+```
+
+可以只导出其中一部分：
+
+```bash
+make vivado-analysis VIVADO_ANALYSIS_REPORTS="power timing utilization"
+```
+
+如果要采样板卡运行时电源/功耗传感器，而不是 Vivado 静态估计：
+
+```bash
+make xrt-power-snapshot
 ```
 
 如果需要打包完整的 Vivado `vpl` 目录：
@@ -167,13 +259,13 @@ make vivado-package-full
 硬件执行并生成 `hw` 报告：
 
 ```bash
-make run-hw-report REPORT_BASENAME_HW=n512_report
+make run-hw-report
 ```
 
 如果已经有编好的硬件 bitstream，优先直接运行，不存在时再自动补编：
 
 ```bash
-make run-hw-report-existing REPORT_BASENAME_HW=n512_report
+make run-hw-report-existing
 ```
 
 硬件报告实际文件名前会自动加 `HW_` 前缀。
@@ -181,7 +273,7 @@ make run-hw-report-existing REPORT_BASENAME_HW=n512_report
 或：
 
 ```bash
-scripts/run_hw_report.sh REPORT_BASENAME_HW=hw_n512_report
+scripts/run_hw_report.sh
 ```
 
 ## 数据来源

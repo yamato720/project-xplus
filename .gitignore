@@ -3,6 +3,9 @@ logs/
 reports/
 .Xil/
 data/generated/
+data/suitesparse/*/raw/
+data/suitesparse/*/mtx/
+data/suitesparse/*/csr/
 *.log
 *.jou
 *.wdb

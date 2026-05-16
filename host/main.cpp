@@ -1,5 +1,6 @@
 #include "cpu_reference.hpp"
 #include "multi_kernel_solver.hpp"
+#include "run_defaults.hpp"
 
 #include <cmath>
 #include <filesystem>
@@ -12,23 +13,24 @@ namespace {
 
 struct CliOptions {
     std::filesystem::path dataset_dir;
-    double tau = 1.0e-10;
-    int max_iters = 0;
+    double tau = project_xplus::cgsolver::run_defaults::kTau;
+    int max_iters = project_xplus::cgsolver::run_defaults::kMaxIters;
 };
 
 void usage(const char* argv0) {
-    std::cerr << "Usage: " << argv0 << " <dataset_dir> [--tau value] [--max-iters value]\n";
+    std::cerr << "Usage: " << argv0 << " [dataset_dir] [--tau value] [--max-iters value]\n";
 }
 
 CliOptions parse_args(int argc, char** argv) {
-    if (argc < 2) {
-        throw std::runtime_error("missing dataset_dir");
+    CliOptions options;
+    options.dataset_dir = project_xplus::cgsolver::run_defaults::dataset_dir(argv[0]);
+
+    int index = 1;
+    if (index < argc && std::string(argv[index]).rfind("--", 0) != 0) {
+        options.dataset_dir = std::filesystem::path(argv[index++]);
     }
 
-    CliOptions options;
-    options.dataset_dir = std::filesystem::path(argv[1]);
-
-    for (int index = 2; index < argc; ++index) {
+    for (; index < argc; ++index) {
         const std::string arg = argv[index];
         if (arg == "--tau") {
             if (index + 1 >= argc) {
