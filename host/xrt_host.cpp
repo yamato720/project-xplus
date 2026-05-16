@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <map>
 
 #include "experimental/xrt_bo.h"
 #include "experimental/xrt_device.h"
@@ -26,6 +27,75 @@ using project_xplus::cgsolver::Dataset;
 using project_xplus::cgsolver::IterationTrace;
 using project_xplus::cgsolver::KernelTimingStats;
 using project_xplus::cgsolver::SolverConfig;
+
+constexpr int BLOCK_SIZE = 4;
+constexpr unsigned char FORMAT_BITMAP = 1;
+
+struct Block {
+    data_t values[16];
+    unsigned char indices[16];
+};
+
+struct BlockCSR {
+    int num_block_rows;
+    int num_block_cols;
+    int num_blocks;
+    std::vector<int> b_row_ptr;
+    std::vector<int> b_col_idx;
+    std::vector<Block> blocks;
+};
+
+BlockCSR convert_csr_to_block_bitmap(
+    int M, int N, 
+    const std::vector<int>& row_ptr, 
+    const std::vector<int>& col_idx, 
+    const std::vector<double>& values) 
+{
+    BlockCSR A;
+    A.num_block_rows = (M + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    A.num_block_cols = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    A.b_row_ptr.push_back(0);
+
+    for (int br = 0; br < A.num_block_rows; ++br) {
+        int row_start = br * BLOCK_SIZE;
+        int row_end = std::min(row_start + BLOCK_SIZE, M);
+
+        std::map<int, std::vector<std::pair<int, double>>> blocks_in_row;
+
+        for (int r = row_start; r < row_end; ++r) {
+            for (int idx = row_ptr[r]; idx < row_ptr[r+1]; ++idx) {
+                int c = col_idx[idx];
+                int bc = c / BLOCK_SIZE; 
+                int local_r = r - row_start;
+                int local_c = c % BLOCK_SIZE;
+                int pos = local_r * BLOCK_SIZE + local_c; 
+                blocks_in_row[bc].push_back({pos, values[idx]});
+            }
+        }
+
+        for (auto const& [bc, elements] : blocks_in_row) {
+            Block blk = {}; // 初始化为0
+            blk.indices[0] = FORMAT_BITMAP; 
+            blk.indices[1] = elements.size(); 
+
+            unsigned short bitmask = 0;
+            int v_idx = 0;
+            for (auto const& el : elements) {
+                bitmask |= (1 << el.first); 
+                blk.values[v_idx++] = el.second; 
+            }
+
+            blk.indices[2] = bitmask & 0xFF;         
+            blk.indices[3] = (bitmask >> 8) & 0xFF;  
+
+            A.b_col_idx.push_back(bc);
+            A.blocks.push_back(blk);
+        }
+        A.b_row_ptr.push_back(A.blocks.size());
+    }
+    A.num_blocks = A.blocks.size();
+    return A;
+}
 
 struct HostOptions {
     // XRT 运行需要的 xclbin 路径和数据集路径。
@@ -189,6 +259,11 @@ int main(int argc, char** argv) {
             throw std::runtime_error("dataset size exceeds kMaxN");
         }
 
+        BlockCSR block_csr = convert_csr_to_block_bitmap(
+            dataset.n(), dataset.n(), // CG求解器通常是方阵，所以 M=N=dataset.n()
+            dataset.row_ptr(), dataset.col_idx(), dataset.values()
+        );
+
         SolverConfig config;
         config.tau = options.tau;
         config.max_iters = options.max_iters;
@@ -233,9 +308,13 @@ int main(int argc, char** argv) {
         // 这一段把 CSR、向量和中间缓冲全部放进 device memory。
         // host 后续只在需要的时候同步极少量标量或最终 x。
         const auto h2d_start = Clock::now();
-        auto row_ptr_bo = make_input_bo(device, spmv_kernel, 0, dataset.row_ptr());
-        auto col_idx_bo = make_input_bo(device, spmv_kernel, 1, dataset.col_idx());
-        auto values_bo = make_input_bo(device, spmv_kernel, 2, dataset.values());
+
+        auto row_ptr_bo = make_input_bo(device, spmv_kernel, 0, block_csr.b_row_ptr);
+        auto col_idx_bo = make_input_bo(device, spmv_kernel, 1, block_csr.b_col_idx);
+        auto values_bo = make_input_bo(device, spmv_kernel, 2, block_csr.blocks);
+        // auto row_ptr_bo = make_input_bo(device, spmv_kernel, 0, dataset.row_ptr());
+        // auto col_idx_bo = make_input_bo(device, spmv_kernel, 1, dataset.col_idx());
+        // auto values_bo = make_input_bo(device, spmv_kernel, 2, dataset.values());
         auto b_bo = make_input_bo(device, init_kernel, 0, dataset.b());
         auto x_bo = make_inout_bo(device, update_xrz_kernel, 0, x);
         auto r_bo = make_inout_bo(device, init_kernel, 3, r);
