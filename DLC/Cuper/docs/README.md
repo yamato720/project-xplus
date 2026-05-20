@@ -8,3 +8,4 @@
 - kernel 迁移状态
 - 与上层 `Project-XPlus` 的差异说明
 - 后续是否回并主线的判断记录
+- 部署报告：`deployment_report.md`
