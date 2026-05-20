@@ -21,7 +21,7 @@ CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 DATA_DIR := $(ROOT_DIR)/data
 
-.PHONY: all help tree clean
+.PHONY: all help tree clean launch launcher build-host run-sw build-xo link-xclbin hw-tmux run-hw
 
 all: help
 
@@ -42,9 +42,40 @@ help:
 	@echo "  BUILD_DIR   = $(BUILD_DIR)"
 	@echo "  REPORT_DIR  = $(REPORT_DIR)"
 	@echo "  LOG_DIR     = $(LOG_DIR)"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make launch       Open the Cuper launcher"
+	@echo "  make launcher     Alias of make launch"
+	@echo "  make build-host   Build build/cuper_host"
+	@echo "  make run-sw       Run software simulation, MATRIX=<path>"
+	@echo "  make build-xo     Build Cuper_2022.xo"
+	@echo "  make link-xclbin  Link Cuper_2022.xclbin"
+	@echo "  make hw-tmux      Build host/XO/xclbin in tmux"
+	@echo "  make run-hw       Run hardware xclbin, MATRIX=<path>"
 
 tree:
 	@find "$(ROOT_DIR)" -maxdepth 2 | sort
 
 clean:
 	rm -rf "$(BUILD_DIR)"
+
+launch launcher:
+	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
+
+build-host:
+	"$(SCRIPT_DIR)/build_host.sh"
+
+run-sw:
+	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"
+
+build-xo:
+	"$(SCRIPT_DIR)/build_xo_u55c.sh"
+
+link-xclbin:
+	"$(SCRIPT_DIR)/link_xclbin_u55c.sh"
+
+hw-tmux:
+	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
+
+run-hw:
+	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"

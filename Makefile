@@ -31,6 +31,24 @@ VPP ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/v++,v++)
 VIVADO ?= $(if $(VIVADO_ROOT),$(VIVADO_ROOT)/bin/vivado,vivado)
 EMCONFIGUTIL ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/emconfigutil,emconfigutil)
 VITIS_SETTINGS ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/settings64.sh)
+VITIS_HLS_ROOT ?= $(strip $(shell \
+	if [ -n "$$XILINX_HLS" ] && [ -d "$$XILINX_HLS/include" ]; then \
+		printf '%s\n' "$$XILINX_HLS"; \
+	elif [ -d /tools/Xilinx2022/Vitis_HLS/2022.2/include ]; then \
+		printf '%s\n' /tools/Xilinx2022/Vitis_HLS/2022.2; \
+	elif [ -d /tools/Xilinx/Vitis_HLS/2022.2/include ]; then \
+		printf '%s\n' /tools/Xilinx/Vitis_HLS/2022.2; \
+	elif [ -d /tools/Xilinx/Vitis_HLS/2021.2/include ]; then \
+		printf '%s\n' /tools/Xilinx/Vitis_HLS/2021.2; \
+	fi))
+TAPA_ROOT ?= $(strip $(shell \
+	if [ -n "$$TAPA_ROOT" ] && [ -f "$$TAPA_ROOT/include/tapa.h" ]; then \
+		printf '%s\n' "$$TAPA_ROOT"; \
+	elif [ -f "$$HOME/.tapa/usr/include/tapa.h" ]; then \
+		printf '%s\n' "$$HOME/.tapa/usr"; \
+	elif [ -f "$$HOME/.rapidstream-tapa/usr/include/tapa.h" ]; then \
+		printf '%s\n' "$$HOME/.rapidstream-tapa/usr"; \
+	fi))
 
 ROOT_DIR := $(abspath .)
 BUILD_DIR := $(ROOT_DIR)/build
@@ -43,6 +61,8 @@ CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
+CUPER_DIR := $(ROOT_DIR)/DLC/Cuper
+CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
 VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
 ANALYSIS_TARGET ?= hw
@@ -75,21 +95,28 @@ SW_XCLBIN := $(BUILD_DIR)/sw_emu/cgsolver_jacobi_pcg.xclbin
 HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 
 LOCAL_HOST := $(BUILD_DIR)/xplus_host
+CUPER_PCG_HOST := $(BUILD_DIR)/xplus_cuper_pcg_host
+CUPER_TAPA_PCG_HOST := $(BUILD_DIR)/xplus_cuper_tapa_pcg_host
+CUPER_CONTROL_LOCAL_HOST := $(BUILD_DIR)/xplus_cuper_control_local_host
+CUPER_CONTROL_XRT_HOST := $(BUILD_DIR)/xplus_cuper_control_xrt_host
 XRT_HOST := $(BUILD_DIR)/xplus_xrt_host
 
 SIZE ?= 512
 ASPECT_RATIO ?= 1.6
 DATASETS ?= thermal2_n1024
 
-KERNEL_NAMES := spmv_csr_kernel init_pcg_kernel dot_kernel update_xrz_kernel update_p_kernel
-# 手动切换 SpMV 硬件实现时，改这里的源文件即可。
-# 默认使用 CSR 版本：
-#   SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_csr_kernel.cpp
-# 如需切到 blocked 占位实现，可以手动改成：
-#   SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_blocked_kernel.cpp
-# 也可以不改文件，直接在命令行覆盖：
-#   make build-sw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp
-#   make build-hw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp
+KERNEL_NAMES := pcg_control_kernel
+# 默认 XRT xclbin 只链接 pcg_control_kernel。当前 pcg_control_kernel
+# 内部 SpMV 已经切到 4x4 block/bitmap 格式，host 会在运行时把 CSR
+# 转换成 b_row_ptr / b_col_idx / blocks 三个 BO。
+#
+# 注意：SPMV_KERNEL_SOURCE 只影响下面保留的旧 spmv_csr_kernel.xo
+# 编译规则；当前 XOS := $(XO_PCG_CONTROL)，所以默认 build-sw/build-hw
+# 不会把独立的 spmv_csr_kernel.xo 或 spmv_blocked_kernel.xo 链接进 xclbin。
+#
+# spmv_blocked_kernel.cpp 仍保留为旧拆分 kernel 的参考实现；默认 PCG
+# 路径真正使用的是 kernels/pcg_control_kernel.cpp 里的
+# spmv_blocked_local(...)。
 SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_csr_kernel.cpp
 XO_SP_MV := $(BUILD_DIR)/spmv_csr_kernel.xo
 XO_INIT := $(BUILD_DIR)/init_pcg_kernel.xo
@@ -101,13 +128,34 @@ XO_INIT := $(TARGET_BUILD_DIR)/init_pcg_kernel.xo
 XO_DOT := $(TARGET_BUILD_DIR)/dot_kernel.xo
 XO_UPDATE_XRZ := $(TARGET_BUILD_DIR)/update_xrz_kernel.xo
 XO_UPDATE_P := $(TARGET_BUILD_DIR)/update_p_kernel.xo
-XOS := $(XO_SP_MV) $(XO_INIT) $(XO_DOT) $(XO_UPDATE_XRZ) $(XO_UPDATE_P)
+XO_PCG_CONTROL := $(TARGET_BUILD_DIR)/pcg_control_kernel.xo
+XOS := $(XO_PCG_CONTROL)
 XCLBIN := $(TARGET_BUILD_DIR)/cgsolver_jacobi_pcg.xclbin
+CUPER_CONTROL_XO := $(TARGET_BUILD_DIR)/cuper_pcg_control_kernel.xo
+CUPER_CONTROL_XCLBIN := $(TARGET_BUILD_DIR)/cuper_pcg_control_kernel.xclbin
 EMCONFIG := $(TARGET_BUILD_DIR)/emconfig.json
 
 XRT_CXXFLAGS := $(CXXFLAGS) -Wall -Wextra -I$(XILINX_XRT)/include
 XRT_LDFLAGS := -L$(XILINX_XRT)/lib -lxrt_coreutil -luuid -pthread -lrt
 XRT_LDFLAGS += -Wl,-rpath,$(XILINX_XRT)/lib
+
+TAPA_CXXFLAGS := $(CXXFLAGS) -Wall -Wextra
+TAPA_CXXFLAGS += -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR)
+TAPA_CXXFLAGS += -I$(CUPER_DIR)/include -I$(TAPA_ROOT)/include
+TAPA_CXXFLAGS += -I$(VITIS_HLS_ROOT)/include -I$(VITIS_HLS_ROOT)/common/technology/autopilot
+TAPA_RUNTIME_LIBS := \
+	$(TAPA_ROOT)/lib/libtapa.so \
+	$(TAPA_ROOT)/lib/libcontext.so \
+	$(TAPA_ROOT)/lib/libfrt.so \
+	$(TAPA_ROOT)/lib/libOpenCL.so \
+	$(TAPA_ROOT)/lib/libglog.so \
+	$(TAPA_ROOT)/lib/libgflags.so \
+	$(TAPA_ROOT)/lib/libthread.so \
+	$(TAPA_ROOT)/lib/libtinyxml2.so \
+	$(TAPA_ROOT)/lib/libyaml-cpp.so
+TAPA_LDFLAGS := $(TAPA_RUNTIME_LIBS) -pthread
+TAPA_LDFLAGS += -Wl,-rpath,$(TAPA_ROOT)/lib
+TAPA_LDFLAGS += -Wl,-rpath,$(XILINX_XRT)/lib
 
 VPP_FLAGS += -t $(TARGET) --platform $(XPLATFORM) --save-temps
 VPP_FLAGS += --temp_dir $(TARGET_BUILD_DIR)/_x_temp
@@ -127,22 +175,31 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env vivado-env generate download-suitesparse-data list-suitesparse-data local-host xrt-host launcher menu run run-local run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-control-local run-cuper-control-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw cuper-control-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
 
 all: run-local
 
 help:
-	@echo "Project-XPlus Jacobi-PCG multi-kernel project"
+	@echo "Project-XPlus Jacobi-PCG single-control-kernel project"
 	@echo "Default run parameters live in host/run_defaults.hpp."
 	@echo ""
 	@echo "Local reference path:"
 	@echo "  make run-local"
+	@echo ""
+	@echo "Project-XPlus Cuper-PCG path:"
+	@echo "  make run-cuper-pcg DATASET=data/suitesparse/Schmid/csr/thermal2_n1024"
+	@echo "  make run-cuper-pcg-tapa DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 TAU=1e6"
+	@echo "  make run-cuper-control-local DATASET=data/suitesparse/Schmid/csr/thermal2_n1024"
+	@echo "  make build-cuper-control-sw"
+	@echo "  make run-cuper-control-xrt TARGET=sw_emu DATASET=data/suitesparse/Schmid/csr/thermal2_n16"
+	@echo "  make cuper-control-hw-tmux"
 	@echo ""
 	@echo "Build XRT host only:"
 	@echo "  make xrt-host"
 	@echo ""
 	@echo "Interactive run launcher:"
 	@echo "  make launcher"
+	@echo "  make cuper-launcher"
 	@echo ""
 	@echo "Generate dataset:"
 	@echo "  make generate"
@@ -152,7 +209,6 @@ help:
 	@echo ""
 	@echo "Build sw_emu xclbin:"
 	@echo "  make build-sw"
-	@echo "  make build-sw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp"
 	@echo ""
 	@echo "Run sw_emu:"
 	@echo "  make run-xrt TARGET=sw_emu"
@@ -162,7 +218,6 @@ help:
 	@echo "Build hardware xclbin:"
 	@echo "  make build-hw"
 	@echo "  make build-hw ENABLE_VIVADO_ANALYSIS=0"
-	@echo "  make build-hw SPMV_KERNEL_SOURCE=$(KERNEL_DIR)/spmv_blocked_kernel.cpp"
 	@echo "  make vivado-package-full"
 	@echo "  make vivado-power-report"
 	@echo "  make vivado-analysis"
@@ -172,6 +227,15 @@ help:
 	@echo "  make run-xrt TARGET=hw"
 	@echo "  make run-hw-report"
 	@echo "  make run-hw-report-existing"
+	@echo ""
+	@echo "DLC/Cuper independent SpMV tool:"
+	@echo "  make cuper-launch"
+	@echo "  make cuper-build-host"
+	@echo "  make cuper-run-sw MATRIX=data/matrices/sit100/sit100.mtx"
+	@echo "  make cuper-build-xo"
+	@echo "  make cuper-link-xclbin"
+	@echo "  make cuper-hw-tmux"
+	@echo "  make cuper-run-hw MATRIX=data/matrices/sit100/sit100.mtx"
 
 env:
 	@test -f "$(XPLATFORM)" || (echo "ERROR: platform not found: $(XPLATFORM)" && exit 1)
@@ -179,6 +243,12 @@ env:
 	@test -x "$(VPP)" || command -v "$(VPP)" >/dev/null || (echo "ERROR: v++ not found" && exit 1)
 	@test -x "$(EMCONFIGUTIL)" || command -v "$(EMCONFIGUTIL)" >/dev/null || (echo "ERROR: emconfigutil not found" && exit 1)
 	@test -f "$(VITIS_SETTINGS)" || (echo "ERROR: Vitis settings script not found: $(VITIS_SETTINGS)" && exit 1)
+
+tapa-env:
+	@test -f "$(TAPA_ROOT)/include/tapa.h" || (echo "ERROR: TAPA_ROOT not found or invalid: $(TAPA_ROOT)" && exit 1)
+	@test -f "$(VITIS_HLS_ROOT)/include/ap_int.h" || (echo "ERROR: VITIS_HLS_ROOT not found or invalid: $(VITIS_HLS_ROOT)" && exit 1)
+	@test -d "$(XILINX_XRT)" || (echo "ERROR: XILINX_XRT not found: $(XILINX_XRT)" && exit 1)
+	@test -f "$(TAPA_ROOT)/lib/libtapa.so" || (echo "ERROR: libtapa.so not found under $(TAPA_ROOT)/lib" && exit 1)
 
 vivado-env: env
 	@test -x "$(VIVADO)" || command -v "$(VIVADO)" >/dev/null || (echo "ERROR: vivado not found" && exit 1)
@@ -194,19 +264,65 @@ list-suitesparse-data:
 
 local-host: $(LOCAL_HOST)
 
+cuper-pcg-host: $(CUPER_PCG_HOST)
+
+cuper-tapa-pcg-host: $(CUPER_TAPA_PCG_HOST)
+
+cuper-control-local-host: $(CUPER_CONTROL_LOCAL_HOST)
+
+cuper-control-xrt-host: $(CUPER_CONTROL_XRT_HOST)
+
 xrt-host: $(XRT_HOST)
 
-launcher menu: $(LOCAL_HOST) $(XRT_HOST)
+launch: launcher
+
+launcher menu: $(LOCAL_HOST) $(CUPER_PCG_HOST) $(CUPER_CONTROL_LOCAL_HOST) $(CUPER_CONTROL_XRT_HOST) $(XRT_HOST)
 	@$(PYTHON) "$(SCRIPT_DIR)/launcher.py" \
 		--vitis-settings "$(VITIS_SETTINGS)" \
 		--local-host "$(LOCAL_HOST)" \
+		--cuper-pcg-host "$(CUPER_PCG_HOST)" \
+		--cuper-tapa-pcg-host "$(CUPER_TAPA_PCG_HOST)" \
+		--cuper-control-local-host "$(CUPER_CONTROL_LOCAL_HOST)" \
 		--xrt-host "$(XRT_HOST)" \
 		--hw-xclbin "$(HW_XCLBIN)" \
 		--sw-xclbin "$(SW_XCLBIN)" \
 		--sw-emu-dir "$(BUILD_DIR)/sw_emu"
 
+cuper-launch cuper-launcher:
+	@$(MAKE) -C "$(CUPER_DIR)" launch
+
+cuper-build-host:
+	@$(MAKE) -C "$(CUPER_DIR)" build-host
+
+cuper-run-sw:
+	@$(MAKE) -C "$(CUPER_DIR)" run-sw MATRIX="$(or $(MATRIX),data/matrices/sit100/sit100.mtx)"
+
+cuper-build-xo:
+	@$(MAKE) -C "$(CUPER_DIR)" build-xo
+
+cuper-link-xclbin:
+	@$(MAKE) -C "$(CUPER_DIR)" link-xclbin
+
+cuper-hw-tmux:
+	@$(MAKE) -C "$(CUPER_DIR)" hw-tmux $(if $(FORCE),FORCE=$(FORCE))
+
+cuper-run-hw:
+	@$(MAKE) -C "$(CUPER_DIR)" run-hw MATRIX="$(or $(MATRIX),data/matrices/sit100/sit100.mtx)"
+
 $(LOCAL_HOST): $(HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(INCLUDE_DIR)/cg_kernels.hpp $(KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/main.cpp $(KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)
+
+$(CUPER_PCG_HOST): $(HOST_DIR)/cuper_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_pcg_main.cpp $(KERNEL_DIR)/cg_kernels.cpp -o $(CUPER_PCG_HOST)
+
+$(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | $(BUILD_DIR) tapa-env
+	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_HOST) $(TAPA_LDFLAGS)
+
+$(CUPER_CONTROL_LOCAL_HOST): $(HOST_DIR)/cuper_control_local_main.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_control_local_main.cpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp -o $(CUPER_CONTROL_LOCAL_HOST)
+
+$(CUPER_CONTROL_XRT_HOST): $(HOST_DIR)/cuper_control_xrt_host.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_control_xrt_host.cpp -o $(CUPER_CONTROL_XRT_HOST) $(XRT_LDFLAGS)
 
 $(XRT_HOST): $(HOST_DIR)/xrt_host.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/xrt_host.cpp -o $(XRT_HOST) $(XRT_LDFLAGS)
@@ -228,8 +344,17 @@ $(XO_UPDATE_XRZ): $(KERNEL_DIR)/update_xrz_kernel.cpp $(INCLUDE_DIR)/cg_common.h
 $(XO_UPDATE_P): $(KERNEL_DIR)/update_p_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k update_p_kernel -o $@ $<
 
+$(XO_PCG_CONTROL): $(KERNEL_DIR)/pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k pcg_control_kernel -o $@ $<
+
+$(CUPER_CONTROL_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k cuper_pcg_control_kernel -o $@ $<
+
 $(XCLBIN): $(XOS) $(CFG_DIR)/connectivity_u55c.cfg | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) $(VPP_LDFLAGS) -o $@ $(XOS)
+
+$(CUPER_CONTROL_XCLBIN): $(CUPER_CONTROL_XO) $(CUPER_CONTROL_CFG) | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_CONTROL_CFG) -o $@ $(CUPER_CONTROL_XO)
 
 $(EMCONFIG): | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(EMCONFIGUTIL) --platform $(XPLATFORM) --od .
@@ -242,10 +367,53 @@ build-sw:
 build-hw:
 	$(MAKE) build TARGET=hw
 
+build-cuper-control: $(CUPER_CONTROL_XCLBIN)
+
+build-cuper-control-sw:
+	$(MAKE) build-cuper-control TARGET=sw_emu
+
+build-cuper-control-hw:
+	$(MAKE) build-cuper-control TARGET=hw
+
+cuper-control-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-control-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-control-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-control-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_control_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-control-hw" \
+		"cd '$(ROOT_DIR)' && $(MAKE) build-cuper-control-hw 2>&1 | tee '$$log'"; \
+	echo "session: project-xplus-cuper-control-hw"; \
+	echo "log: $$log"; \
+	echo "attach: tmux attach -t project-xplus-cuper-control-hw"; \
+	echo "tail: tail -f $$log"
+
 run: run-local
 
 run-local: $(LOCAL_HOST)
 	$(LOCAL_HOST)
+
+run-cuper-pcg: $(CUPER_PCG_HOST)
+	$(CUPER_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n1024)" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-pcg-tapa: $(CUPER_TAPA_PCG_HOST)
+	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-control-local: $(CUPER_CONTROL_LOCAL_HOST)
+	$(CUPER_CONTROL_LOCAL_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n1024)" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-control-xrt: $(CUPER_CONTROL_XRT_HOST)
+ifeq ($(TARGET),hw)
+	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-hw" && exit 1)
+	$(VITIS_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+else
+	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-sw" && exit 1)
+	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+endif
 
 run-xrt: $(XRT_HOST)
 ifeq ($(TARGET),hw)

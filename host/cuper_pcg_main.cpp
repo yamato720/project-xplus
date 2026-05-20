@@ -1,7 +1,8 @@
+#include "cuper_pcg_solver.hpp"
 #include "cpu_reference.hpp"
-#include "multi_kernel_solver.hpp"
 #include "run_defaults.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
@@ -11,41 +12,16 @@
 
 namespace {
 
-enum class SpmvVariant {
-    kCsr,
-    kBlocked,
-};
-
 struct CliOptions {
     std::filesystem::path dataset_dir;
     double tau = project_xplus::cgsolver::run_defaults::kTau;
     int max_iters = project_xplus::cgsolver::run_defaults::kMaxIters;
-    SpmvVariant spmv_variant = SpmvVariant::kCsr;
+    double diff_tol = 1.0e-3;
 };
 
 void usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [dataset_dir] [--tau value] [--max-iters value] [--spmv csr|blocked]\n";
-}
-
-SpmvVariant parse_spmv_variant(const std::string& value) {
-    if (value == "csr") {
-        return SpmvVariant::kCsr;
-    }
-    if (value == "blocked") {
-        return SpmvVariant::kBlocked;
-    }
-    throw std::runtime_error("unknown --spmv value: " + value + " (expected csr or blocked)");
-}
-
-const char* spmv_variant_name(const SpmvVariant variant) {
-    switch (variant) {
-        case SpmvVariant::kCsr:
-            return "csr";
-        case SpmvVariant::kBlocked:
-            return "blocked";
-    }
-    return "unknown";
+              << " [dataset_dir] [--tau value] [--max-iters value] [--diff-tol value]\n";
 }
 
 CliOptions parse_args(int argc, char** argv) {
@@ -69,11 +45,11 @@ CliOptions parse_args(int argc, char** argv) {
                 throw std::runtime_error("--max-iters requires a value");
             }
             options.max_iters = std::stoi(argv[++index]);
-        } else if (arg == "--spmv") {
+        } else if (arg == "--diff-tol") {
             if (index + 1 >= argc) {
-                throw std::runtime_error("--spmv requires a value");
+                throw std::runtime_error("--diff-tol requires a value");
             }
-            options.spmv_variant = parse_spmv_variant(argv[++index]);
+            options.diff_tol = std::stod(argv[++index]);
         } else {
             throw std::runtime_error("unknown argument: " + arg);
         }
@@ -85,6 +61,9 @@ CliOptions parse_args(int argc, char** argv) {
     if (options.max_iters < 0) {
         throw std::runtime_error("--max-iters must be non-negative");
     }
+    if (options.diff_tol <= 0.0) {
+        throw std::runtime_error("--diff-tol must be positive");
+    }
 
     return options;
 }
@@ -94,8 +73,6 @@ CliOptions parse_args(int argc, char** argv) {
 int main(int argc, char** argv) {
     try {
         const CliOptions options = parse_args(argc, argv);
-        // 本地路径不经过 XRT，只是直接调用同名“kernel 函数”，
-        // 用来验证多阶段拆分本身的数值逻辑。
         const project_xplus::cgsolver::Dataset dataset =
             project_xplus::cgsolver::Dataset::load(options.dataset_dir);
 
@@ -104,40 +81,49 @@ int main(int argc, char** argv) {
         config.max_iters = options.max_iters;
 
         std::cout << "[xplus] dataset=" << options.dataset_dir
-                  << " mode=local-multi-kernel"
-                  << " spmv=" << spmv_variant_name(options.spmv_variant) << "\n";
+                  << " mode=cuper-pcg"
+                  << " spmv=cuper-slice-fp32\n";
 
-        const auto spmv_kernel_entry =
-            options.spmv_variant == SpmvVariant::kBlocked ? spmv_blocked_kernel : spmv_csr_kernel;
-        const project_xplus::cgsolver::MultiKernelResult xplus_result =
-            project_xplus::cgsolver::run_local_multi_kernel_solver(
-                dataset, config, &std::cout, spmv_kernel_entry);
-        // 仍然保留 CPU golden，确保本地多-kernel 逻辑没有偏离参考实现。
+        const project_xplus::cgsolver::CuperPcgResult cuper_result =
+            project_xplus::cgsolver::run_cuper_pcg_solver(dataset, config, &std::cout);
         const project_xplus::cgsolver::CpuReferenceResult golden_result =
             project_xplus::cgsolver::run_cpu_reference(dataset, config);
 
         double max_abs_diff = 0.0;
-        for (std::size_t index = 0; index < xplus_result.solution.size(); ++index) {
-            const double diff =
-                std::fabs(xplus_result.solution[index] - golden_result.golden.solution[index]);
-            if (diff > max_abs_diff) {
-                max_abs_diff = diff;
-            }
+        double max_rel_diff = 0.0;
+        for (std::size_t index = 0; index < cuper_result.solution.size(); ++index) {
+            const double expected = golden_result.golden.solution[index];
+            const double actual = cuper_result.solution[index];
+            const double abs_diff = std::fabs(actual - expected);
+            const double rel_diff = abs_diff / std::max(std::fabs(expected), 1.0e-12);
+            max_abs_diff = std::max(max_abs_diff, abs_diff);
+            max_rel_diff = std::max(max_rel_diff, rel_diff);
         }
 
         std::cout << std::scientific << std::setprecision(12);
-        std::cout << "[done] iter=" << xplus_result.iterations
-                  << " residual_abs=" << xplus_result.residual_l2
-                  << " residual_rel=" << xplus_result.residual_rel
-                  << " status=" << project_xplus::cgsolver::to_string(xplus_result.status) << "\n";
+        std::cout << "[done] iter=" << cuper_result.iterations
+                  << " residual_abs=" << cuper_result.residual_l2
+                  << " residual_rel=" << cuper_result.residual_rel
+                  << " status=" << project_xplus::cgsolver::to_string(cuper_result.status) << "\n";
         std::cout << "[check] cpu_residual_abs=" << golden_result.summary.residual_l2
-                  << " fpga_residual_abs=" << xplus_result.residual_l2
-                  << " max_abs_diff=" << max_abs_diff << "\n";
+                  << " cuper_residual_abs=" << cuper_result.residual_l2
+                  << " max_abs_diff=" << max_abs_diff
+                  << " max_rel_diff=" << max_rel_diff
+                  << " diff_tol=" << options.diff_tol << "\n";
+        std::cout << "[timing-ms] plan=" << cuper_result.timing.plan_ms
+                  << " spmv_total=" << cuper_result.timing.spmv_ms
+                  << " spmv_calls=" << std::defaultfloat << cuper_result.timing.spmv_calls
+                  << std::scientific
+                  << " spmv_avg="
+                  << (cuper_result.timing.spmv_calls > 0
+                          ? cuper_result.timing.spmv_ms / cuper_result.timing.spmv_calls
+                          : 0.0)
+                  << "\n";
 
-        if (!xplus_result.converged) {
+        if (!cuper_result.converged) {
             return 2;
         }
-        if (max_abs_diff > 1.0e-9) {
+        if (max_abs_diff > options.diff_tol && max_rel_diff > options.diff_tol) {
             return 3;
         }
         return 0;

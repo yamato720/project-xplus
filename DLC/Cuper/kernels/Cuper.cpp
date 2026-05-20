@@ -254,28 +254,23 @@ iter:
         INDEX_TYPE x_table_start = x_table_min[i];
         INDEX_TYPE x_table_end   = x_table_max[i];
 #endif
-        // 计算整个向量的总包数
         const INDEX_TYPE total_vector_packets = (Column_num + 15) >> 4;
+        const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
+        const INDEX_TYPE end_idx = min(start_idx + Slice_WIDTH_DIV_16,
+                                       total_vector_packets);
         
         Load_vector:
-            for(INDEX_TYPE j = 0; j < total_vector_packets; ) {
+            for(INDEX_TYPE j = start_idx; j < end_idx; ) {
 #pragma HLS loop_tripcount min=1 max=512
 #pragma HLS pipeline II = 1
-                // 必须保证：所有 PE 协同转发向量
                 if(!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
                     float_v16 x;
                     Vector_X_Stream_in.try_read(x);
-                    Vector_X_Stream_out.try_write(x); // 转发给下游
+                    Vector_X_Stream_out.try_write(x);
 
-                    // 只有属于本 PE 负责的列范围，才写入本地 BRAM
-                    INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
-                    INDEX_TYPE end_idx   = (i + 1) * Slice_WIDTH_DIV_16;
-                    
-                    if(j >= start_idx && j < end_idx) {
-                        for(INDEX_TYPE k = 0; k < 16; ++k) {
-                            for(INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
-                                local_X[l][( (j - start_idx) << 4) + k] = x[k];
-                            }
+                    for(INDEX_TYPE k = 0; k < 16; ++k) {
+                        for(INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
+                            local_X[l][((j - start_idx) << 4) + k] = x[k];
                         }
                     }
                     ++j;

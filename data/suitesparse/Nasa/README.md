@@ -17,6 +17,6 @@ Datasets:
 | `nasasrb` | 54,870 | 2,677,324 | Larger NASA shuttle rocket booster SPD case, has SuiteSparse `b` vector. |
 | `pwt` | 36,519 | 326,107 | NASA structural matrix, generated `b = A * x_ref`; verify suitability before PCG use. |
 
-Current Project-XPlus kernels define `kMaxN = 1024` in `include/cg_common.hpp`, so these datasets are staged for data integration work and will not run through the current host/kernel path without increasing the supported problem size.
+These datasets are staged for data integration work. The current XRT path stores PCG vectors in HBM, but full-size runs still depend on rebuilding the xclbin and fitting the converted block matrix plus `x/r/z/p/ap` into available HBM.
 
 See `../SOURCES.md` for source URLs, checksums, and conversion notes.

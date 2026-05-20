@@ -6,9 +6,17 @@ data/generated/
 data/suitesparse/*/raw/
 data/suitesparse/*/mtx/
 data/suitesparse/*/csr/
+DLC/Cuper/.ipcache/
+DLC/Cuper/run/
+*.xo
+*.xclbin
+*.compile_summary
+*.link_summary
+*.xclbin.link_summary
 *.log
 *.jou
 *.wdb
 *.wcfg
 *.csv
 *.run_summary
+docs/refer/*.pdf

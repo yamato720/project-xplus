@@ -20,7 +20,7 @@ Conversion output format:
 | `Nasa/nasasrb` | https://sparse.tamu.edu/Nasa/nasasrb | https://sparse.tamu.edu/MM/Nasa/nasasrb.tar.gz | `data/suitesparse/Nasa/csr/nasasrb` | 54,870 | 2,677,324 | Larger NASA shuttle rocket booster SPD problem; uses packaged `nasasrb_b.mtx`. |
 | `Nasa/pwt` | https://sparse.tamu.edu/Nasa/pwt | https://sparse.tamu.edu/MM/Nasa/pwt.tar.gz | `data/suitesparse/Nasa/csr/pwt` | 36,519 | 326,107 | NASA structural matrix; `b` generated locally as `A * x_ref`; verify PCG suitability before use. |
 | `Schmid/thermal2` | https://sparse.tamu.edu/Schmid/thermal2 | https://sparse.tamu.edu/MM/Schmid/thermal2.tar.gz | `data/suitesparse/Schmid/csr/thermal2` | 1,228,045 | 8,580,313 | Full million-row symmetric positive definite thermal problem; uses packaged `thermal2_b.mtx`. |
-| `Schmid/thermal2_n1024` | derived from `Schmid/thermal2` | derived locally | `data/suitesparse/Schmid/csr/thermal2_n1024` | 1,024 | 6,362 | Leading 1024x1024 principal submatrix for the current `kMaxN = 1024` bitstream smoke test; `b` generated locally as `A_sub * x_ref`. |
+| `Schmid/thermal2_n1024` | derived from `Schmid/thermal2` | derived locally | `data/suitesparse/Schmid/csr/thermal2_n1024` | 1,024 | 6,362 | Leading 1024x1024 principal submatrix for the current smoke test; `b` generated locally as `A_sub * x_ref`. |
 
 Any `Schmid/thermal2_n<N>` dataset can be generated locally with:
 
@@ -44,6 +44,6 @@ Practical convergence still depends on conditioning, floating-point behavior, to
 
 ## Current Runtime Limit
 
-The current kernel code sets `kMaxN = 1024` in `include/cg_common.hpp`. This is a code and bitstream design limit, not a dataset limit. The full `thermal2` dataset is staged on disk, but it cannot run on the current xclbin until the kernels are redesigned for larger vectors and the hardware bitstream is rebuilt.
+The current XRT path keeps PCG vectors in HBM instead of full-vector BRAM arrays. Full-size datasets still require a rebuilt xclbin and enough HBM capacity for the converted block matrix plus `x/r/z/p/ap`; this table records staged data, not a guarantee that every dataset fits a given board build.
 
 The current hardware smoke test therefore uses `Schmid/thermal2_n1024`.

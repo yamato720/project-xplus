@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project-XPlus 分块与滑动窗口 SpMV 原理</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --ink: #17202b;
+      --muted: #5d6875;
+      --panel: #ffffff;
+      --panel-2: #f0f5f7;
+      --border: #c9d2dc;
+      --strong: #203d5f;
+      --compute: #245b4f;
+      --memory: #704f16;
+      --warn: #8b3547;
+      --soft-blue: #e8f2ff;
+      --soft-green: #e9f7ef;
+      --soft-amber: #fff3d8;
+      --soft-red: #fdecef;
+      --code-bg: #101820;
+      --code-ink: #edf4fb;
+      --radius: 8px;
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    main {
+      width: min(1160px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(25px, 3vw, 34px);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: 21px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    p + p {
+      margin-top: 10px;
+    }
+
+    a {
+      color: var(--strong);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.94em;
+    }
+
+    .hero {
+      padding: 26px 0 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .subtitle {
+      max-width: 920px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 26px;
+      margin-top: 24px;
+      align-items: start;
+    }
+
+    nav {
+      position: sticky;
+      top: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .nav-title {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    nav a {
+      display: block;
+      padding: 9px 12px;
+      border-bottom: 1px solid #e5eaf0;
+      color: var(--ink);
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    nav a:last-child {
+      border-bottom: 0;
+    }
+
+    section {
+      padding: 24px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    section:first-child {
+      padding-top: 0;
+    }
+
+    .lead {
+      max-width: 940px;
+      color: var(--muted);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .summary-item,
+    .info-box,
+    .diagram-node,
+    .field,
+    .step,
+    .note,
+    .formula {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .summary-item {
+      padding: 14px;
+    }
+
+    .summary-item strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--strong);
+    }
+
+    .summary-item span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+      align-items: start;
+    }
+
+    .info-box {
+      padding: 14px;
+    }
+
+    .info-box.memory {
+      background: var(--soft-amber);
+      border-color: #e1c27d;
+    }
+
+    .info-box.compute {
+      background: var(--soft-green);
+      border-color: #9bceb0;
+    }
+
+    .info-box.warning {
+      background: var(--soft-red);
+      border-color: #e0a0aa;
+    }
+
+    .info-box.blue {
+      background: var(--soft-blue);
+      border-color: #9dbfe6;
+    }
+
+    .formula {
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: #f9fbfd;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .code {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      background: var(--code-bg);
+      color: var(--code-ink);
+      overflow-x: auto;
+      white-space: pre;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .matrix-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+      gap: 16px;
+      margin-top: 16px;
+      align-items: center;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(44px, 1fr));
+      gap: 6px;
+      max-width: 330px;
+    }
+
+    .cell {
+      min-height: 48px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #eef2f6;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+
+    .cell.nz {
+      background: var(--soft-green);
+      border-color: #93c7a8;
+      color: #143d2a;
+      font-weight: 720;
+    }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .field {
+      padding: 12px;
+    }
+
+    .field b {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--strong);
+    }
+
+    .flow {
+      display: grid;
+      gap: 0;
+      margin-top: 16px;
+      justify-items: center;
+    }
+
+    .diagram-node {
+      width: min(680px, 100%);
+      overflow: hidden;
+    }
+
+    .diagram-title {
+      padding: 10px 14px;
+      background: var(--strong);
+      color: #fff;
+      font-weight: 760;
+    }
+
+    .diagram-node.memory .diagram-title {
+      background: var(--memory);
+    }
+
+    .diagram-node.compute .diagram-title {
+      background: var(--compute);
+    }
+
+    .diagram-node.warn .diagram-title {
+      background: var(--warn);
+    }
+
+    .diagram-body {
+      padding: 12px 14px;
+    }
+
+    .io-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .io {
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fafbfc;
+      font-size: 13px;
+    }
+
+    .io b {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+    }
+
+    .arrow {
+      width: 2px;
+      height: 34px;
+      background: #66717f;
+      position: relative;
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -1px;
+      width: 10px;
+      height: 10px;
+      border-right: 2px solid #66717f;
+      border-bottom: 2px solid #66717f;
+      transform: translateX(-50%) rotate(45deg);
+      background: var(--bg);
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      width: 100%;
+      margin: 10px 0 4px;
+    }
+
+    .step {
+      padding: 13px;
+      background: var(--panel);
+    }
+
+    .step h3 {
+      color: var(--compute);
+    }
+
+    .step ol,
+    .step ul,
+    .info-box ul,
+    .note ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+
+    .step li,
+    .info-box li,
+    .note li {
+      margin-top: 5px;
+    }
+
+    .table-wrap {
+      margin-top: 16px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e4e9ef;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f6;
+      color: var(--strong);
+      font-weight: 760;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .note {
+      margin-top: 16px;
+      padding: 14px;
+      background: #fbfcfd;
+    }
+
+    .note strong {
+      color: var(--warn);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .swatch {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch::before {
+      content: "";
+      width: 18px;
+      height: 12px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+    }
+
+    .swatch.memory::before {
+      background: var(--soft-amber);
+      border-color: #e1c27d;
+    }
+
+    .swatch.compute::before {
+      background: var(--soft-green);
+      border-color: #9bceb0;
+    }
+
+    .swatch.warn::before {
+      background: var(--soft-red);
+      border-color: #e0a0aa;
+    }
+
+    @media (max-width: 880px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      nav {
+        position: static;
+      }
+
+      .summary-grid,
+      .two-col,
+      .matrix-wrap,
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .fields,
+      .io-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <h1>Project-XPlus 分块与滑动窗口 SpMV 原理</h1>
+      <p class="subtitle">
+        这份文档说明当前 <code>pcg_control_kernel</code> 里的 SpMV 为什么要同时使用
+        <code>4x4 block/bitmap</code> 和 <code>x</code> 滑动窗口，以及它们如何在数学上仍然等价于
+        <code>y = A * x</code>。
+      </p>
+      <div class="meta">
+        <span class="pill">实现位置：<code>kernels/pcg_control_kernel.cpp</code></span>
+        <span class="pill">公共结构：<code>include/cg_common.hpp</code></span>
+        <span class="pill">窗口长度：<code>kSpmvWindowSize = 512</code></span>
+        <span class="pill">块大小：<code>kSpmvBlockSize = 4</code></span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav aria-label="文档目录">
+        <div class="nav-title">目录</div>
+        <a href="#goal">1. 要解决的问题</a>
+        <a href="#blocked">2. 4x4 block/bitmap</a>
+        <a href="#window">3. 滑动窗口等价变换</a>
+        <a href="#kernel-flow">4. kernel 执行流程</a>
+        <a href="#inner-loop">5. 单个窗口内部</a>
+        <a href="#pingpong">6. ping-pong 与 DATAFLOW</a>
+        <a href="#pcg">7. 在 PCG 里的位置</a>
+        <a href="#limits">8. 当前局限和下一步</a>
+        <a href="#mapping">9. 代码对应表</a>
+      </nav>
+
+      <article>
+        <section id="goal">
+          <h2>1. 要解决的问题</h2>
+          <p class="lead">
+            稀疏矩阵向量乘 <code>SpMV</code> 的核心公式很简单，但在 FPGA 上困难主要来自访存：
+            矩阵非零元按稀疏结构访问，<code>x[col]</code> 的列号通常不连续。如果每个非零元都直接随机读 HBM，
+            流水线很容易被访存延迟拖住。
+          </p>
+
+          <div class="formula">y_i = sum_j A_ij * x_j</div>
+
+          <div class="summary-grid">
+            <div class="summary-item">
+              <strong>不再缓存完整 x</strong>
+              <span>完整 <code>x_local[n]</code> 会让片上 BRAM 随问题规模增长。当前只缓存固定长度窗口。</span>
+            </div>
+            <div class="summary-item">
+              <strong>A 也按 window 重排</strong>
+              <span>host 把 CSR 转成 4x4 block/bitmap 后，再按 x-window 组织 A 的 block 子流。</span>
+            </div>
+            <div class="summary-item">
+              <strong>按列窗口累加 y</strong>
+              <span>一次 <code>A*x</code> 被拆成多个 <code>A[:, window] * x[window]</code> 的部分和。</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="blocked">
+          <h2>2. 4x4 block/bitmap 分块格式</h2>
+          <p>
+            host 仍从原始 CSR 数据集读取矩阵，但会先把矩阵按 4 行、4 列切成小块。
+            第 <code>br</code> 个 block row 覆盖原矩阵行：
+          </p>
+          <div class="formula">row = 4 * br + local_r,  local_r in {0, 1, 2, 3}</div>
+          <p>第 <code>bc</code> 个 block column 覆盖原矩阵列：</p>
+          <div class="formula">col = 4 * bc + local_c,  local_c in {0, 1, 2, 3}</div>
+
+          <div class="matrix-wrap">
+            <div class="info-box">
+              <h3>一个 4x4 block 的例子</h3>
+              <div class="matrix" aria-label="4x4 block 示例">
+                <div class="cell nz">a</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell nz">b</div>
+                <div class="cell">0</div>
+                <div class="cell nz">c</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell">0</div>
+                <div class="cell nz">d</div>
+                <div class="cell">0</div>
+                <div class="cell nz">e</div>
+                <div class="cell">0</div>
+              </div>
+            </div>
+
+            <div class="info-box blue">
+              <h3>compact 存储</h3>
+              <p>
+                这个 block 不保存完整 16 个 double，而是用 16-bit <code>mask</code> 记录哪些位置非零，
+                再把非零值按 row-major 顺序紧凑放进 <code>values[]</code>。
+              </p>
+              <div class="code">pos = local_r * 4 + local_c
+mask bit(pos) = 1  表示该位置非零
+values[] = [a, b, c, d, e]</div>
+            </div>
+          </div>
+
+          <div class="fields">
+            <div class="field">
+              <b><code>a_win_row_ptr</code></b>
+              <span>window-major block row 指针。第 <code>w</code> 个 window、第 <code>br</code> 个 block row 的区间由 <code>a_win_row_ptr[w][br]</code> 到 <code>a_win_row_ptr[w][br+1]</code> 给出。</span>
+            </div>
+            <div class="field">
+              <b><code>a_win_col_idx</code></b>
+              <span>每个 windowed 非零 4x4 block 的绝对 block column。真实列号仍需要加上块内 <code>local_c</code>。</span>
+            </div>
+            <div class="field">
+              <b><code>a_win_blocks</code></b>
+              <span>按 window 顺序排列的 block payload，包括 compact values 和 16-bit occupancy mask。</span>
+            </div>
+          </div>
+
+          <div class="formula">y[4*br + local_r] += block(local_r, local_c) * x[4*bc + local_c]</div>
+
+          <div class="note">
+            <strong>关键点：</strong>
+            这里的分块不是改变数学矩阵，只是改变存储和遍历顺序。所有非零值仍然按原来的
+            <code>A[row, col]</code> 参与乘加。
+          </div>
+        </section>
+
+        <section id="window">
+          <h2>3. 滑动窗口的数学等价变换</h2>
+          <p>
+            当前窗口长度固定为 <code>512</code>。kernel 每次只把一段 <code>x</code> 搬到片上 BRAM：
+          </p>
+
+          <div class="formula">W_t = [t * 512, min((t + 1) * 512, n))
+x_window = x[W_t]</div>
+
+          <p>
+            完整 SpMV 可以按列窗口拆成部分和：
+          </p>
+
+          <div class="formula">y = A * x
+  = A[:, W_0] * x[W_0]
+  + A[:, W_1] * x[W_1]
+  + A[:, W_2] * x[W_2]
+  + ...</div>
+
+          <div class="two-col">
+            <div class="info-box compute">
+              <h3>数学上等价</h3>
+              <p>
+                每个非零项 <code>A_ij * x_j</code> 的列 <code>j</code> 只会落入唯一一个窗口。
+                所有窗口的贡献加起来，正好覆盖完整的 <code>sum_j</code>。
+              </p>
+            </div>
+            <div class="info-box memory">
+              <h3>硬件上固定片上容量</h3>
+              <p>
+                片上只保留 <code>512</code> 个 <code>double</code> 的 <code>x_window</code>。
+                使用 ping-pong 后是两份窗口缓存，约 <code>2 * 512 * 8 = 8192</code> 字节。
+              </p>
+            </div>
+          </div>
+
+          <div class="note">
+            <strong>为什么窗口大小要是 4 的整数倍：</strong>
+            block column 的宽度是 4。<code>512 % 4 == 0</code>，所以一个 4x4 block column 不会横跨两个
+            <code>x</code> 窗口。host 可以把每个 4x4 block 精确归到唯一一个 A-window，kernel 不需要拆 block。
+          </div>
+        </section>
+
+        <section id="kernel-flow">
+          <h2>4. 当前 kernel 的 SpMV 执行流程</h2>
+          <p class="lead">
+            当前函数名是 <code>spmv_blocked_windowed</code>。它既用于初始化阶段的
+            <code>ax0 = A * x0</code>，也用于 PCG 主循环里的 <code>ap = A * p</code>。
+          </p>
+
+          <div class="legend">
+            <span class="swatch memory">HBM / BO 数据</span>
+            <span class="swatch compute">片上计算</span>
+            <span class="swatch warn">尾窗口 / 边界处理</span>
+          </div>
+
+          <div class="flow">
+            <div class="diagram-node memory">
+              <div class="diagram-title">输入矩阵和向量</div>
+              <div class="diagram-body">
+                <p><code>a_win_row_ptr</code>, <code>a_win_col_idx</code>, <code>a_win_blocks</code>, <code>x</code>, <code>y</code>, <code>n</code></p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b>按 window 分组的 block/bitmap 矩阵，完整 <code>x</code> 或 <code>p</code></div>
+                  <div class="io"><b>输出</b>最终写入 HBM 的 <code>y = A*x</code> 或 <code>ap = A*p</code></div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow"></div>
+
+            <div class="diagram-node compute">
+              <div class="diagram-title">Row tile 初始化</div>
+              <div class="diagram-body">
+                <p>
+                  当前版本不再让每个 window 读回并改写 HBM 上的 <code>y/ap</code> 部分和。
+                  kernel 先选一个 row tile，把 <code>y_tile</code> 在 BRAM 中清零，
+                  后续所有 x-window 的贡献都累加到这个片上 tile。
+                </p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b><code>row_tile_begin_br</code>, <code>tile_block_rows</code></div>
+                  <div class="io"><b>输出</b>清零后的片上 <code>y_tile</code></div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow"></div>
+
+            <div class="diagram-node memory">
+              <div class="diagram-title">预取第 0 个 x 窗口</div>
+              <div class="diagram-body">
+                <p><code>load_x_window(x, x_window_ping, 0, n)</code> 把 <code>x[0:512)</code> 搬进 ping BRAM。</p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b>HBM 上完整 <code>x</code></div>
+                  <div class="io"><b>输出</b>片上 <code>x_window_ping</code></div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow"></div>
+
+            <div class="diagram-node compute">
+              <div class="diagram-title">窗口循环：累加当前 row tile，同时预取下一窗口</div>
+              <div class="diagram-body">
+                <p>
+                  对第 <code>window_id</code> 个窗口，kernel 直接读取 host 已经整理好的
+                  <code>A[row_tile, W_window_id]</code> block 子流。
+                  当前窗口贡献写入 <code>y_tile</code>，下一窗口的 <code>x</code> 同时被加载到另一个 buffer。
+                </p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b>当前 <code>x_window</code>，当前 tile/window 的 A block 子流，片上 <code>y_tile</code></div>
+                  <div class="io"><b>输出</b>更新后的 <code>y_tile</code>，下一窗口 buffer</div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow"></div>
+
+            <div class="diagram-node warn">
+              <div class="diagram-title">处理最后一个窗口</div>
+              <div class="diagram-body">
+                <p>最后一个窗口没有下一窗口可预取，所以只执行 <code>accumulate_window_tile</code>。</p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b>最后一次已加载的 ping 或 pong buffer，当前 <code>y_tile</code></div>
+                  <div class="io"><b>输出</b>累完所有 x-window 的 <code>y_tile</code></div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow"></div>
+
+            <div class="diagram-node memory">
+              <div class="diagram-title">row tile 写回 HBM</div>
+              <div class="diagram-body">
+                <p><code>write_y_tile</code> 把片上 <code>y_tile</code> 写回 HBM 上的 <code>y</code> 或 <code>ap</code>。</p>
+                <div class="io-row">
+                  <div class="io"><b>输入</b>累加完成的 <code>y_tile</code></div>
+                  <div class="io"><b>输出</b>HBM 上对应行段的 <code>y = A*x</code> 或 <code>ap = A*p</code></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="inner-loop">
+          <h2>5. 单个 row tile/window 如何累加</h2>
+          <p>
+            <code>accumulate_window_tile</code> 处理的是一个列窗口对当前 row tile 的贡献：
+          </p>
+          <div class="formula">y_tile += A[row_tile, window_begin:window_end) * x_window</div>
+
+          <div class="split">
+            <div class="step">
+              <h3>每个 block row</h3>
+              <ol>
+                <li>用 <code>row_ptr_base = window_id * (num_block_rows + 1)</code> 找到当前 window 的 row pointer 区域。</li>
+                <li>只遍历当前 row tile 内的 block row：<code>br = row_tile_begin_br + local_br</code>。</li>
+                <li>读取 <code>a_win_row_ptr[row_ptr_base + br]</code> 到 <code>a_win_row_ptr[row_ptr_base + br + 1]</code>。</li>
+                <li>如果该 row/window 没有 block，则 <code>y_tile</code> 对应行保持已有部分和。</li>
+                <li>不再从 HBM 读回 <code>y</code>，所有 window 的部分和直接累在 BRAM 的 <code>y_tile</code> 中。</li>
+              </ol>
+            </div>
+            <div class="step">
+              <h3>每个非零 block</h3>
+              <ol>
+                <li>当前 row pointer 区间已经只包含这个 window 的 block。</li>
+                <li>顺序读取 <code>a_win_col_idx[bi]</code> 和 <code>a_win_blocks[bi]</code>。</li>
+                <li>按 mask 遍历 block 内非零位置并乘加。</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="code">zero_y_tile(y_tile)
+
+for each window:
+  load current x_window
+
+  for each local block row local_br in row_tile:
+    br = row_tile_begin_br + local_br
+    row_ptr_base = window_id * (num_block_rows + 1)
+    block_start = a_win_row_ptr[row_ptr_base + br]
+    block_end   = a_win_row_ptr[row_ptr_base + br + 1]
+
+    for bi in block_start : block_end:
+      bc = a_win_col_idx[bi]
+      block = a_win_blocks[bi]
+
+      for pos in 0 : 16:
+        if mask bit(pos) == 1:
+          local_r = pos / 4
+          local_c = pos % 4
+          global_c = 4 * bc + local_c
+          tile_row = local_br * 4 + local_r
+          y_tile[tile_row] += block_value * x_window[global_c - window_begin]
+
+write_y_tile(y, y_tile)</div>
+
+          <div class="note">
+            <strong>注意：</strong>
+            当前 A 已经按 x-window 分组，所以 kernel 不再对 block row 做二分查找或逐项过滤。
+            row tile 把多行 <code>y/ap</code> 部分和跨多个 window 留在 BRAM，
+            每个输出元素在一次 SpMV 中只需要最后写回 HBM 一次。
+          </div>
+        </section>
+
+        <section id="pingpong">
+          <h2>6. ping-pong 缓冲与 DATAFLOW</h2>
+          <p>
+            当前有两个片上窗口缓存：
+          </p>
+          <div class="code">data_t x_window_ping[kSpmvWindowSize];
+data_t x_window_pong[kSpmvWindowSize];
+
+#pragma HLS BIND_STORAGE variable = x_window_ping type = ram_2p impl = bram
+#pragma HLS BIND_STORAGE variable = x_window_pong type = ram_2p impl = bram</div>
+
+          <div class="two-col">
+            <div class="info-box compute">
+              <h3>偶数窗口</h3>
+              <p>使用 <code>ping</code> 作为当前计算输入，同时把下一窗口加载到 <code>pong</code>。</p>
+            </div>
+            <div class="info-box compute">
+              <h3>奇数窗口</h3>
+              <p>使用 <code>pong</code> 作为当前计算输入，同时把下一窗口加载到 <code>ping</code>。</p>
+            </div>
+          </div>
+
+          <div class="formula">compute window t from buffer A
+load    window t+1 into buffer B</div>
+
+          <p>
+            两个 helper 函数内部使用 <code>#pragma HLS DATAFLOW</code>，让 HLS 尝试把这两个任务重叠。
+            这个 DATAFLOW 只覆盖 SpMV 的窗口级 load/compute，不代表整个 PCG 主循环都能 dataflow。
+          </p>
+
+          <div class="note">
+            <strong>为什么写成两个 helper：</strong>
+            Vitis HLS 2022.2 的 DATAFLOW 区域不适合直接放条件执行。
+            所以代码把 ping 和 pong 分成两个固定任务图：一个固定读 ping 写 pong，另一个固定读 pong 写 ping。
+          </div>
+        </section>
+
+        <section id="pcg">
+          <h2>7. 它在 PCG 里的位置</h2>
+          <p>
+            当前 <code>pcg_control_kernel</code> 是单顶层 kernel。SpMV 被调用两类场景：
+          </p>
+
+          <div class="two-col">
+            <div class="info-box blue">
+              <h3>初始化阶段</h3>
+              <div class="formula">ap = A * x0
+r0 = b - ap</div>
+              <p><code>ap</code> BO 临时承载 <code>ax0</code>。</p>
+            </div>
+            <div class="info-box blue">
+              <h3>PCG 主循环</h3>
+              <div class="formula">ap = A * p
+pAp = p^T ap</div>
+              <p>这里是每轮迭代计算量最大的部分。</p>
+            </div>
+          </div>
+
+          <p>
+            PCG 的 <code>alpha</code>、<code>beta</code>、收敛判断和 breakdown 判断仍然有严格标量依赖。
+            因此当前只在 SpMV 内部做窗口级 dataflow，而不是把完整 PCG 迭代做成无停顿流水线。
+          </p>
+        </section>
+
+        <section id="limits">
+          <h2>8. 当前局限和下一步</h2>
+          <div class="two-col">
+            <div class="info-box compute">
+              <h3>当前已经解决的点</h3>
+              <ul>
+                <li>不再要求完整 <code>x</code> 放进片上数组。</li>
+                <li>窗口 BRAM 容量固定，不随 <code>n</code> 线性增长。</li>
+                <li>block 内访问 <code>x_window</code> 命中片上 BRAM。</li>
+                <li>A 的 block payload 已按 x-window 分组，kernel 只读当前 window 的 block 子流。</li>
+                <li><code>y/ap</code> 的部分和已经按 row tile 暂存在片上 BRAM，跨所有 x-window 累完后再写回。</li>
+                <li>数值结果仍等价于完整 <code>A*x</code>。</li>
+              </ul>
+            </div>
+            <div class="info-box warning">
+              <h3>当前还没有解决的点</h3>
+              <ul>
+                <li>每个 row tile 都会重新加载所有 x-window；row tile 越小，x-window 重载次数越多。</li>
+                <li><code>y_tile</code> 是 BRAM read-modify-write 归约目标，同一行多 block 累加会形成真实依赖。</li>
+                <li>矩阵还没有进一步拆成多 compute worker 并行处理。</li>
+                <li>当前是 windowed A block stream 版本，不是最终吞吐最优版本。</li>
+              </ul>
+            </div>
+          </div>
+
+          <p>
+            当前已经生成了按窗口分组的 metadata：
+          </p>
+          <div class="code">window_ptr[window]
+window_block_row[entry]
+window_block_col[entry]
+window_blocks[entry]</div>
+
+          <p>
+            在代码里它落成 <code>a_win_row_ptr / a_win_col_idx / a_win_blocks</code>。
+            kernel 现在再叠加 row tile，实际计算顺序就是
+            <code>row tile x column window</code>：固定一批输出行，把所有列窗口贡献累完再写回。
+          </p>
+        </section>
+
+        <section id="mapping">
+          <h2>9. 代码对应表</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>原理概念</th>
+                  <th>代码位置</th>
+                  <th>作用</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>block 大小</td>
+                  <td><code>include/cg_common.hpp</code> / <code>kSpmvBlockSize = 4</code></td>
+                  <td>定义 4x4 分块，host 和 kernel 必须一致。</td>
+                </tr>
+                <tr>
+                  <td>窗口大小</td>
+                  <td><code>include/cg_common.hpp</code> / <code>kSpmvWindowSize = 512</code></td>
+                  <td>定义每次缓存到片上的 <code>x</code> 元素数量。</td>
+                </tr>
+                <tr>
+                  <td>row tile 大小</td>
+                  <td><code>include/cg_common.hpp</code> / <code>kSpmvRowTileBlockRows = 512</code></td>
+                  <td>定义每次在片上保留多少个 4-row block row 的 <code>y/ap</code> 部分和。</td>
+                </tr>
+                <tr>
+                  <td>CSR 转 windowed block/bitmap</td>
+                  <td><code>host/xrt_host.cpp</code> / <code>build_windowed_blocked_spmv_matrix</code></td>
+                  <td>host 侧把原始 CSR 转成 <code>a_win_row_ptr</code>、<code>a_win_col_idx</code>、<code>a_win_blocks</code>。</td>
+                </tr>
+                <tr>
+                  <td>加载 x 窗口</td>
+                  <td><code>pcg_control_kernel.cpp</code> / <code>load_x_window</code></td>
+                  <td>从 HBM 上的完整 <code>x</code> 或 <code>p</code> 读取一段到片上 BRAM。</td>
+                </tr>
+                <tr>
+                  <td>tile/window 贡献累加</td>
+                  <td><code>pcg_control_kernel.cpp</code> / <code>accumulate_window_tile</code></td>
+                  <td>计算 <code>y_tile += A[row_tile, window] * x_window</code>。</td>
+                </tr>
+                <tr>
+                  <td>二维分块 SpMV</td>
+                  <td><code>pcg_control_kernel.cpp</code> / <code>spmv_blocked_windowed</code></td>
+                  <td>按 row tile 清零片上 <code>y_tile</code>，跨所有 x-window 累加，最后写回完整 <code>A*x</code>。</td>
+                </tr>
+                <tr>
+                  <td>ping-pong dataflow</td>
+                  <td><code>process_ping_tile_and_prefetch_pong</code> / <code>process_pong_tile_and_prefetch_ping</code></td>
+                  <td>尝试重叠当前窗口计算和下一窗口预取。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

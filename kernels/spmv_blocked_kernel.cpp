@@ -4,17 +4,17 @@ namespace {
 
 using data_t = project_xplus::cgsolver::data_t;
 using index_t = project_xplus::cgsolver::index_t;
+// 和 host / pcg_control_kernel 共用同一个 block 结构，避免两边结构体
+// 字段顺序或大小不一致。
+using Block = project_xplus::cgsolver::SpmvBlock;
 constexpr int kMaxN = project_xplus::cgsolver::kMaxN;
 constexpr int kRowBlockSize = 32;
 
-constexpr int BLOCK_SIZE = 4;
+// 独立 spmv_blocked_kernel 也使用 4x4 block/bitmap 格式。
+// 当前默认 PCG xclbin 不链接这个独立 kernel；真正默认路径在
+// pcg_control_kernel.cpp 里调用 spmv_blocked_local(...)。
+constexpr int BLOCK_SIZE = project_xplus::cgsolver::kSpmvBlockSize;
 constexpr unsigned char FORMAT_BITMAP = 1;
-
-// 确保和 Host 端结构一致
-struct Block {
-    data_t values[16];
-    unsigned char indices[16];
-};
 
 inline void spmv_blocked_bitmap_body(
     const index_t* b_row_ptr,

@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project-XPlus Jacobi-PCG XRT Flowchart</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --ink: #1c2430;
+      --muted: #5f6b7a;
+      --line: #6b7788;
+      --panel: #ffffff;
+      --border: #cbd3df;
+      --input: #edf6ff;
+      --input-border: #9dc7ef;
+      --fn: #ffffff;
+      --output: #f0fbf4;
+      --output-border: #98d5a7;
+      --host: #23395d;
+      --kernel: #275347;
+      --exit: #9b2f3f;
+      --warn: #7b5b13;
+      --radius: 8px;
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin-bottom: 14px;
+    }
+
+    .subtitle {
+      margin-top: 8px;
+      color: var(--muted);
+      max-width: 900px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 24px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .swatch {
+      width: 18px;
+      height: 12px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+    }
+
+    .swatch.input {
+      background: var(--input);
+      border-color: var(--input-border);
+    }
+
+    .swatch.output {
+      background: var(--output);
+      border-color: var(--output-border);
+    }
+
+    .flow-section {
+      margin-top: 24px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+      gap: 0;
+    }
+
+    .node {
+      width: min(720px, 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgb(22 34 51 / 7%);
+    }
+
+    .node-title {
+      padding: 10px 14px;
+      font-weight: 760;
+      color: #fff;
+      background: var(--host);
+    }
+
+    .node.kernel .node-title {
+      background: var(--kernel);
+    }
+
+    .node.exit .node-title {
+      background: var(--exit);
+    }
+
+    .node.warn .node-title {
+      background: var(--warn);
+    }
+
+    .node-section {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .node-section:first-of-type {
+      border-top: 0;
+    }
+
+    .node-label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .node-input {
+      background: var(--input);
+      border-top-color: var(--input-border);
+    }
+
+    .node-output {
+      background: var(--output);
+      border-top-color: var(--output-border);
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.94em;
+    }
+
+    .arrow {
+      width: 2px;
+      height: 38px;
+      background: var(--line);
+      position: relative;
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -1px;
+      width: 12px;
+      height: 12px;
+      border-right: 2px solid var(--line);
+      border-bottom: 2px solid var(--line);
+      transform: translateX(-50%) rotate(45deg);
+      background: transparent;
+    }
+
+    .kernel-frame {
+      width: min(980px, 100%);
+      border: 1px solid #b8c9c2;
+      border-radius: var(--radius);
+      background: #fbfdfc;
+      padding: 18px;
+      position: relative;
+    }
+
+    .kernel-frame h2 {
+      color: var(--kernel);
+    }
+
+    .loop-area {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 720px);
+      justify-content: center;
+      gap: 0;
+      padding: 6px 0;
+    }
+
+    .loop-area::before {
+      content: "";
+      position: absolute;
+      left: calc(50% - 410px);
+      top: 582px;
+      bottom: 128px;
+      width: 2px;
+      background: var(--line);
+    }
+
+    .loop-area::after {
+      content: "";
+      position: absolute;
+      left: calc(50% - 410px);
+      top: 128px;
+      width: 86px;
+      height: 456px;
+      border-left: 2px solid var(--line);
+      border-top: 2px solid var(--line);
+      border-bottom: 2px solid var(--line);
+      border-radius: 8px 0 0 8px;
+      pointer-events: none;
+    }
+
+    .return-tip {
+      position: absolute;
+      left: calc(50% - 332px);
+      top: 121px;
+      width: 12px;
+      height: 12px;
+      border-right: 2px solid var(--line);
+      border-bottom: 2px solid var(--line);
+      transform: rotate(-45deg);
+    }
+
+    .split {
+      width: min(980px, 100%);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 240px;
+      align-items: center;
+      gap: 20px;
+      margin: 0 auto;
+    }
+
+    .split .node {
+      width: 100%;
+    }
+
+    .branch-line {
+      height: 2px;
+      background: var(--line);
+      position: relative;
+    }
+
+    .branch-line::after {
+      content: "";
+      position: absolute;
+      right: -1px;
+      top: 50%;
+      width: 11px;
+      height: 11px;
+      border-right: 2px solid var(--line);
+      border-bottom: 2px solid var(--line);
+      transform: translateY(-50%) rotate(-45deg);
+    }
+
+    .branch-pair {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 20px 240px;
+      align-items: center;
+      gap: 0;
+      width: min(980px, 100%);
+      margin: 0 auto;
+    }
+
+    .branch-pair > .node:first-child {
+      width: min(720px, 100%);
+      justify-self: center;
+    }
+
+    .branch-pair > .node:last-child {
+      width: 100%;
+    }
+
+    .compact .node-section {
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .footer-note {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        width: min(100vw - 20px, 760px);
+      }
+
+      .kernel-frame {
+        padding: 12px;
+      }
+
+      .split,
+      .branch-pair {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .branch-line {
+        width: 2px;
+        height: 30px;
+        margin: 0 auto;
+      }
+
+      .branch-line::after {
+        right: auto;
+        left: 50%;
+        top: auto;
+        bottom: -1px;
+        transform: translateX(-50%) rotate(45deg);
+      }
+
+      .loop-area::before,
+      .loop-area::after,
+      .return-tip {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Project-XPlus Jacobi-PCG XRT 流程图</h1>
+      <p class="subtitle">
+        当前默认实现是单顶层 <code>pcg_control_kernel</code>：host 只启动一次 kernel，PCG 主循环、<code>alpha</code> / <code>beta</code>、收敛和 breakdown 判断都在 FPGA 上完成。
+      </p>
+      <div class="legend" aria-label="图例">
+        <span><i class="swatch input"></i>输入块</span>
+        <span><i class="swatch"></i>功能描述块</span>
+        <span><i class="swatch output"></i>输出块</span>
+      </div>
+    </header>
+
+    <section class="flow-section">
+      <h2>Host 侧流程</h2>
+      <div class="flow">
+        <article class="node">
+          <div class="node-title">Host: 读取数据、构造预条件器和分块矩阵</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>dataset_dir</code>, <code>tau</code>, <code>max_iters</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            加载 CSR 矩阵、右端向量和初始解，CPU 侧构造 <code>m_inv = 1 / diag(A)</code>，同时把 CSR 转成按 x-window 分组的 4x4 block/bitmap SpMV 格式。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>a_win_row_ptr</code>, <code>a_win_col_idx</code>, <code>a_win_blocks</code>, <code>b</code>, <code>x0</code>, <code>m_inv</code>, <code>effective_max_iters</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node">
+          <div class="node-title">Host: 创建 XRT 对象和 BO</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>xclbin</code>, <code>a_win_row_ptr</code>, <code>a_win_col_idx</code>, <code>a_win_blocks</code>, <code>b</code>, <code>x0</code>, <code>m_inv</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            下载 xclbin，创建 <code>pcg_control_kernel</code>，分配并同步输入 BO。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>a_win_row_ptr_bo</code>, <code>a_win_col_idx_bo</code>, <code>a_win_blocks_bo</code>, <code>b_bo</code>, <code>m_inv_bo</code>, <code>x_bo</code>, <code>r_bo</code>, <code>z_bo</code>, <code>p_bo</code>, <code>ap_bo</code>, <code>metrics_bo</code>, <code>status_bo</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node">
+          <div class="node-title">Host: 启动一次 pcg_control_kernel</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            所有 BO，<code>tau</code>, <code>effective_max_iters</code>, <code>n</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            设置 kernel 参数，调用 <code>pcg_run.start()</code> 和 <code>pcg_run.wait()</code>。host 在等待期间不参与每轮 PCG 控制。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            FPGA 写回后的 <code>x_bo</code>, <code>metrics_bo</code>, <code>status_bo</code>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="arrow" aria-hidden="true"></div>
+
+    <section class="flow-section kernel-frame">
+      <h2>FPGA 内部流程: pcg_control_kernel</h2>
+      <div class="loop-area">
+        <span class="return-tip" aria-hidden="true"></span>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: HBM 常驻向量状态</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>x_bo</code>, <code>r_bo</code>, <code>z_bo</code>, <code>p_bo</code>, <code>ap_bo</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            <code>x/r/z/p/ap</code> 都常驻 HBM。kernel 不再把整条向量缓存进 BRAM，只在每个循环阶段原地读写这些 BO。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            HBM 上的 PCG 向量状态
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: 初始化 SpMV</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>a_win_row_ptr</code>, <code>a_win_col_idx</code>, <code>a_win_blocks</code>, <code>x_bo</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            用按 x-window 分组的 4x4 block/bitmap SpMV 计算 <code>ax0 = A * x0</code>。这里的 <code>ap_bo</code> 临时承载 <code>ax0</code>。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>ap_bo = ax0</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: 初始化 r/z/p/metrics</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>b</code>, <code>ap_bo=ax0</code>, <code>m_inv</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            计算 <code>r0=b-ax0</code>，<code>z0=M^-1*r0</code>，<code>p0=z0</code>，<code>rz0=r0^T z0</code>，<code>rr0=r0^T r0</code>。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>r_bo</code>, <code>z_bo</code>, <code>p_bo</code>, <code>rz</code>, <code>rr</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <div class="branch-pair">
+          <article class="node warn">
+            <div class="node-title">循环入口判断</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              <code>rr</code>, <code>tau</code>, <code>iteration</code>, <code>max_iters</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              判断是否已收敛或是否已经达到迭代上限。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              继续迭代，或写 <code>status=converged/max_iter</code>
+            </div>
+          </article>
+          <div class="branch-line" aria-hidden="true"></div>
+          <article class="node exit compact">
+            <div class="node-title">出口: converged / max_iter</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              <code>rr <= tau</code> 或 <code>iteration == max_iters</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              设置最终状态。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              <code>status</code>, <code>iterations</code>
+            </div>
+          </article>
+        </div>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: SpMV 和 dot</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>a_win_row_ptr</code>, <code>a_win_col_idx</code>, <code>a_win_blocks</code>, <code>p_bo</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            用按 x-window 分组的 4x4 block/bitmap SpMV 计算 <code>ap = A*p</code>，再计算 <code>pAp = p^T ap</code>。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>ap_bo</code>, <code>p_ap</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <div class="branch-pair">
+          <article class="node warn">
+            <div class="node-title">Breakdown 判断</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              <code>p_ap</code>, <code>rz</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              检查 <code>pAp</code> 或 <code>rz</code> 是否为 NaN 或接近 0。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              继续计算 <code>alpha</code>，或写 <code>status=breakdown</code>
+            </div>
+          </article>
+          <div class="branch-line" aria-hidden="true"></div>
+          <article class="node exit compact">
+            <div class="node-title">出口: breakdown</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              非法 <code>p_ap</code> 或 <code>rz</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              停止迭代。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              <code>status=2</code>
+            </div>
+          </article>
+        </div>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: alpha 更新 x/r/z</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>rz</code>, <code>p_ap</code>, <code>x_bo</code>, <code>r_bo</code>, <code>p_bo</code>, <code>ap_bo</code>, <code>m_inv</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            计算 <code>alpha=rz/pAp</code>，更新 <code>x=x+alpha*p</code>，<code>r=r-alpha*ap</code>，<code>z=M^-1*r</code>，并归约新 <code>rz/rr</code>。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>x_bo</code>, <code>r_bo</code>, <code>z_bo</code>, <code>rz_new</code>, <code>rr_new</code>, <code>alpha</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <div class="branch-pair">
+          <article class="node warn">
+            <div class="node-title">收敛及时出口判断</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              <code>rr_new</code>, <code>tau</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              如果 <code>rr_new <= tau</code>，kernel 立即退出，不再计算本轮 <code>beta/update_p</code>。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              继续更新方向，或写 <code>status=converged</code>
+            </div>
+          </article>
+          <div class="branch-line" aria-hidden="true"></div>
+          <article class="node exit compact">
+            <div class="node-title">出口: converged</div>
+            <div class="node-section node-input">
+              <span class="node-label">输入</span>
+              <code>rr_new <= tau</code>
+            </div>
+            <div class="node-section">
+              <span class="node-label">功能描述</span>
+              停止迭代。
+            </div>
+            <div class="node-section node-output">
+              <span class="node-label">输出</span>
+              <code>status=0</code>, <code>iterations</code>
+            </div>
+          </article>
+        </div>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: beta 更新 p</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>rz_new</code>, <code>rz_old</code>, <code>z_bo</code>, <code>p_bo</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            计算 <code>beta=rz_new/rz_old</code>，更新 <code>p=z+beta*p</code>。随后沿左侧回环进入下一轮循环入口判断。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>p_bo</code>, <code>rz=rz_new</code>, <code>rr=rr_new</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node kernel">
+          <div class="node-title">Kernel: 写回标量状态</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>rz</code>, <code>rr</code>, <code>p_ap</code>, <code>alpha</code>, <code>status</code>, <code>iterations</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            最终解已经在 <code>x_bo</code> 原地更新，这里只写回摘要标量和状态。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>x_bo</code>, <code>metrics_bo=[rz, rr, pAp, alpha]</code>, <code>status_bo=[status, iterations]</code>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="arrow" aria-hidden="true"></div>
+
+    <section class="flow-section">
+      <h2>Host 回读与校验</h2>
+      <div class="flow">
+        <article class="node">
+          <div class="node-title">Host: 回读结果</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            FPGA 写回后的 <code>x_bo</code>, <code>metrics_bo</code>, <code>status_bo</code>
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            同步 device 到 host，解析 <code>status_code</code>、迭代次数和最终 <code>rr</code>。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>x_final</code>, <code>rr</code>, <code>status</code>, <code>iterations</code>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true"></div>
+
+        <article class="node">
+          <div class="node-title">Host: CPU 残差与 golden 校验</div>
+          <div class="node-section node-input">
+            <span class="node-label">输入</span>
+            <code>x_final</code>, CSR 矩阵, <code>b</code>, CPU golden
+          </div>
+          <div class="node-section">
+            <span class="node-label">功能描述</span>
+            CPU 侧重新计算残差，比较 FPGA 解和 golden 解，并输出 txt/json/html 报告。
+          </div>
+          <div class="node-section node-output">
+            <span class="node-label">输出</span>
+            <code>residual_abs</code>, <code>residual_rel</code>, <code>max_abs_diff</code>, 报告文件
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <p class="footer-note">
+      旧的 <code>spmv_csr_kernel</code>、<code>init_pcg_kernel</code>、<code>dot_kernel</code>、<code>update_xrz_kernel</code>、<code>update_p_kernel</code> 仍保留为拆分实现参考；默认 xclbin 只链接 <code>pcg_control_kernel</code>。
+    </p>
+  </main>
+</body>
+</html>

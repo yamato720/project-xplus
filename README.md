@@ -1,12 +1,12 @@
 # Project-XPlus
 
-`Project-XPlus` 是一个面向 Jacobi-PCG 多 kernel HLS/XRT 的独立子项目。
+`Project-XPlus` 是一个面向 Jacobi-PCG HLS/XRT 的独立子项目。当前 XRT 默认路径已经切到单顶层 `pcg_control_kernel`，PCG 主循环控制在 FPGA kernel 内完成。
 
 当前目标：
 
 1. 以 `Project-XPlus` 为新的工程根组织 Jacobi-PCG solver
 2. 让 `Project-XPlus` 自己拥有数据集生成、加载和 golden 参考
-3. 同时维护本地多-kernel 基线和 XRT/Vitis 多 kernel 子工程入口
+3. 同时维护本地多-kernel 基线和 XRT/Vitis 单 kernel 控制流入口
 
 ## 目录
 
@@ -47,6 +47,7 @@ Project-XPlus/
     multi_kernel_solver.hpp
     xrt_host.cpp
   kernels/
+    pcg_control_kernel.cpp
     cg_kernels.cpp
     spmv_csr_kernel.cpp
     init_pcg_kernel.cpp
@@ -69,7 +70,7 @@ Project-XPlus/
 2. 设计文档落地
 3. 本地可运行的 5-kernel Jacobi-PCG 基线
 4. `Project-XPlus` 自有数据集生成、加载和 golden 对照
-5. XRT/Vitis 子工程的 host、kernel、connectivity 和运行脚本骨架
+5. XRT/Vitis 子工程的单顶层 `pcg_control_kernel`、host、connectivity 和运行脚本骨架
 6. `sw_emu` / `hw` 报告输出链，包括 txt/json/interactive html/static html
 7. 关键 host 与 kernel 顶层中文注释，便于顺着看硬件执行流程
 8. `DLC/Cuper` 独立 HLS 子项目骨架，便于作为迁移分支单独演进
@@ -126,13 +127,48 @@ make download-suitesparse-data DATASETS=thermal2_n2048
 
 数据来源、尺寸和 checksum 记录在 [data/suitesparse/SOURCES.md](/home/pyx/ProjectFS/Project-X/Project-XPlus/data/suitesparse/SOURCES.md)。
 
-交互式选择数据集和运行方式：
+交互式选择数据集和构建/运行方式：
 
 ```bash
 make launcher
 ```
 
+launcher 里会先选择实现版本，然后进入该版本自己的构建/运行菜单：
+
+1. 多 kernel 普通版：本地 CSR SpMV + init/dot/update 拆分流程
+2. 多 kernel 分块版：本地 blocked SpMV + init/dot/update 拆分流程
+3. 当前单 control-kernel 版：XRT `pcg_control_kernel`，PCG 控制和 SpMV 都在一个 kernel 内
+4. Cuper-PCG 版：Project-XPlus 内的新 PCG 版本，host 控制 PCG，SpMV 阶段使用 Cuper slice/window 风格的 FP32 软件适配
+5. Cuper-PCG TAPA 版：Project-XPlus 内的新 PCG 版本，host 控制 PCG，SpMV 阶段直接调用 `DLC/Cuper` 的 TAPA kernel
+6. Cuper-PCG control-kernel 版：host launch 一次，PCG 控制和 Cuper column-batch/row-tile SpMV 都在一个 kernel 内
+
 launcher 首页也提供 `d. 数据集下载/生成`，可以直接按大小从完整 `thermal2` 生成 `thermal2_n<N>`。
+`r. 硬件报告/分析` 只用于已有硬件 bitstream/Vivado run 之后导出额外报告，不再放 bitstream 或 sw_emu 构建入口。
+
+直接运行 Cuper-PCG 软件版：
+
+```bash
+make run-cuper-pcg DATASET=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+直接运行 Cuper-PCG TAPA 软件仿真版：
+
+```bash
+make run-cuper-pcg-tapa DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 TAU=1e6
+```
+
+直接运行 Cuper-PCG control-kernel 软件仿真版：
+
+```bash
+make build-cuper-control-sw
+make run-cuper-control-xrt TARGET=sw_emu DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 TAU=1e-10
+```
+
+硬件 bitstream 后台生成：
+
+```bash
+make cuper-control-hw-tmux
+```
 
 构建 XRT host：
 
@@ -325,30 +361,22 @@ HW_<basename>.log
 
 ## 执行流程
 
+算法数学原理和 host/kernel 对应关系详见：
+
+- [docs/design/jacobi_pcg_algorithm_flow_zh.md](docs/design/jacobi_pcg_algorithm_flow_zh.md)
+- [docs/design/jacobi_pcg_xrt_flowchart.html](docs/design/jacobi_pcg_xrt_flowchart.html)
+
 当前硬件执行流程是：
 
 1. host 读取 CSR 数据集并构造 `m_inv`
 2. host 通过 XRT 下载 `xclbin`
-3. host 分配 BO，并把 CSR / 向量同步到 device
-4. host 依次启动 5 个 kernel：
-   `spmv_csr_kernel`
-   `init_pcg_kernel`
-   `dot_kernel`
-   `update_xrz_kernel`
-   `update_p_kernel`
-5. host 每轮只回读必要标量，计算 `alpha / beta / 收敛判断`
-6. 全部迭代结束后再回读最终 `x`
+3. host 把 CSR 矩阵转换成 4x4 block/bitmap SpMV 格式，并把 block 矩阵 / 向量同步到 device
+4. host 启动一次 `pcg_control_kernel`
+5. kernel 在 FPGA 内完成初始化 SpMV、PCG 主循环、`alpha / beta`、收敛判断和 breakdown 判断
+6. 全部迭代结束后 host 回读最终 `x`、`metrics` 和 `status`
 7. host 用 CPU golden 和残差重新校验，并生成 txt/json/html 报告
 
-正式 HLS 多 kernel 方案以：
-
-- `spmv_csr_kernel`
-- `init_pcg_kernel`
-- `dot_kernel`
-- `update_xrz_kernel`
-- `update_p_kernel`
-
-为正式计算阶段。
+`spmv_csr_kernel`、`init_pcg_kernel`、`dot_kernel`、`update_xrz_kernel`、`update_p_kernel` 仍保留在源码中，作为本地多-kernel 基线和拆分实现参考；默认 xclbin 不再链接这 5 个独立 kernel。
 生成默认 `n512` 数据集：
 
 ```bash

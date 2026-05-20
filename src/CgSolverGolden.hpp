@@ -4,6 +4,7 @@
 #include "CsrDataset.hpp"
 #include "../include/cg_common.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -11,9 +12,19 @@
 
 namespace project_xplus::cgsolver {
 
+struct GoldenIterationTrace {
+    int iteration = 0;
+    double alpha = 0.0;
+    double beta = 0.0;
+    double rz = 0.0;
+    double rr = 0.0;
+    double residual = 0.0;
+};
+
 struct GoldenResult {
     std::vector<double> solution;
     std::vector<double> jacobi_diag;
+    std::vector<GoldenIterationTrace> iteration_trace;
     int iterations = 0;
     double final_rr = 0.0;
     bool converged = false;
@@ -80,18 +91,32 @@ inline GoldenResult run_jacobi_pcg(const CsrDataset& dataset, const SolverConfig
         apply_jacobi_inverse(jacobi_diag, r, z);
 
         const double rz_new = dot(r, z);
+        const double rr_new = dot(r, r);
         const double beta = rz_new / rz;
+
+        result.iteration_trace.push_back(GoldenIterationTrace{
+            iteration,
+            alpha,
+            beta,
+            rz_new,
+            rr_new,
+            std::sqrt(std::max(rr_new, 0.0)),
+        });
+
+        rz = rz_new;
+        rr = rr_new;
+
+        result.iterations = iteration + 1;
+        result.final_rr = rr;
+
+        if (rr <= config.tau) {
+            break;
+        }
 
         for (int index = 0; index < dataset.n(); ++index) {
             p[static_cast<std::size_t>(index)] =
                 z[static_cast<std::size_t>(index)] + beta * p[static_cast<std::size_t>(index)];
         }
-
-        rz = rz_new;
-        rr = dot(r, r);
-
-        result.iterations = iteration + 1;
-        result.final_rr = rr;
     }
 
     result.converged = result.final_rr <= config.tau;

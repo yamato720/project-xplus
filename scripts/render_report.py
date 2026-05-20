@@ -62,8 +62,18 @@ def render_timing_bars(timing: dict[str, float]) -> str:
 
 
 def render_kernel_timing_bars(kernel_timing: dict[str, float]) -> str:
+    if not kernel_timing.get("split_timing_available", False):
+        return (
+            "<div class='pager-empty'>"
+            "当前报告来自单 pcg_control_kernel 运行，host 只计到整个 kernel 总时间。"
+            "SpMV / dot / update_xrz / update_p 已融合在同一个 kernel 内，"
+            "没有独立 XRT run 计时。"
+            "</div>"
+        )
+
     total = max(
-        kernel_timing.get("spmv_total", 0.0)
+        kernel_timing.get("pcg_control_total", 0.0)
+        + kernel_timing.get("spmv_total", 0.0)
         + kernel_timing.get("init_total", 0.0)
         + kernel_timing.get("dot_total", 0.0)
         + kernel_timing.get("update_xrz_total", 0.0)
@@ -71,7 +81,7 @@ def render_kernel_timing_bars(kernel_timing: dict[str, float]) -> str:
         1e-12,
     )
     bars = []
-    for key in ["spmv_total", "init_total", "dot_total", "update_xrz_total", "update_p_total"]:
+    for key in ["pcg_control_total", "spmv_total", "init_total", "dot_total", "update_xrz_total", "update_p_total"]:
         value = kernel_timing.get(key, 0.0)
         width = max(1.0, value / total * 100.0) if value > 0.0 else 0.0
         bars.append(
@@ -86,12 +96,60 @@ def render_kernel_timing_bars(kernel_timing: dict[str, float]) -> str:
     return "\n".join(bars)
 
 
+def normalize_kernel_timing(kernel_timing: dict[str, float]) -> dict[str, float]:
+    for key in [
+        "pcg_control_total",
+        "pcg_control_avg",
+        "pcg_control_calls",
+        "spmv_total",
+        "spmv_avg",
+        "spmv_calls",
+        "init_total",
+        "init_avg",
+        "init_calls",
+        "dot_total",
+        "dot_avg",
+        "dot_calls",
+        "update_xrz_total",
+        "update_xrz_avg",
+        "update_xrz_calls",
+        "update_p_total",
+        "update_p_avg",
+        "update_p_calls",
+    ]:
+        kernel_timing.setdefault(key, 0.0)
+    kernel_timing.setdefault("split_timing_available", False)
+    kernel_timing.setdefault("timing_model", "single_control_kernel")
+    return kernel_timing
+
+
+def trace_note(data: dict, traces: list[dict]) -> str:
+    metadata = data.get("trace_metadata", {})
+    source = metadata.get("source", "none" if not traces else "unknown")
+    if source == "cpu_reference":
+        return (
+            "alpha / beta / residual progression from CPU reference. "
+            "The current single control-kernel hardware reports only final metrics."
+        )
+    if source == "hardware":
+        return "alpha / beta / residual progression collected from hardware trace buffer."
+    return "No per-iteration trace was collected for this run."
+
+
+def kernel_timing_note(kernel_timing: dict[str, float]) -> str:
+    if kernel_timing.get("split_timing_available", False):
+        return "Per-kernel categories from split XRT launches."
+    return "Single pcg_control_kernel run: only total kernel time is measured by host; internal stage timings are unavailable."
+
+
 def render_html_interactive(data: dict) -> str:
     result = data["result"]
     dataset = data["dataset"]
     host_timing = data["host_timing_ms"]
-    kernel_timing = data["kernel_timing_ms"]
+    kernel_timing = normalize_kernel_timing(data["kernel_timing_ms"])
     traces = data.get("iterations_trace", [])
+    iter_note = trace_note(data, traces)
+    kt_note = kernel_timing_note(kernel_timing)
     pass_label, pass_class = badge(result["pass"])
     pager_script = """
   <script>
@@ -455,8 +513,9 @@ def render_html_interactive(data: dict) -> str:
       <div class="col-12 col-xxl-7">
         <div class="report-card card"><div class="card-body">
           <div class="section-title">Kernel Breakdown</div>
-          <div class="section-note">Only kernel-internal categories, separated from host macro timing</div>
+          <div class="section-note">{kt_note}</div>
           <div class="kv-grid mb-3">
+            <div class="kv-row"><div class="kv-key">pcg_control avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['pcg_control_avg'])} / {kernel_timing['pcg_control_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">spmv avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['spmv_avg'])} / {kernel_timing['spmv_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">init avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['init_avg'])} / {kernel_timing['init_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">dot avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['dot_avg'])} / {kernel_timing['dot_calls']}</div></div>
@@ -474,7 +533,7 @@ def render_html_interactive(data: dict) -> str:
       <div class="col-12">
         <div class="report-card card"><div class="card-body">
           <div class="section-title">Iteration Trace</div>
-          <div class="section-note">alpha / beta / residual progression, 30 rows per page</div>
+          <div class="section-note">{iter_note}</div>
           <div class="pager-bar">
             <div class="pager-controls">
               <button type="button" class="pager-btn" id="iter-first">最前</button>
@@ -511,7 +570,7 @@ def render_html_interactive(data: dict) -> str:
               <tbody id="iter-table-body"></tbody>
             </table>
           </div>
-          <div class="pager-empty d-none" id="iter-empty">没有迭代数据。</div>
+          <div class="pager-empty d-none" id="iter-empty">没有迭代数据；当前单 control-kernel 若未启用 trace BO，只会回写最终 metrics/status。</div>
         </div></div>
       </div>
     </div>
@@ -526,8 +585,10 @@ def render_html_static(data: dict) -> str:
     result = data["result"]
     dataset = data["dataset"]
     host_timing = data["host_timing_ms"]
-    kernel_timing = data["kernel_timing_ms"]
+    kernel_timing = normalize_kernel_timing(data["kernel_timing_ms"])
     traces = data.get("iterations_trace", [])
+    iter_note = trace_note(data, traces)
+    kt_note = kernel_timing_note(kernel_timing)
     pass_label, pass_class = badge(result["pass"])
 
     return f"""<!DOCTYPE html>
@@ -729,8 +790,9 @@ def render_html_static(data: dict) -> str:
       <div class="col-12 col-xxl-7">
         <div class="report-card card"><div class="card-body">
           <div class="section-title">Kernel Breakdown</div>
-          <div class="section-note">Only kernel-internal categories, separated from host macro timing</div>
+          <div class="section-note">{kt_note}</div>
           <div class="kv-grid mb-3">
+            <div class="kv-row"><div class="kv-key">pcg_control avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['pcg_control_avg'])} / {kernel_timing['pcg_control_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">spmv avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['spmv_avg'])} / {kernel_timing['spmv_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">init avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['init_avg'])} / {kernel_timing['init_calls']}</div></div>
             <div class="kv-row"><div class="kv-key">dot avg / calls</div><div class="kv-value">{fmt_ms(kernel_timing['dot_avg'])} / {kernel_timing['dot_calls']}</div></div>
@@ -748,7 +810,7 @@ def render_html_static(data: dict) -> str:
       <div class="col-12">
         <div class="report-card card"><div class="card-body">
           <div class="section-title">Iteration Trace</div>
-          <div class="section-note">Static fully expanded table for VSCode preview compatibility</div>
+          <div class="section-note">{iter_note}</div>
           <div class="table-wrap">
             <table class="table table-sm align-middle">
               <thead>
