@@ -43,6 +43,10 @@ struct SparseSlice {
     SparseSlice() : sliceSize(0), numColSlices(0), numRowSlices(0), sliceColPtr(), sliceRowIdx(), sliceVal() {}
 };
 
+// SpElement 是 Cuper SpMV 的非零元格式。
+// host 侧会把 CSR/COO 非零元按 slice、PE、HBM channel 重排成
+// SpElement list；TAPA kernel 只消费这些矩阵元素和输入向量 X。
+// PCG 的 r/z/p/m_inv 等状态不在这个格式里。
 struct SpElement{
     INDEX_TYPE colIdx;
     INDEX_TYPE rowIdx;

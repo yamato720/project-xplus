@@ -604,7 +604,20 @@ void Destroy_float_v16(tapa::istream<float_v16> &Vector_X_Stream) {
     }
 }
 
-void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,     
+// TAPA Cuper 顶层 kernel：这里只实现 Cuper 风格 SpMV。
+//
+// 这个 kernel 的职责是：
+//   X + Matrix_data_0..15 -> Y_out
+// host 传入 Batch_num / Matrix_len / Row_num / Column_num / Iteration_num，
+// kernel 内部通过 TAPA task graph 完成向量加载、16 路矩阵读取、Core 乘加、
+// Accumulator、检查和写回。
+//
+// 注意：这里不是 PCG control-kernel。
+// 这个顶层没有 r/z/p/ap/m_inv/alpha/beta/status 等 PCG 状态参数，
+// 也不做 Jacobi-PCG 的收敛判断。Project-XPlus 的 Cuper-PCG TAPA 版
+// 是在 host 侧执行 PCG 主循环，每轮把当前 p/x 向量送进这个 Cuper
+// kernel 做一次 SpMV。
+void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
            tapa::mmap<float_v16> X,
            tapa::mmap<float_v16> Y_out,

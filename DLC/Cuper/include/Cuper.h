@@ -16,6 +16,10 @@
 //#define X_TABLE
 
 
+// Cuper TAPA SpMV 的硬件结构常量。
+// 这些常量描述 SpMV 的 slice/batch/HBM 并行度，不是 PCG 迭代参数。
+// Project-XPlus 的 Cuper-PCG TAPA 版会从 host 侧多次调用 Cuper，
+// 每次调用完成一次 y = A * x。
 constexpr INDEX_TYPE PE_NUM                 = 8;
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 16;
 constexpr INDEX_TYPE ROW_HBM_NUM            = 4;
@@ -27,6 +31,9 @@ constexpr INDEX_TYPE URAM_DEPTH             = (48 / HBM_CHANNEL_NUM) * 4096 / 2;
 constexpr INDEX_TYPE FIFO_DEPTH             = 2;
 constexpr INDEX_TYPE X_BRAM_DEPTH           = 4;
 constexpr INDEX_TYPE X_TABLE_DEPTH          = 200;
+// standalone Cuper benchmark 的默认重复次数。
+// 在 Project-XPlus 的 Cuper-PCG TAPA 路径中，PCG 迭代由 host 控制，
+// 调用 Cuper 时通常把 Iteration_num 传 1，避免和 PCG 迭代次数混淆。
 constexpr INDEX_TYPE ITERATION_NUM          = 2;
 constexpr INDEX_TYPE X_TABLE_ITERATION_NUM  = 1;
 constexpr double     THRESHOLD              = 1e-10;
@@ -46,6 +53,9 @@ using float_v16 = tapa::vec_t<VALUE_TYPE, 16>;
 
 //using row_v8    = tapa::vec_t<ap_uint<18>, 8>;
 
+// TAPA Cuper 顶层只做 SpMV：
+//   Matrix_data + X -> Y_out
+// 不接收/更新 PCG 的 r/z/p，也不计算 alpha/beta。
 void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
            tapa::mmap<float_v16> X,

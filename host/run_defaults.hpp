@@ -39,8 +39,11 @@ inline fs::path dataset_dir(const char* argv0) {
 
 inline std::string xrt_target() {
     const char* emulation = std::getenv("XCL_EMULATION_MODE");
-    if (emulation != nullptr && std::string(emulation) == "sw_emu") {
-        return "sw_emu";
+    if (emulation != nullptr) {
+        const std::string mode = emulation;
+        if (mode == "sw_emu" || mode == "hw_emu") {
+            return mode;
+        }
     }
     return "hw";
 }
@@ -50,7 +53,14 @@ inline fs::path xclbin_path(const char* argv0) {
 }
 
 inline std::string report_prefix() {
-    return xrt_target() == "sw_emu" ? "SW_thermal2_n1024" : "HW_thermal2_n1024";
+    const std::string target = xrt_target();
+    if (target == "sw_emu") {
+        return "SW_thermal2_n1024";
+    }
+    if (target == "hw_emu") {
+        return "HW_EMU_thermal2_n1024";
+    }
+    return "HW_thermal2_n1024";
 }
 
 inline fs::path report_json_path(const char* argv0) {

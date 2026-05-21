@@ -200,6 +200,10 @@ void cuper_pcg_control_kernel(const project_xplus::cgsolver::index_t* batch_ptr,
                               int batch_count) {
 // 单顶层 Cuper-PCG control kernel。
 //
+// 这是和 TAPA Cuper 版最容易混淆的一版：
+//   - TAPA Cuper 版的 kernel 名是 Cuper，只做 SpMV，PCG 在 host 侧。
+//   - 本文件的 kernel 名是 cuper_pcg_control_kernel，PCG 控制在 kernel 内。
+//
 // 和 pcg_control_kernel.cpp 的目标一致：
 //   host 只 launch 一次 kernel
 //   kernel 内部完成 init + PCG loop + 收敛/breakdown 判断

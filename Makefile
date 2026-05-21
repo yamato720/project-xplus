@@ -8,11 +8,14 @@ PYTHON ?= python3
 
 TARGET ?= sw_emu
 DEVICE ?= xilinx_u55c_gen3x16_xdma_3_202210_1
-XPLATFORM ?= /opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm
-XILINX_XRT ?= /opt/xilinx/xrt
+LOCAL_XILINX_DIR ?= $(abspath ../xilinx-local)
+XPLATFORM ?= $(if $(wildcard $(LOCAL_XILINX_DIR)/opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm),$(LOCAL_XILINX_DIR)/opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm,/opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm)
+XILINX_XRT ?= $(if $(wildcard $(LOCAL_XILINX_DIR)/opt/xilinx/xrt/include/experimental/xrt_bo.h),$(LOCAL_XILINX_DIR)/opt/xilinx/xrt,/opt/xilinx/xrt)
 VITIS_ROOT ?= $(strip $(shell \
 	if [ -n "$$XILINX_VITIS" ] && [ -x "$$XILINX_VITIS/bin/v++" ]; then \
 		printf '%s\n' "$$XILINX_VITIS"; \
+	elif [ -x "$$HOME/vivado/Vitis/2022.2/bin/v++" ]; then \
+		printf '%s\n' "$$HOME/vivado/Vitis/2022.2"; \
 	elif [ -x /tools/Xilinx2022/Vitis/2022.2/bin/v++ ]; then \
 		printf '%s\n' /tools/Xilinx2022/Vitis/2022.2; \
 	elif [ -x /tools/Xilinx/Vitis/2022.2/bin/v++ ]; then \
@@ -34,6 +37,8 @@ VITIS_SETTINGS ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/settings64.sh)
 VITIS_HLS_ROOT ?= $(strip $(shell \
 	if [ -n "$$XILINX_HLS" ] && [ -d "$$XILINX_HLS/include" ]; then \
 		printf '%s\n' "$$XILINX_HLS"; \
+	elif [ -d "$$HOME/vivado/Vitis_HLS/2022.2/include" ]; then \
+		printf '%s\n' "$$HOME/vivado/Vitis_HLS/2022.2"; \
 	elif [ -d /tools/Xilinx2022/Vitis_HLS/2022.2/include ]; then \
 		printf '%s\n' /tools/Xilinx2022/Vitis_HLS/2022.2; \
 	elif [ -d /tools/Xilinx/Vitis_HLS/2022.2/include ]; then \
@@ -167,7 +172,17 @@ VPP_LDFLAGS += --config $(VIVADO_ANALYSIS_CFG)
 endif
 endif
 
-VITIS_ENV_CMD := source "$(VITIS_SETTINGS)" >/dev/null 2>&1 &&
+# Vitis 2022.2 prepends an old binutils-2.26. On Ubuntu 24.04 it cannot link
+# sw_emu shared objects against glibc with .relr.dyn sections, so keep Vitis'
+# compiler but let it use the system linker and startup objects.
+VITIS_BINUTILS_226 := $(XILINX_ROOT)/Vivado/$(VITIS_VERSION)/tps/lnx64/binutils-2.26/bin
+SYSTEM_GCC_LIB_DIR ?= $(firstword $(wildcard /usr/lib/gcc/x86_64-linux-gnu/*))
+VITIS_ENV_BASE_CMD := source "$(VITIS_SETTINGS)" >/dev/null 2>&1 && \
+	export PATH="$$(printf '%s' "$$PATH" | tr ':' '\n' | grep -Fxv "$(VITIS_BINUTILS_226)" | paste -sd ':' -)" && \
+	export COMPILER_PATH="/usr/bin:$${COMPILER_PATH:-}" && \
+	export LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:$(SYSTEM_GCC_LIB_DIR):$${LIBRARY_PATH:-}" &&
+VITIS_ENV_CMD := $(VITIS_ENV_BASE_CMD) unset XILINX_XRT &&
+XRT_RUN_ENV_CMD := $(VITIS_ENV_BASE_CMD)
 SUMMARY_GREP := ^(\\[xplus-xrt\\]|\\[init\\]|\\[done\\]|\\[check\\]|\\[host-timing-ms\\]|\\[kernel-timing-ms\\])
 
 ifneq ($(strip $(VITIS_ROOT)),)
@@ -394,7 +409,7 @@ cuper-control-hw-tmux:
 run: run-local
 
 run-local: $(LOCAL_HOST)
-	$(LOCAL_HOST)
+	$(LOCAL_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n1024)" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(SPMV),--spmv $(SPMV))
 
 run-cuper-pcg: $(CUPER_PCG_HOST)
 	$(CUPER_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n1024)" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
@@ -408,21 +423,21 @@ run-cuper-control-local: $(CUPER_CONTROL_LOCAL_HOST)
 run-cuper-control-xrt: $(CUPER_CONTROL_XRT_HOST)
 ifeq ($(TARGET),hw)
 	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-hw" && exit 1)
-	$(VITIS_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 else
 	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-sw" && exit 1)
 	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
-	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 endif
 
 run-xrt: $(XRT_HOST)
 ifeq ($(TARGET),hw)
 	@test -f "$(XCLBIN)" || (echo "ERROR: xclbin not found: $(XCLBIN). Build it first with: make build-hw" && exit 1)
-	$(VITIS_ENV_CMD) $(XRT_HOST)
+	$(XRT_RUN_ENV_CMD) $(XRT_HOST)
 else
 	@test -f "$(XCLBIN)" || (echo "ERROR: xclbin not found: $(XCLBIN). Build it first with: make build-sw" && exit 1)
 	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
-	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(XRT_HOST)"
+	$(XRT_RUN_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(XRT_HOST)"
 endif
 
 run-sw-report:
@@ -431,7 +446,7 @@ run-sw-report:
 	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
 	@$(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1
 	@$(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1
-	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
+	@{ $(XRT_RUN_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true
@@ -447,7 +462,7 @@ run-sw-report-existing:
 	@$(MAKE) xrt-host >>"$(REPORT_LOG)" 2>&1
 	@test -f "$(SW_XCLBIN)" || ($(MAKE) build-sw >>"$(REPORT_LOG)" 2>&1)
 	@test -f "$(BUILD_DIR)/sw_emu/emconfig.json" || ($(MAKE) $(BUILD_DIR)/sw_emu/emconfig.json TARGET=sw_emu >>"$(REPORT_LOG)" 2>&1)
-	@{ $(VITIS_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
+	@{ $(XRT_RUN_ENV_CMD) cd "$(BUILD_DIR)/sw_emu" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=sw_emu "$(XRT_HOST)"; } >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" interactive "$(REPORT_JSON)" "$(REPORT_HTML)" >>"$(REPORT_LOG)" 2>&1
 	@$(PYTHON) "$(SCRIPT_DIR)/render_report.py" static "$(REPORT_JSON)" "$(REPORT_HTML_STATIC)" >>"$(REPORT_LOG)" 2>&1
 	@grep -E "$(SUMMARY_GREP)" "$(REPORT_LOG)" || true

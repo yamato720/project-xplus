@@ -107,14 +107,23 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
         "\n".join(
             [
                 "#!/usr/bin/env bash",
-                "set -euo pipefail",
+                "set -uo pipefail",
                 f"cd {shell_quote(root)}",
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",
                 "date",
-                f"{shell_quote(root / 'scripts' / 'build_host.sh')}",
-                f"{shell_quote(root / 'scripts' / 'build_xo_u55c.sh')}",
-                f"{shell_quote(root / 'scripts' / 'link_xclbin_u55c.sh')}",
+                "rc=0",
+                f"{shell_quote(root / 'scripts' / 'build_host.sh')} || rc=$?",
+                'if [ "$rc" -eq 0 ]; then',
+                f"  {shell_quote(root / 'scripts' / 'build_xo_u55c.sh')} || rc=$?",
+                "fi",
+                'if [ "$rc" -eq 0 ]; then',
+                f"  {shell_quote(root / 'scripts' / 'link_xclbin_u55c.sh')} || rc=$?",
+                "fi",
                 "date",
+                "echo",
+                'echo "tmux run finished with exit code: $rc"',
+                'read -r -p "Press Enter to close this tmux window..." _',
+                "exit \"$rc\"",
             ]
         )
         + "\n",

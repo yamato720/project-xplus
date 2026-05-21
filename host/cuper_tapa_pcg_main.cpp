@@ -104,6 +104,16 @@ int round_up(const int value, const int align) {
     return ((value + align - 1) / align) * align;
 }
 
+// 把 DLC/Cuper 的 TAPA kernel 包装成 PCG 求解器可调用的 SpMV 后端。
+//
+// 这个类只负责：
+//   1. 把 Project-XPlus 的 Dataset 转成 Cuper/TAPA 需要的 HBM 数据布局
+//   2. 把 host 侧 PCG 当前输入向量拷到 X buffer
+//   3. 调用 TAPA 顶层 Cuper kernel 做一次 y = A * x
+//   4. 把 Y_out 拷回 host 侧 PCG 的 output 向量
+//
+// PCG 的 alpha/beta、r/z/p 更新、收敛判断都不在这里；
+// 它们在 host/cuper_pcg_solver.hpp 的 run_cuper_pcg_solver_with_backend 中。
 class CuperTapaSpmv {
   public:
     CuperTapaSpmv(const Dataset& dataset, std::string bitstream)
@@ -137,6 +147,9 @@ class CuperTapaSpmv {
                 static_cast<VALUE_TYPE>(input[static_cast<std::size_t>(index)]);
         }
 
+        // 每次 operator() 对应 host-side PCG 的一次 SpMV 调用。
+        // Iteration_num 固定传 1，避免把 Cuper kernel 内部的性能重复计数
+        // 和 PCG 迭代次数混在一起。
         const double kernel_ns = tapa::invoke(
             Cuper,
             bitstream_,
@@ -163,6 +176,10 @@ class CuperTapaSpmv {
 
   private:
     void build_matrix(const Dataset& dataset) {
+        // 这里把 Project-XPlus 的 CSR 数据集转换为 DLC/Cuper 的输入格式。
+        // 转换链路是：
+        //   CSR -> COO -> SparseSlice -> 每个 PE 的 SpElement list -> 16 个 HBM channel
+        // 这只是 TAPA SpMV 的矩阵预处理，不包含 PCG 向量 r/z/p 或 Jacobi 对角项。
         std::vector<INDEX_TYPE> row_ptr(dataset.row_ptr().begin(), dataset.row_ptr().end());
         std::vector<INDEX_TYPE> col_idx(dataset.col_idx().begin(), dataset.col_idx().end());
         std::vector<VALUE_TYPE> values(dataset.values().size(), 0.0f);
@@ -260,6 +277,8 @@ int main(int argc, char** argv) {
                   << " bitstream=" << (options.bitstream.empty() ? "<software-sim>" : options.bitstream)
                   << "\n";
 
+        // TAPA 版 PCG 的硬件部分到这里为止只是一个 SpMV 后端。
+        // 下面的 run_cuper_pcg_solver_with_backend 会在 host 侧循环调用 spmv。
         CuperTapaSpmv spmv(dataset, options.bitstream);
         CuperPcgResult cuper_result =
             project_xplus::cgsolver::run_cuper_pcg_solver_with_backend(

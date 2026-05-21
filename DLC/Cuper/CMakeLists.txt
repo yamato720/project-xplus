@@ -10,7 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 自动获取 Vitis HLS 路径，如果环境变量没设置，再回退到当前 U55C
 # 部署记录使用的 2022.2 工具链。
 if(NOT DEFINED ENV{XILINX_HLS})
-    set(XILINX_HLS_PATH "/tools/Xilinx2022/Vitis_HLS/2022.2")
+    if(EXISTS "$ENV{HOME}/vivado/Vitis_HLS/2022.2/include")
+        set(XILINX_HLS_PATH "$ENV{HOME}/vivado/Vitis_HLS/2022.2")
+    else()
+        set(XILINX_HLS_PATH "/tools/Xilinx2022/Vitis_HLS/2022.2")
+    endif()
 else()
     set(XILINX_HLS_PATH $ENV{XILINX_HLS})
 endif()

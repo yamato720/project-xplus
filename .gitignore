@@ -8,8 +8,12 @@ data/suitesparse/*/mtx/
 data/suitesparse/*/csr/
 DLC/Cuper/.ipcache/
 DLC/Cuper/run/
+DLC/Cuper/work.out/
+hd_visual/
 *.xo
 *.xclbin
+!395bitstream/
+!395bitstream/*.xclbin
 *.compile_summary
 *.link_summary
 *.xclbin.link_summary

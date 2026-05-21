@@ -167,6 +167,21 @@ inline data_t dot_vec(const std::vector<data_t>& lhs, const std::vector<data_t>&
 }
 
 template <typename SpmvRunner>
+// Cuper-PCG 的 host-side 主循环。
+//
+// 模板参数 run_spmv 可以是：
+//   - 软件版 Cuper 风格 SpMV
+//   - TAPA Cuper kernel 包装后的 SpMV 后端
+//
+// 但无论后端是哪一种，这个函数都在 host 侧完成 PCG 控制：
+//   init r/z/p
+//   dot(r, z), dot(p, A*p)
+//   alpha / beta
+//   x/r/z/p 更新
+//   tau 收敛判断和 breakdown 判断
+//
+// 因此 Cuper-PCG 软件版和 Cuper-PCG TAPA 版都不是“PCG 进 kernel”。
+// 真正把 PCG 控制放入 FPGA kernel 的版本是 kernels/cuper_pcg_control_kernel.cpp。
 inline CuperPcgResult run_cuper_pcg_solver_with_backend(const Dataset& dataset,
                                                         const SolverConfig& config,
                                                         const CuperPcgBackendInfo& backend,
@@ -204,6 +219,7 @@ inline CuperPcgResult run_cuper_pcg_solver_with_backend(const Dataset& dataset,
         *log_output << "\n";
     }
 
+    // 初始 SpMV：spmv_out = A * x0，用于构造 r = b - A*x0。
     run_spmv(result.solution, spmv_out, result);
 
     for (int index = 0; index < dataset.n(); ++index) {
@@ -220,6 +236,8 @@ inline CuperPcgResult run_cuper_pcg_solver_with_backend(const Dataset& dataset,
     for (int iteration = 0;
          iteration < result.effective_max_iters && rr > config.tau;
          ++iteration) {
+        // 每轮 PCG 只把 SpMV 交给后端；其余 dot、alpha/beta 和向量更新
+        // 仍在 host 侧执行。
         run_spmv(p, spmv_out, result);
 
         const data_t p_ap = dot_vec(p, spmv_out);
@@ -229,6 +247,7 @@ inline CuperPcgResult run_cuper_pcg_solver_with_backend(const Dataset& dataset,
             break;
         }
 
+        // alpha = (r, z) / (p, A*p)
         const data_t alpha = rz / p_ap;
         if (!std::isfinite(alpha)) {
             result.status = SolverStatus::kBreakdown;
@@ -249,6 +268,7 @@ inline CuperPcgResult run_cuper_pcg_solver_with_backend(const Dataset& dataset,
             break;
         }
 
+        // beta = (r_new, z_new) / (r_old, z_old)
         const data_t beta = rz_new / rz;
         if (!std::isfinite(beta)) {
             result.status = SolverStatus::kBreakdown;
