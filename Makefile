@@ -6,6 +6,7 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2
 PYTHON ?= python3
 
+N ?= 1024
 TARGET ?= sw_emu
 DEVICE ?= xilinx_u55c_gen3x16_xdma_3_202210_1
 XPLATFORM ?= /opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm
@@ -47,8 +48,8 @@ VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
 VIVADO_PACKAGE_DIR := $(BUILD_DIR)/packages
 VIVADO_PACKAGE_NAME ?= project-xplus-vivado-view
 VIVADO_PACKAGE_FULL := $(VIVADO_PACKAGE_DIR)/$(VIVADO_PACKAGE_NAME)-full.tar.gz
-REPORT_BASENAME ?= n1024
-REPORT_BASENAME_HW ?= n1024
+REPORT_BASENAME ?= n$(N)
+REPORT_BASENAME_HW ?= n$(N)
 REPORT_BASENAME_SW_FULL := SW_$(REPORT_BASENAME)
 REPORT_BASENAME_HW_FULL := HW_$(REPORT_BASENAME_HW)
 REPORT_JSON := $(REPORT_DIR)/$(REPORT_BASENAME_SW_FULL).json
@@ -67,8 +68,8 @@ HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 LOCAL_HOST := $(BUILD_DIR)/xplus_host
 XRT_HOST := $(BUILD_DIR)/xplus_xrt_host
 
-DATASET_DIR ?= $(ROOT_DIR)/data/generated/cgsolver/n1024
-SIZE ?= 1024
+DATASET_DIR ?= $(ROOT_DIR)/data/generated/cgsolver/n$(N)
+SIZE ?= $(N)
 ASPECT_RATIO ?= 1.6
 TAU ?= 1e-10
 MAX_ITERS ?= 0

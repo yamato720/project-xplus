@@ -5,94 +5,59 @@ namespace {
 using data_t = project_xplus::cgsolver::data_t;
 using index_t = project_xplus::cgsolver::index_t;
 constexpr int kMaxN = project_xplus::cgsolver::kMaxN;
-constexpr int kRowBlockSize = 32;
 
 constexpr int BLOCK_SIZE = 128;
-constexpr int BLOCK_ELEMENTS = BLOCK_SIZE * BLOCK_SIZE;
-constexpr int BITMAP_WORD_BITS = 64;
-constexpr int BITMAP_WORDS = (BLOCK_ELEMENTS + BITMAP_WORD_BITS - 1) / BITMAP_WORD_BITS;
 
-// 确保和 Host 端结构一致
-struct BlockBitmap {
-    unsigned long long bitmap[BITMAP_WORDS];
-    int nnz;
-};
-
-inline void spmv_blocked_bitmap_body(
-    const index_t* b_row_ptr,
-    const index_t* b_col_idx,
+inline void spmv_block_csc_coo_body(
+    const index_t* b_col_ptr,
+    const index_t* b_row_idx,
     const index_t* b_nnz_ptr,
-    const BlockBitmap* blocks,
+    const unsigned char* local_rows,
+    const unsigned char* local_cols,
     const data_t* values,
     const data_t* x,
     data_t* y,
-    const int num_block_rows,
+    const int num_block_cols,
     const int total_n) 
 {
-    // 1. 将全量 x 缓存到 BRAM 中，保证后续随机访问 II=1
+    // 1. 将全量 x 和 y 缓存在片上，避免块间 CSC 对 y 的随机写直接打到外存。
     data_t x_local[kMaxN];
+    data_t y_local[kMaxN];
 #pragma HLS BIND_STORAGE variable = x_local type = ram_2p impl = bram
+#pragma HLS BIND_STORAGE variable = y_local type = ram_2p impl = bram
 
-load_x:
+load_xy:
     for (int index = 0; index < total_n; ++index) {
 #pragma HLS PIPELINE II = 1
         x_local[index] = x[index];
+        y_local[index] = 0.0;
     }
 
-    // 2. 顺序处理每个块行
-block_rows:
-    for (int br = 0; br < num_block_rows; ++br) {
-        
-        data_t y_accum[BLOCK_SIZE];
-#pragma HLS ARRAY_PARTITION variable=y_accum cyclic factor=16
+    // 2. 块间按 CSC 遍历：先走 block-column，再走该列中的非零 block。
+block_cols:
+    for (int bc = 0; bc < num_block_cols; ++bc) {
+    blocks_in_col:
+        for (int bi = b_col_ptr[bc]; bi < b_col_ptr[bc + 1]; ++bi) {
+            const int br = b_row_idx[bi];
+            const int value_begin = b_nnz_ptr[bi];
+            const int value_end = b_nnz_ptr[bi + 1];
 
-    clear_accum:
-        for (int i = 0; i < BLOCK_SIZE; ++i) {
+        block_entries:
+            for (int vi = value_begin; vi < value_end; ++vi) {
 #pragma HLS PIPELINE II = 1
-            y_accum[i] = 0.0;
-        }
-
-        int block_start = b_row_ptr[br];
-        int block_end = b_row_ptr[br + 1];
-
-        // 3. 遍历该块行中的所有非零块
-    blocks_in_row:
-        for (int bi = block_start; bi < block_end; ++bi) {
-            int bc = b_col_idx[bi];
-            int v_idx = b_nnz_ptr[bi];
-
-            // 4. 解析 128x128 bitmap 并按 bitmap 顺序读取紧凑 values。
-        bitmap_words:
-            for (int word_index = 0; word_index < BITMAP_WORDS; ++word_index) {
-                unsigned long long mask = blocks[bi].bitmap[word_index];
-                const int word_base = word_index * BITMAP_WORD_BITS;
-
-            bits_in_word:
-                for (int bit = 0; bit < BITMAP_WORD_BITS; ++bit) {
-#pragma HLS PIPELINE II = 1
-                    if ((mask >> bit) & 1ULL) {
-                        int pos = word_base + bit;
-                        int local_r = pos / BLOCK_SIZE;
-                        int local_c = pos % BLOCK_SIZE;
-                        int global_c = bc * BLOCK_SIZE + local_c;
-
-                        data_t x_val = (global_c < total_n) ? x_local[global_c] : 0.0;
-                        y_accum[local_r] += values[v_idx] * x_val;
-                        v_idx++;
-                    }
+                const int row = br * BLOCK_SIZE + static_cast<int>(local_rows[vi]);
+                const int col = bc * BLOCK_SIZE + static_cast<int>(local_cols[vi]);
+                if (row < total_n && col < total_n) {
+                    y_local[row] += values[vi] * x_local[col];
                 }
             }
         }
+    }
 
-        // 5. 写回全局内存 y，包含边界保护
-    write_y:
-        for (int i = 0; i < BLOCK_SIZE; ++i) {
+write_y:
+    for (int index = 0; index < total_n; ++index) {
 #pragma HLS PIPELINE II = 1
-            int global_r = br * BLOCK_SIZE + i;
-            if (global_r < total_n) {
-                y[global_r] = y_accum[i];
-            }
-        }
+        y[index] = y_local[index];
     }
 }
 
@@ -136,10 +101,11 @@ block_rows:
 
 extern "C" {
 
-void spmv_blocked_kernel(const index_t* b_row_ptr,
-                         const index_t* b_col_idx,
+void spmv_blocked_kernel(const index_t* b_col_ptr,
+                         const index_t* b_row_idx,
                          const index_t* b_nnz_ptr,
-                         const BlockBitmap* blocks,
+                         const unsigned char* local_rows,
+                         const unsigned char* local_cols,
                          const data_t* values,
                          const data_t* x,
                          data_t* y,
@@ -152,32 +118,35 @@ void spmv_blocked_kernel(const index_t* b_row_ptr,
 // 1. 仍然按 CSR 语义输出 y = A * x
 // 2. 外层先按 row block 组织结构，方便后续往真正的 blocked dataflow 演进
 // 3. 暂时不引入新的数据格式、metadata 或额外端口
-#pragma HLS INTERFACE s_axilite port = b_row_ptr bundle = control
-#pragma HLS INTERFACE s_axilite port = b_col_idx bundle = control
+#pragma HLS INTERFACE s_axilite port = b_col_ptr bundle = control
+#pragma HLS INTERFACE s_axilite port = b_row_idx bundle = control
 #pragma HLS INTERFACE s_axilite port = b_nnz_ptr bundle = control
-#pragma HLS INTERFACE s_axilite port = blocks bundle = control
+#pragma HLS INTERFACE s_axilite port = local_rows bundle = control
+#pragma HLS INTERFACE s_axilite port = local_cols bundle = control
 #pragma HLS INTERFACE s_axilite port = values bundle = control
 #pragma HLS INTERFACE s_axilite port = x bundle = control
 #pragma HLS INTERFACE s_axilite port = y bundle = control
 #pragma HLS INTERFACE s_axilite port = n bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
-#pragma HLS INTERFACE m_axi port = b_row_ptr offset = slave bundle = gmem_row depth=50000
-#pragma HLS INTERFACE m_axi port = b_col_idx offset = slave bundle = gmem_col depth=50000
+#pragma HLS INTERFACE m_axi port = b_col_ptr offset = slave bundle = gmem_colptr depth=50000
+#pragma HLS INTERFACE m_axi port = b_row_idx offset = slave bundle = gmem_rowidx depth=50000
 #pragma HLS INTERFACE m_axi port = b_nnz_ptr offset = slave bundle = gmem_nnz depth=50000
-#pragma HLS INTERFACE m_axi port = blocks offset = slave bundle = gmem_bitmap depth=50000
+#pragma HLS INTERFACE m_axi port = local_rows offset = slave bundle = gmem_local_rows depth=50000
+#pragma HLS INTERFACE m_axi port = local_cols offset = slave bundle = gmem_local_cols depth=50000
 #pragma HLS INTERFACE m_axi port = values offset = slave bundle = gmem_val depth=50000
 #pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x depth=50000
 #pragma HLS INTERFACE m_axi port = y offset = slave bundle = gmem_y depth=50000
 
-    int num_block_rows = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    spmv_blocked_bitmap_body(b_row_ptr, b_col_idx, b_nnz_ptr, blocks, values, x, y, num_block_rows, n);
+    int num_block_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    spmv_block_csc_coo_body(b_col_ptr, b_row_idx, b_nnz_ptr, local_rows, local_cols, values, x, y, num_block_cols, n);
 }
 
-void spmv_csr_kernel(const index_t* b_row_ptr,
-                     const index_t* b_col_idx,
+void spmv_csr_kernel(const index_t* b_col_ptr,
+                     const index_t* b_row_idx,
                      const index_t* b_nnz_ptr,
-                     const BlockBitmap* blocks,
+                     const unsigned char* local_rows,
+                     const unsigned char* local_cols,
                      const data_t* values,
                      const data_t* x,
                      data_t* y,
@@ -186,26 +155,28 @@ void spmv_csr_kernel(const index_t* b_row_ptr,
 // 这样 xrt_host / connectivity / BO group_id 都不需要重写，
 // 只通过编译时切换源文件就能把硬件实现换成 blocked 版本。
 
-#pragma HLS INTERFACE s_axilite port = b_row_ptr bundle = control
-#pragma HLS INTERFACE s_axilite port = b_col_idx bundle = control
+#pragma HLS INTERFACE s_axilite port = b_col_ptr bundle = control
+#pragma HLS INTERFACE s_axilite port = b_row_idx bundle = control
 #pragma HLS INTERFACE s_axilite port = b_nnz_ptr bundle = control
-#pragma HLS INTERFACE s_axilite port = blocks bundle = control
+#pragma HLS INTERFACE s_axilite port = local_rows bundle = control
+#pragma HLS INTERFACE s_axilite port = local_cols bundle = control
 #pragma HLS INTERFACE s_axilite port = values bundle = control
 #pragma HLS INTERFACE s_axilite port = x bundle = control
 #pragma HLS INTERFACE s_axilite port = y bundle = control
 #pragma HLS INTERFACE s_axilite port = n bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
-#pragma HLS INTERFACE m_axi port = b_row_ptr offset = slave bundle = gmem_row depth=50000
-#pragma HLS INTERFACE m_axi port = b_col_idx offset = slave bundle = gmem_col depth=50000
+#pragma HLS INTERFACE m_axi port = b_col_ptr offset = slave bundle = gmem_colptr depth=50000
+#pragma HLS INTERFACE m_axi port = b_row_idx offset = slave bundle = gmem_rowidx depth=50000
 #pragma HLS INTERFACE m_axi port = b_nnz_ptr offset = slave bundle = gmem_nnz depth=50000
-#pragma HLS INTERFACE m_axi port = blocks offset = slave bundle = gmem_bitmap depth=50000
+#pragma HLS INTERFACE m_axi port = local_rows offset = slave bundle = gmem_local_rows depth=50000
+#pragma HLS INTERFACE m_axi port = local_cols offset = slave bundle = gmem_local_cols depth=50000
 #pragma HLS INTERFACE m_axi port = values offset = slave bundle = gmem_val depth=50000
 #pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x depth=50000
 #pragma HLS INTERFACE m_axi port = y offset = slave bundle = gmem_y depth=50000
 
-    int num_block_rows = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    spmv_blocked_bitmap_body(b_row_ptr, b_col_idx, b_nnz_ptr, blocks, values, x, y, num_block_rows, n);
+    int num_block_cols = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    spmv_block_csc_coo_body(b_col_ptr, b_row_idx, b_nnz_ptr, local_rows, local_cols, values, x, y, num_block_cols, n);
 // #pragma HLS INTERFACE s_axilite port = row_ptr bundle = control
 // #pragma HLS INTERFACE s_axilite port = col_idx bundle = control
 // #pragma HLS INTERFACE s_axilite port = values bundle = control

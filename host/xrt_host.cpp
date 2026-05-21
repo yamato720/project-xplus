@@ -29,76 +29,120 @@ using project_xplus::cgsolver::KernelTimingStats;
 using project_xplus::cgsolver::SolverConfig;
 
 constexpr int BLOCK_SIZE = 128;
-constexpr int BLOCK_ELEMENTS = BLOCK_SIZE * BLOCK_SIZE;
-constexpr int BITMAP_WORD_BITS = 64;
-constexpr int BITMAP_WORDS = (BLOCK_ELEMENTS + BITMAP_WORD_BITS - 1) / BITMAP_WORD_BITS;
 
-struct BlockBitmap {
-    unsigned long long bitmap[BITMAP_WORDS];
-    int nnz;
+struct BlockEntry {
+    unsigned char local_row;
+    unsigned char local_col;
+    data_t value;
 };
 
-struct BlockCSR {
+struct BlockCSC {
     int num_block_rows;
     int num_block_cols;
     int num_blocks;
-    std::vector<int> b_row_ptr;
-    std::vector<int> b_col_idx;
+    std::vector<int> b_col_ptr;
+    std::vector<int> b_row_idx;
     std::vector<int> b_nnz_ptr;
-    std::vector<BlockBitmap> blocks;
+    std::vector<unsigned char> local_rows;
+    std::vector<unsigned char> local_cols;
     std::vector<data_t> values;
 };
 
-BlockCSR convert_csr_to_block_bitmap(
+BlockCSC convert_csr_to_block_csc_coo(
     int M, int N, 
     const std::vector<int>& row_ptr, 
     const std::vector<int>& col_idx, 
     const std::vector<double>& values) 
 {
-    BlockCSR A;
+    BlockCSC A;
     A.num_block_rows = (M + BLOCK_SIZE - 1) / BLOCK_SIZE;
     A.num_block_cols = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    A.b_row_ptr.push_back(0);
     A.b_nnz_ptr.push_back(0);
 
-    for (int br = 0; br < A.num_block_rows; ++br) {
-        int row_start = br * BLOCK_SIZE;
-        int row_end = std::min(row_start + BLOCK_SIZE, M);
-
-        std::map<int, std::vector<std::pair<int, double>>> blocks_in_row;
-
-        for (int r = row_start; r < row_end; ++r) {
-            for (int idx = row_ptr[r]; idx < row_ptr[r+1]; ++idx) {
-                int c = col_idx[idx];
-                int bc = c / BLOCK_SIZE;
-                int local_r = r - row_start;
-                int local_c = c % BLOCK_SIZE;
-                int pos = local_r * BLOCK_SIZE + local_c;
-                blocks_in_row[bc].push_back({pos, values[idx]});
-            }
+    std::map<std::pair<int, int>, std::vector<BlockEntry>> blocks;
+    for (int row = 0; row < M; ++row) {
+        const int br = row / BLOCK_SIZE;
+        const unsigned char local_row = static_cast<unsigned char>(row % BLOCK_SIZE);
+        for (int idx = row_ptr[row]; idx < row_ptr[row + 1]; ++idx) {
+            const int col = col_idx[idx];
+            const int bc = col / BLOCK_SIZE;
+            const unsigned char local_col = static_cast<unsigned char>(col % BLOCK_SIZE);
+            blocks[{bc, br}].push_back({local_row, local_col, static_cast<data_t>(values[idx])});
         }
+    }
 
-        for (auto const& [bc, elements] : blocks_in_row) {
-            BlockBitmap blk = {}; // 初始化为0
-            blk.nnz = static_cast<int>(elements.size());
-
-            auto sorted_elements = elements;
-            std::sort(sorted_elements.begin(), sorted_elements.end());
-            for (auto const& el : sorted_elements) {
-                const int word = el.first / BITMAP_WORD_BITS;
-                const int bit = el.first % BITMAP_WORD_BITS;
-                blk.bitmap[word] |= (1ULL << bit);
-                A.values.push_back(static_cast<data_t>(el.second));
+    A.b_col_ptr.push_back(0);
+    for (int bc = 0; bc < A.num_block_cols; ++bc) {
+        for (int br = 0; br < A.num_block_rows; ++br) {
+            auto block_it = blocks.find({bc, br});
+            if (block_it == blocks.end()) {
+                continue;
             }
 
-            A.b_col_idx.push_back(bc);
-            A.blocks.push_back(blk);
+            auto entries = block_it->second;
+            std::sort(entries.begin(), entries.end(), [](const BlockEntry& lhs, const BlockEntry& rhs) {
+                if (lhs.local_col != rhs.local_col) {
+                    return lhs.local_col < rhs.local_col;
+                }
+                return lhs.local_row < rhs.local_row;
+            });
+
+            A.b_row_idx.push_back(br);
+            for (const BlockEntry& entry : entries) {
+                A.local_rows.push_back(entry.local_row);
+                A.local_cols.push_back(entry.local_col);
+                A.values.push_back(entry.value);
+            }
             A.b_nnz_ptr.push_back(static_cast<int>(A.values.size()));
         }
-        A.b_row_ptr.push_back(A.blocks.size());
+        A.b_col_ptr.push_back(static_cast<int>(A.b_row_idx.size()));
     }
-    A.num_blocks = A.blocks.size();
+    A.num_blocks = static_cast<int>(A.b_row_idx.size());
     return A;
+}
+
+std::vector<data_t> spmv_block_csc_coo_reference(const BlockCSC& A,
+                                                 const std::vector<data_t>& x,
+                                                 const int n) {
+    std::vector<data_t> y(static_cast<std::size_t>(n), 0.0);
+
+    for (int bc = 0; bc < A.num_block_cols; ++bc) {
+        for (int bi = A.b_col_ptr[bc]; bi < A.b_col_ptr[bc + 1]; ++bi) {
+            const int br = A.b_row_idx[bi];
+            for (int vi = A.b_nnz_ptr[bi]; vi < A.b_nnz_ptr[bi + 1]; ++vi) {
+                const int row = br * BLOCK_SIZE + static_cast<int>(A.local_rows[vi]);
+                const int col = bc * BLOCK_SIZE + static_cast<int>(A.local_cols[vi]);
+                if (row < n && col < n) {
+                    y[row] += A.values[vi] * x[col];
+                }
+            }
+        }
+    }
+
+    return y;
+}
+
+void validate_block_csc_coo_conversion(const Dataset& dataset, const BlockCSC& block_csc) {
+    std::vector<data_t> x(dataset.x0().begin(), dataset.x0().end());
+    std::vector<data_t> csr_y(static_cast<std::size_t>(dataset.n()), 0.0);
+
+    for (int row = 0; row < dataset.n(); ++row) {
+        data_t acc = 0.0;
+        for (int offset = dataset.row_ptr()[row]; offset < dataset.row_ptr()[row + 1]; ++offset) {
+            acc += static_cast<data_t>(dataset.values()[offset]) * x[dataset.col_idx()[offset]];
+        }
+        csr_y[row] = acc;
+    }
+
+    const std::vector<data_t> block_y = spmv_block_csc_coo_reference(block_csc, x, dataset.n());
+    data_t max_abs_diff = 0.0;
+    for (int row = 0; row < dataset.n(); ++row) {
+        max_abs_diff = std::max(max_abs_diff, std::fabs(csr_y[row] - block_y[row]));
+    }
+
+    if (max_abs_diff > 1.0e-9) {
+        throw std::runtime_error("BlockCSC/COO conversion check failed");
+    }
 }
 
 struct HostOptions {
@@ -263,10 +307,11 @@ int main(int argc, char** argv) {
             throw std::runtime_error("dataset size exceeds kMaxN");
         }
 
-        BlockCSR block_csr = convert_csr_to_block_bitmap(
+        BlockCSC block_csc = convert_csr_to_block_csc_coo(
             dataset.n(), dataset.n(), // CG求解器通常是方阵，所以 M=N=dataset.n()
             dataset.row_ptr(), dataset.col_idx(), dataset.values()
         );
+        validate_block_csc_coo_conversion(dataset, block_csc);
 
         SolverConfig config;
         config.tau = options.tau;
@@ -313,11 +358,12 @@ int main(int argc, char** argv) {
         // host 后续只在需要的时候同步极少量标量或最终 x。
         const auto h2d_start = Clock::now();
 
-        auto row_ptr_bo = make_input_bo(device, spmv_kernel, 0, block_csr.b_row_ptr);
-        auto col_idx_bo = make_input_bo(device, spmv_kernel, 1, block_csr.b_col_idx);
-        auto nnz_ptr_bo = make_input_bo(device, spmv_kernel, 2, block_csr.b_nnz_ptr);
-        auto bitmap_bo = make_input_bo(device, spmv_kernel, 3, block_csr.blocks);
-        auto values_bo = make_input_bo(device, spmv_kernel, 4, block_csr.values);
+        auto col_ptr_bo = make_input_bo(device, spmv_kernel, 0, block_csc.b_col_ptr);
+        auto row_idx_bo = make_input_bo(device, spmv_kernel, 1, block_csc.b_row_idx);
+        auto nnz_ptr_bo = make_input_bo(device, spmv_kernel, 2, block_csc.b_nnz_ptr);
+        auto local_rows_bo = make_input_bo(device, spmv_kernel, 3, block_csc.local_rows);
+        auto local_cols_bo = make_input_bo(device, spmv_kernel, 4, block_csc.local_cols);
+        auto values_bo = make_input_bo(device, spmv_kernel, 5, block_csc.values);
         // auto row_ptr_bo = make_input_bo(device, spmv_kernel, 0, dataset.row_ptr());
         // auto col_idx_bo = make_input_bo(device, spmv_kernel, 1, dataset.col_idx());
         // auto values_bo = make_input_bo(device, spmv_kernel, 2, dataset.values());
@@ -326,7 +372,7 @@ int main(int argc, char** argv) {
         auto r_bo = make_inout_bo(device, init_kernel, 3, r);
         auto z_bo = make_inout_bo(device, init_kernel, 4, z);
         auto p_bo = make_inout_bo(device, init_kernel, 5, p);
-        auto spmv_out_bo = make_inout_bo(device, spmv_kernel, 6, spmv_out);
+        auto spmv_out_bo = make_inout_bo(device, spmv_kernel, 7, spmv_out);
         auto m_inv_bo = make_input_bo(device, init_kernel, 2, m_inv);
         auto metrics_bo = make_inout_bo(device, init_kernel, 6, metrics);
         auto dot_out_bo = make_inout_bo(device, dot_kernel, 2, dot_out);
@@ -340,14 +386,15 @@ int main(int argc, char** argv) {
         const auto kernel_start = Clock::now();
         auto run_begin = Clock::now();
         xrt::run init_spmv_run(spmv_kernel);
-        init_spmv_run.set_arg(0, row_ptr_bo);
-        init_spmv_run.set_arg(1, col_idx_bo);
+        init_spmv_run.set_arg(0, col_ptr_bo);
+        init_spmv_run.set_arg(1, row_idx_bo);
         init_spmv_run.set_arg(2, nnz_ptr_bo);
-        init_spmv_run.set_arg(3, bitmap_bo);
-        init_spmv_run.set_arg(4, values_bo);
-        init_spmv_run.set_arg(5, p_bo);
-        init_spmv_run.set_arg(6, spmv_out_bo);
-        init_spmv_run.set_arg(7, dataset.n());
+        init_spmv_run.set_arg(3, local_rows_bo);
+        init_spmv_run.set_arg(4, local_cols_bo);
+        init_spmv_run.set_arg(5, values_bo);
+        init_spmv_run.set_arg(6, p_bo);
+        init_spmv_run.set_arg(7, spmv_out_bo);
+        init_spmv_run.set_arg(8, dataset.n());
         init_spmv_run.start();
         init_spmv_run.wait();
         auto run_end = Clock::now();
@@ -387,14 +434,15 @@ int main(int argc, char** argv) {
             // 其中 alpha / beta / 收敛判断都由 host 计算和控制。
             run_begin = Clock::now();
             xrt::run spmv_run(spmv_kernel);
-            spmv_run.set_arg(0, row_ptr_bo);
-            spmv_run.set_arg(1, col_idx_bo);
+            spmv_run.set_arg(0, col_ptr_bo);
+            spmv_run.set_arg(1, row_idx_bo);
             spmv_run.set_arg(2, nnz_ptr_bo);
-            spmv_run.set_arg(3, bitmap_bo);
-            spmv_run.set_arg(4, values_bo);
-            spmv_run.set_arg(5, p_bo);
-            spmv_run.set_arg(6, spmv_out_bo);
-            spmv_run.set_arg(7, dataset.n());
+            spmv_run.set_arg(3, local_rows_bo);
+            spmv_run.set_arg(4, local_cols_bo);
+            spmv_run.set_arg(5, values_bo);
+            spmv_run.set_arg(6, p_bo);
+            spmv_run.set_arg(7, spmv_out_bo);
+            spmv_run.set_arg(8, dataset.n());
             spmv_run.start();
             spmv_run.wait();
             run_end = Clock::now();
