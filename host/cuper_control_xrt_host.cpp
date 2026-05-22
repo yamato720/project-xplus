@@ -69,6 +69,11 @@ void usage(const char* argv0) {
               << " [--diff-tol value] [--device-index value]\n";
 }
 
+double elapsed_ms(const std::chrono::steady_clock::time_point start,
+                  const std::chrono::steady_clock::time_point end) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
 HostOptions parse_args(int argc, char** argv) {
     HostOptions options;
     options.xclbin_path =
@@ -149,11 +154,15 @@ xrt::bo make_inout_bo(xrt::device& device, xrt::kernel& kernel, int arg_index, s
 
 int main(int argc, char** argv) {
     try {
+        const auto total_start = std::chrono::steady_clock::now();
         const HostOptions options = parse_args(argc, argv);
+
+        const auto prepare_start = std::chrono::steady_clock::now();
         const Dataset dataset = Dataset::load(options.dataset_dir);
         // host 端把 CSR 矩阵打包成 kernel 直接读取的 16 路 HBM Cuper 格式。
         const CuperControlMatrix matrix =
             project_xplus::cgsolver::build_cuper_control_matrix(dataset);
+        const auto prepare_end = std::chrono::steady_clock::now();
 
         SolverConfig config;
         config.tau = options.tau;
@@ -168,9 +177,11 @@ int main(int argc, char** argv) {
                   << " batches=" << matrix.batch_count
                   << " matrix_len=" << matrix.matrix_len << "\n";
 
+        const auto xrt_setup_start = std::chrono::steady_clock::now();
         xrt::device device(options.device_index);
         auto uuid = device.load_xclbin(options.xclbin_path.string());
         xrt::kernel kernel(device, uuid, "cuper_pcg_control_kernel");
+        const auto xrt_setup_end = std::chrono::steady_clock::now();
 
         std::vector<data_t> x = dataset.x0();
         std::vector<data_t> r(static_cast<std::size_t>(dataset.n()), 0.0);
@@ -185,6 +196,7 @@ int main(int argc, char** argv) {
         //   0      : sp_element_list_ptr
         //   1..16  : matrix_data_0..15
         //   17..25 : b/m_inv/x/r/z/p/ap/metrics/status
+        const auto bo_setup_start = std::chrono::steady_clock::now();
         auto sp_ptr_bo = make_input_bo(device, kernel, 0, matrix.sp_element_list_ptr);
         auto matrix0_bo = make_input_bo(device, kernel, 1, matrix.matrix_data[0]);
         auto matrix1_bo = make_input_bo(device, kernel, 2, matrix.matrix_data[1]);
@@ -211,8 +223,10 @@ int main(int argc, char** argv) {
         auto ap_bo = make_inout_bo(device, kernel, 23, ap);
         auto metrics_bo = make_inout_bo(device, kernel, 24, metrics);
         auto status_bo = make_inout_bo(device, kernel, 25, status);
+        const auto bo_setup_end = std::chrono::steady_clock::now();
 
         // 单次 launch 内完成初始 SpMV、PCG 迭代和状态/metrics 写回。
+        const auto kernel_start = std::chrono::steady_clock::now();
         auto run = kernel(sp_ptr_bo,
                           matrix0_bo,
                           matrix1_bo,
@@ -244,7 +258,9 @@ int main(int argc, char** argv) {
                           dataset.n(),
                           matrix.batch_count);
         run.wait();
+        const auto kernel_end = std::chrono::steady_clock::now();
 
+        const auto readback_start = std::chrono::steady_clock::now();
         x_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, x.size() * sizeof(data_t), 0);
         metrics_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, metrics.size() * sizeof(data_t), 0);
         status_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, status.size() * sizeof(int), 0);
@@ -257,7 +273,9 @@ int main(int argc, char** argv) {
         std::copy(x_mapped, x_mapped + x.size(), x.begin());
         std::copy(metrics_mapped, metrics_mapped + metrics.size(), metrics.begin());
         std::copy(status_mapped, status_mapped + status.size(), status.begin());
+        const auto readback_end = std::chrono::steady_clock::now();
 
+        const auto check_start = std::chrono::steady_clock::now();
         const CpuReferenceResult golden_result =
             project_xplus::cgsolver::run_cpu_reference(dataset, config);
         double max_abs_diff = 0.0;
@@ -271,6 +289,8 @@ int main(int argc, char** argv) {
         }
 
         const double residual_l2 = project_xplus::cgsolver::compute_residual_norm(dataset, x);
+        const auto check_end = std::chrono::steady_clock::now();
+        const auto total_end = std::chrono::steady_clock::now();
         std::cout << std::scientific << std::setprecision(12);
         std::cout << "[done] iter=" << status[1]
                   << " residual_abs=" << residual_l2
@@ -284,6 +304,13 @@ int main(int argc, char** argv) {
                   << " max_rel_diff=" << max_rel_diff
                   << " diff_tol=" << options.diff_tol
                   << " rr=" << metrics[1] << "\n";
+        std::cout << "[timing-ms] prepare=" << elapsed_ms(prepare_start, prepare_end)
+                  << " xrt_setup=" << elapsed_ms(xrt_setup_start, xrt_setup_end)
+                  << " bo_setup=" << elapsed_ms(bo_setup_start, bo_setup_end)
+                  << " kernel=" << elapsed_ms(kernel_start, kernel_end)
+                  << " readback=" << elapsed_ms(readback_start, readback_end)
+                  << " check=" << elapsed_ms(check_start, check_end)
+                  << " total=" << elapsed_ms(total_start, total_end) << "\n";
 
         if (status[0] != 0) {
             return 2;
