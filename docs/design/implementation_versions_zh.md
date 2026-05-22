@@ -12,6 +12,7 @@
 | Cuper-PCG 软件版 | Cuper-PCG 版 | host | Cuper 风格 FP32 软件 SpMV | 验证 Cuper 数据格式和 PCG 外层流程 |
 | Cuper-PCG TAPA 版 | Cuper-PCG TAPA 版 | host | `DLC/Cuper` TAPA kernel | 当前最新 TAPA Cuper 硬件实验 |
 | Cuper-PCG control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | Cuper column-batch/row-tile SpMV | 把 Cuper SpMV 和 PCG 控制合进一个 kernel 的实验版 |
+| Cuper-PCG fullcuper control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | 手拆 TAPA Cuper 思路后的 16 HBM/512-bit/8-lane SpMV | 当前最接近满血 Cuper 进入 PCG kernel 的实验版 |
 
 ## 1. 多 kernel 普通版
 
@@ -234,6 +235,26 @@ cfg/connectivity_cuper_control_u55c.cfg
 - 这是把 Cuper 风格 SpMV 和 PCG control-kernel 合并的实验版。
 - PCG 控制逻辑在 FPGA kernel 内。
 - 与 TAPA Cuper 版不同，它不是调用 `DLC/Cuper/kernels/Cuper.cpp` 的 TAPA task graph。
+- 当前 `fullcuper` bitstream 是这条路线的最新硬件产物：把 TAPA Cuper 的数据组织和并行思路手拆进 `cuper_pcg_control_kernel.cpp`，不是继续走 TAPA。
+- `fullcuper` 版使用 16 路 HBM matrix 输入、512-bit matrix word、每通道 8 lane、x broadcast、本地 4-bank slice cache 和 512 个 URAM accumulator。
+- `fullcuper` 版的 PCG init、SpMV、dot、alpha/beta、x/r/z/p 更新、收敛判断都在同一个 FPGA kernel 内完成。
+
+当前硬件产物：
+
+```text
+395bitstream/cuper_pcg_control_packed16hbm_20260522.xclbin
+395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin
+395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin.info
+```
+
+`fullcuper` 当前已知 timing 状态：
+
+```text
+DATA_CLK 请求 300 MHz，xclbin 记录为 215 MHz
+KERNEL_CLK 500 MHz
+hbm_aclk 450 MHz
+routed timing 未干净收敛：WNS -1.305 ns，TNS -32582.684 ns
+```
 
 常用命令：
 
@@ -241,6 +262,18 @@ cfg/connectivity_cuper_control_u55c.cfg
 make build-cuper-control-sw
 make run-cuper-control-xrt TARGET=sw_emu DATASET=data/suitesparse/Schmid/csr/thermal2_n16
 make cuper-control-hw-tmux
+```
+
+运行 bitstream 示例：
+
+```bash
+make cuper-control-xrt-host
+
+./build/xplus_cuper_control_xrt_host \
+  395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin \
+  /path/to/dataset \
+  --tau 1e-8 \
+  --max-iters 1000
 ```
 
 ## 版本判断规则
