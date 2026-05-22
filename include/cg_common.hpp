@@ -8,7 +8,7 @@ namespace project_xplus::cgsolver {
 using data_t = double;
 using index_t = int;
 
-static constexpr int kMaxN = 100000;
+static constexpr int kMaxN = 200000;
 static constexpr data_t kBreakdownEps = 1.0e-30;
 
 struct SolverConfig {

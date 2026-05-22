@@ -11,26 +11,16 @@ inline bool valid_n(const int n) {
     return n >= 0 && n <= kMaxN;
 }
 
-inline void load_vector_local(const data_t* src, data_t* dst, const int n) {
-    // 这个辅助函数对应硬件版里先把 x 缓存到片上本地数组的动作。
-    for (int index = 0; index < n; ++index) {
-        dst[index] = src[index];
-    }
-}
-
 inline void spmv_reference_body(const index_t* row_ptr,
                                 const index_t* col_idx,
                                 const data_t* values,
                                 const data_t* x,
                                 data_t* y,
                                 const int n) {
-    data_t x_local[kMaxN];
-    load_vector_local(x, x_local, n);
-
     for (int row = 0; row < n; ++row) {
         data_t acc = 0.0;
         for (int offset = row_ptr[row]; offset < row_ptr[row + 1]; ++offset) {
-            acc += values[offset] * x_local[col_idx[offset]];
+            acc += values[offset] * x[col_idx[offset]];
         }
         y[row] = acc;
     }

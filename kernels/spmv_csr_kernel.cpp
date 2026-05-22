@@ -35,24 +35,13 @@ void spmv_csr_kernel(const project_xplus::cgsolver::index_t* row_ptr,
         return;
     }
 
-    // 对 n<=kMaxN 的小规模向量，先把输入 x 缓存到片上 BRAM，
-    // 避免后面按 CSR col_idx 随机索引时每次都打到外部存储。
-    data_t x_local[kMaxN];
-#pragma HLS BIND_STORAGE variable = x_local type = ram_2p impl = bram
-
-load_x:
-    for (int index = 0; index < n; ++index) {
-#pragma HLS PIPELINE II = 1
-        x_local[index] = x[index];
-    }
-
 spmv_rows:
     for (int row = 0; row < n; ++row) {
 #pragma HLS PIPELINE II = 1
         // CSR 一行对应一个输出 y[row]。
         data_t acc = 0.0;
         for (int offset = row_ptr[row]; offset < row_ptr[row + 1]; ++offset) {
-            acc += values[offset] * x_local[col_idx[offset]];
+            acc += values[offset] * x[col_idx[offset]];
         }
         y[row] = acc;
     }

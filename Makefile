@@ -6,7 +6,7 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2
 PYTHON ?= python3
 
-N ?= 1024
+N ?= 4096
 TARGET ?= sw_emu
 DEVICE ?= xilinx_u55c_gen3x16_xdma_3_202210_1
 XPLATFORM ?= /opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm

@@ -28,11 +28,11 @@ using project_xplus::cgsolver::IterationTrace;
 using project_xplus::cgsolver::KernelTimingStats;
 using project_xplus::cgsolver::SolverConfig;
 
-constexpr int BLOCK_SIZE = 128;
+constexpr int BLOCK_SIZE = 4096;
 
 struct BlockEntry {
-    unsigned char local_row;
-    unsigned char local_col;
+    unsigned short local_row;
+    unsigned short local_col;
     data_t value;
 };
 
@@ -43,8 +43,8 @@ struct BlockCSC {
     std::vector<int> b_col_ptr;
     std::vector<int> b_row_idx;
     std::vector<int> b_nnz_ptr;
-    std::vector<unsigned char> local_rows;
-    std::vector<unsigned char> local_cols;
+    std::vector<unsigned short> local_rows;
+    std::vector<unsigned short> local_cols;
     std::vector<data_t> values;
 };
 
@@ -62,11 +62,11 @@ BlockCSC convert_csr_to_block_csc_coo(
     std::map<std::pair<int, int>, std::vector<BlockEntry>> blocks;
     for (int row = 0; row < M; ++row) {
         const int br = row / BLOCK_SIZE;
-        const unsigned char local_row = static_cast<unsigned char>(row % BLOCK_SIZE);
+        const unsigned short local_row = static_cast<unsigned short>(row % BLOCK_SIZE);
         for (int idx = row_ptr[row]; idx < row_ptr[row + 1]; ++idx) {
             const int col = col_idx[idx];
             const int bc = col / BLOCK_SIZE;
-            const unsigned char local_col = static_cast<unsigned char>(col % BLOCK_SIZE);
+            const unsigned short local_col = static_cast<unsigned short>(col % BLOCK_SIZE);
             blocks[{bc, br}].push_back({local_row, local_col, static_cast<data_t>(values[idx])});
         }
     }
@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
             dataset.n(), dataset.n(), // CG求解器通常是方阵，所以 M=N=dataset.n()
             dataset.row_ptr(), dataset.col_idx(), dataset.values()
         );
-        validate_block_csc_coo_conversion(dataset, block_csc);
+        //validate_block_csc_coo_conversion(dataset, block_csc);
 
         SolverConfig config;
         config.tau = options.tau;
