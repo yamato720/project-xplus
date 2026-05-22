@@ -126,6 +126,8 @@ HostOptions parse_args(int argc, char** argv) {
 
 template <typename T>
 xrt::bo make_input_bo(xrt::device& device, xrt::kernel& kernel, int arg_index, const std::vector<T>& data) {
+    // arg_index 必须和 cuper_pcg_control_kernel.cpp 的函数参数顺序一致。
+    // kernel.group_id(arg_index) 会把 BO 放到该 m_axi 端口绑定的 memory bank。
     xrt::bo bo(device, data.size() * sizeof(T), kernel.group_id(arg_index));
     auto mapped = bo.map<T*>();
     std::copy(data.begin(), data.end(), mapped);
@@ -135,6 +137,7 @@ xrt::bo make_input_bo(xrt::device& device, xrt::kernel& kernel, int arg_index, c
 
 template <typename T>
 xrt::bo make_inout_bo(xrt::device& device, xrt::kernel& kernel, int arg_index, std::vector<T>& data) {
+    // inout BO 先把初值同步到 device，kernel 完成后再由调用点同步回来。
     xrt::bo bo(device, data.size() * sizeof(T), kernel.group_id(arg_index));
     auto mapped = bo.map<T*>();
     std::copy(data.begin(), data.end(), mapped);
@@ -148,6 +151,7 @@ int main(int argc, char** argv) {
     try {
         const HostOptions options = parse_args(argc, argv);
         const Dataset dataset = Dataset::load(options.dataset_dir);
+        // host 端把 CSR 矩阵打包成 kernel 直接读取的 16 路 HBM Cuper 格式。
         const CuperControlMatrix matrix =
             project_xplus::cgsolver::build_cuper_control_matrix(dataset);
 
@@ -160,9 +164,9 @@ int main(int argc, char** argv) {
         std::cout << "[xplus-xrt] xclbin=" << options.xclbin_path
                   << " dataset=" << options.dataset_dir
                   << " kernel=cuper_pcg_control_kernel"
-                  << " spmv=cuper-column-batch-row-tile"
+                  << " spmv=cuper-packed-16hbm"
                   << " batches=" << matrix.batch_count
-                  << " row_tiles=" << matrix.row_tile_count << "\n";
+                  << " matrix_len=" << matrix.matrix_len << "\n";
 
         xrt::device device(options.device_index);
         auto uuid = device.load_xclbin(options.xclbin_path.string());
@@ -177,26 +181,55 @@ int main(int argc, char** argv) {
         std::vector<data_t> metrics(4, 0.0);
         std::vector<int> status(2, 0);
 
-        auto batch_ptr_bo = make_input_bo(device, kernel, 0, matrix.batch_ptr);
-        auto batch_tile_ptr_bo = make_input_bo(device, kernel, 1, matrix.batch_tile_ptr);
-        auto rows_bo = make_input_bo(device, kernel, 2, matrix.element_rows);
-        auto cols_bo = make_input_bo(device, kernel, 3, matrix.element_cols);
-        auto vals_bo = make_input_bo(device, kernel, 4, matrix.element_values);
-        auto b_bo = make_input_bo(device, kernel, 5, dataset.b());
-        auto minv_bo = make_input_bo(device, kernel, 6, m_inv);
-        auto x_bo = make_inout_bo(device, kernel, 7, x);
-        auto r_bo = make_inout_bo(device, kernel, 8, r);
-        auto z_bo = make_inout_bo(device, kernel, 9, z);
-        auto p_bo = make_inout_bo(device, kernel, 10, p);
-        auto ap_bo = make_inout_bo(device, kernel, 11, ap);
-        auto metrics_bo = make_inout_bo(device, kernel, 12, metrics);
-        auto status_bo = make_inout_bo(device, kernel, 13, status);
+        // BO 编号和 kernel 参数 ABI 对齐：
+        //   0      : sp_element_list_ptr
+        //   1..16  : matrix_data_0..15
+        //   17..25 : b/m_inv/x/r/z/p/ap/metrics/status
+        auto sp_ptr_bo = make_input_bo(device, kernel, 0, matrix.sp_element_list_ptr);
+        auto matrix0_bo = make_input_bo(device, kernel, 1, matrix.matrix_data[0]);
+        auto matrix1_bo = make_input_bo(device, kernel, 2, matrix.matrix_data[1]);
+        auto matrix2_bo = make_input_bo(device, kernel, 3, matrix.matrix_data[2]);
+        auto matrix3_bo = make_input_bo(device, kernel, 4, matrix.matrix_data[3]);
+        auto matrix4_bo = make_input_bo(device, kernel, 5, matrix.matrix_data[4]);
+        auto matrix5_bo = make_input_bo(device, kernel, 6, matrix.matrix_data[5]);
+        auto matrix6_bo = make_input_bo(device, kernel, 7, matrix.matrix_data[6]);
+        auto matrix7_bo = make_input_bo(device, kernel, 8, matrix.matrix_data[7]);
+        auto matrix8_bo = make_input_bo(device, kernel, 9, matrix.matrix_data[8]);
+        auto matrix9_bo = make_input_bo(device, kernel, 10, matrix.matrix_data[9]);
+        auto matrix10_bo = make_input_bo(device, kernel, 11, matrix.matrix_data[10]);
+        auto matrix11_bo = make_input_bo(device, kernel, 12, matrix.matrix_data[11]);
+        auto matrix12_bo = make_input_bo(device, kernel, 13, matrix.matrix_data[12]);
+        auto matrix13_bo = make_input_bo(device, kernel, 14, matrix.matrix_data[13]);
+        auto matrix14_bo = make_input_bo(device, kernel, 15, matrix.matrix_data[14]);
+        auto matrix15_bo = make_input_bo(device, kernel, 16, matrix.matrix_data[15]);
+        auto b_bo = make_input_bo(device, kernel, 17, dataset.b());
+        auto minv_bo = make_input_bo(device, kernel, 18, m_inv);
+        auto x_bo = make_inout_bo(device, kernel, 19, x);
+        auto r_bo = make_inout_bo(device, kernel, 20, r);
+        auto z_bo = make_inout_bo(device, kernel, 21, z);
+        auto p_bo = make_inout_bo(device, kernel, 22, p);
+        auto ap_bo = make_inout_bo(device, kernel, 23, ap);
+        auto metrics_bo = make_inout_bo(device, kernel, 24, metrics);
+        auto status_bo = make_inout_bo(device, kernel, 25, status);
 
-        auto run = kernel(batch_ptr_bo,
-                          batch_tile_ptr_bo,
-                          rows_bo,
-                          cols_bo,
-                          vals_bo,
+        // 单次 launch 内完成初始 SpMV、PCG 迭代和状态/metrics 写回。
+        auto run = kernel(sp_ptr_bo,
+                          matrix0_bo,
+                          matrix1_bo,
+                          matrix2_bo,
+                          matrix3_bo,
+                          matrix4_bo,
+                          matrix5_bo,
+                          matrix6_bo,
+                          matrix7_bo,
+                          matrix8_bo,
+                          matrix9_bo,
+                          matrix10_bo,
+                          matrix11_bo,
+                          matrix12_bo,
+                          matrix13_bo,
+                          matrix14_bo,
+                          matrix15_bo,
                           b_bo,
                           minv_bo,
                           x_bo,
@@ -216,6 +249,8 @@ int main(int argc, char** argv) {
         metrics_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, metrics.size() * sizeof(data_t), 0);
         status_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, status.size() * sizeof(int), 0);
 
+        // XRT map 指针中的内容才是同步后的 device 结果，复制回 host vector
+        // 后统一走 CPU reference 校验和日志输出。
         const auto x_mapped = x_bo.map<data_t*>();
         const auto metrics_mapped = metrics_bo.map<data_t*>();
         const auto status_mapped = status_bo.map<int*>();

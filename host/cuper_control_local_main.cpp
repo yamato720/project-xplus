@@ -13,11 +13,25 @@
 #include <vector>
 
 extern "C" {
-void cuper_pcg_control_kernel(const project_xplus::cgsolver::index_t* batch_ptr,
-                              const project_xplus::cgsolver::index_t* batch_tile_ptr,
-                              const project_xplus::cgsolver::index_t* element_rows,
-                              const project_xplus::cgsolver::index_t* element_cols,
-                              const float* element_values,
+// 本地可执行文件直接链接 HLS C++ kernel 函数，用同一套 host 打包数据
+// 验证 cuper_pcg_control_kernel 的数学结果。参数顺序必须和 kernel 定义一致。
+void cuper_pcg_control_kernel(const project_xplus::cgsolver::index_t* sp_element_list_ptr,
+                              const unsigned long* matrix_data_0,
+                              const unsigned long* matrix_data_1,
+                              const unsigned long* matrix_data_2,
+                              const unsigned long* matrix_data_3,
+                              const unsigned long* matrix_data_4,
+                              const unsigned long* matrix_data_5,
+                              const unsigned long* matrix_data_6,
+                              const unsigned long* matrix_data_7,
+                              const unsigned long* matrix_data_8,
+                              const unsigned long* matrix_data_9,
+                              const unsigned long* matrix_data_10,
+                              const unsigned long* matrix_data_11,
+                              const unsigned long* matrix_data_12,
+                              const unsigned long* matrix_data_13,
+                              const unsigned long* matrix_data_14,
+                              const unsigned long* matrix_data_15,
                               const project_xplus::cgsolver::data_t* b,
                               const project_xplus::cgsolver::data_t* m_inv,
                               project_xplus::cgsolver::data_t* x,
@@ -98,6 +112,8 @@ int main(int argc, char** argv) {
         const CliOptions options = parse_args(argc, argv);
         const project_xplus::cgsolver::Dataset dataset =
             project_xplus::cgsolver::Dataset::load(options.dataset_dir);
+        // CSR 数据在 host 侧转换成 Cuper packed 16-HBM 格式，
+        // 后续 local 调用和 XRT 调用都复用这个布局。
         const project_xplus::cgsolver::CuperControlMatrix matrix =
             project_xplus::cgsolver::build_cuper_control_matrix(dataset);
 
@@ -117,15 +133,29 @@ int main(int argc, char** argv) {
 
         std::cout << "[xplus] dataset=" << options.dataset_dir
                   << " mode=cuper-pcg-control-local"
-                  << " spmv=cuper-column-batch-row-tile"
+                  << " spmv=cuper-packed-16hbm"
                   << " batches=" << matrix.batch_count
-                  << " row_tiles=" << matrix.row_tile_count << "\n";
+                  << " matrix_len=" << matrix.matrix_len << "\n";
 
-        cuper_pcg_control_kernel(matrix.batch_ptr.data(),
-                                 matrix.batch_tile_ptr.data(),
-                                 matrix.element_rows.data(),
-                                 matrix.element_cols.data(),
-                                 matrix.element_values.data(),
+        // local 路径没有 XRT BO，直接把 std::vector 的底层指针传给 kernel。
+        // matrix_data[0..15] 对应 kernel 的 matrix_data_0..15。
+        cuper_pcg_control_kernel(matrix.sp_element_list_ptr.data(),
+                                 matrix.matrix_data[0].data(),
+                                 matrix.matrix_data[1].data(),
+                                 matrix.matrix_data[2].data(),
+                                 matrix.matrix_data[3].data(),
+                                 matrix.matrix_data[4].data(),
+                                 matrix.matrix_data[5].data(),
+                                 matrix.matrix_data[6].data(),
+                                 matrix.matrix_data[7].data(),
+                                 matrix.matrix_data[8].data(),
+                                 matrix.matrix_data[9].data(),
+                                 matrix.matrix_data[10].data(),
+                                 matrix.matrix_data[11].data(),
+                                 matrix.matrix_data[12].data(),
+                                 matrix.matrix_data[13].data(),
+                                 matrix.matrix_data[14].data(),
+                                 matrix.matrix_data[15].data(),
                                  dataset.b().data(),
                                  m_inv.data(),
                                  x.data(),
@@ -141,6 +171,8 @@ int main(int argc, char** argv) {
                                  dataset.n(),
                                  matrix.batch_count);
 
+        // 用 CPU reference 校验本地 kernel 函数结果，主要检查 Cuper 打包和
+        // PCG 控制流是否和原始 solver 一致。
         const project_xplus::cgsolver::CpuReferenceResult golden_result =
             project_xplus::cgsolver::run_cpu_reference(dataset, config);
 
