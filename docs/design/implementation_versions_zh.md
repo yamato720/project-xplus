@@ -26,7 +26,7 @@
 | `host/cuper_tapa_pcg_main.cpp` | TAPA Cuper SpMV + host PCG | host | 服务器实测大矩阵很快的旧 TAPA 对照版 |
 | `host/cuper_tapa_pcg_fpga_main.cpp` | 调用 `CuperPcg` 的 host | FPGA | host 只准备 Cuper 矩阵格式、向量 BO、启动一次 TAPA kernel |
 | `kernels/cuper_pcg_control_kernel.cpp` | HLS control-kernel / fullcuper 路线 | FPGA | 不是 TAPA task graph，是手拆 Cuper 思路后的 HLS kernel |
-| `host/cuper_control_xrt_host.cpp` | 调用 `cuper_pcg_control_kernel` 的 XRT host | FPGA | 用于 `395bitstream/cuper_pcg_control_*` 这批 bitstream |
+| `host/cuper_control_xrt_host.cpp` | 调用 `cuper_pcg_control_kernel` 的 XRT host | FPGA | 用于 `395bitstream/cuper-notapa-pcg-fpga-*.xclbin` 这批 no-TAPA FPGA-PCG bitstream |
 | `kernels/pcg_control_kernel.cpp` | Project-XPlus 默认 control-kernel | FPGA | 默认 Jacobi-PCG 路线，SpMV 不是 Cuper/TAPA |
 
 当前新增的 `CuperPcg` 不替代原来的 `Cuper`。同一个 `DLC/Cuper/kernels/Cuper.cpp`
@@ -354,9 +354,9 @@ cfg/connectivity_cuper_control_u55c.cfg
 当前硬件产物：
 
 ```text
-395bitstream/cuper_pcg_control_packed16hbm_20260522.xclbin
-395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin
-395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin.info
+395bitstream/cuper-notapa-pcg-fpga-legacy-packed16hbm-u55c-20260522.xclbin
+395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin
+395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin.info
 ```
 
 `fullcuper` 当前已知 timing 状态：
@@ -382,7 +382,7 @@ make cuper-control-hw-tmux
 make cuper-control-xrt-host
 
 ./build/xplus_cuper_control_xrt_host \
-  395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin \
+  395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin \
   /path/to/dataset \
   --tau 1e-8 \
   --max-iters 1000

@@ -10,9 +10,9 @@ bitstream 尝试。重点是区分已经能生成的版本、仍在失败的 TAP
 
 | 产物 | 架构 | 状态 |
 | --- | --- | --- |
-| `395bitstream/Cuper_2022.xclbin` | TAPA Cuper SpMV，PCG 在 host | 可用，服务器实测大矩阵最快 |
-| `395bitstream/cuper_pcg_control_packed16hbm_20260522.xclbin` | HLS control-kernel，Cuper packed SpMV + FPGA 内 PCG | 可用 |
-| `395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin` | HLS control-kernel，手拆 Cuper 数据流 + FPGA 内 PCG | 可用，但频率/效率不如 TAPA Cuper SpMV 版 |
+| `395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper SpMV，PCG 在 host | 可用，服务器实测大矩阵最快 |
+| `395bitstream/cuper-notapa-pcg-fpga-legacy-packed16hbm-u55c-20260522.xclbin` | HLS control-kernel，Cuper packed SpMV + FPGA 内 PCG | 可用 |
+| `395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | HLS control-kernel，手拆 Cuper 数据流 + FPGA 内 PCG | 可用，但频率/效率不如 TAPA Cuper SpMV 版 |
 
 当前仍在攻关的是：
 
@@ -35,7 +35,7 @@ XRT/Vitis 库，也不是 host 端编译问题；日志已经进入 Vivado place
 文件：
 
 ```text
-395bitstream/Cuper_2022.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin
 ```
 
 对应源码：
@@ -59,7 +59,7 @@ host/cuper_pcg_solver.hpp
 文件：
 
 ```text
-395bitstream/cuper_pcg_control_packed16hbm_20260522.xclbin
+395bitstream/cuper-notapa-pcg-fpga-legacy-packed16hbm-u55c-20260522.xclbin
 ```
 
 构建日志：
@@ -102,8 +102,8 @@ bitgen:    00h 23m 47s
 文件：
 
 ```text
-395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin
-395bitstream/cuper_pcg_control_fullcuper_20260522.xclbin.info
+395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin
+395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin.info
 ```
 
 构建日志：
@@ -424,7 +424,7 @@ routing 走到后段
 
 ## 当前结论
 
-`Cuper_2022.xclbin` 的性能优势来自原 TAPA Cuper SpMV 数据流。现在要做的
+`cuper-tapa-spmv-u55c-20260522.xclbin` 的性能优势来自原 TAPA Cuper SpMV 数据流。现在要做的
 不是继续优化已经可用的 host-PCG 对照版，而是把 FPGA 内 PCG 做到不破坏
 TAPA Cuper 的布线和吞吐。
 

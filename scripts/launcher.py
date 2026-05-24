@@ -41,7 +41,7 @@ CUPER_CODE_VERSIONS = [
     CodeVersion(
         key="cuper_tapa_spmv",
         title="TAPA Cuper / single SpMV",
-        description="只运行 DLC/Cuper TAPA SpMV kernel，用于测纯 SpMV；兼容已有 Cuper_2022.xclbin。",
+        description="只运行 DLC/Cuper TAPA SpMV kernel，用于测纯 SpMV；兼容 395bitstream 里的 TAPA SpMV bitstream。",
         runner="cuper_tapa_spmv",
         requires_kmax=False,
     ),
@@ -556,10 +556,10 @@ def handle_active_action(version: CodeVersion,
         if answer == "2":
             return run_command(["make", "run-cuper-tapa-spmv", f"DATASET={dataset.path}"], cwd=root)
         if answer == "3":
-            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 DLC/Cuper/Cuper_2022.xclbin: ")
+            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin: ")
             if bitfile is None:
                 return 0
-            bitfile_path = Path(bitfile) if bitfile else root / "DLC" / "Cuper" / "Cuper_2022.xclbin"
+            bitfile_path = Path(bitfile) if bitfile else root / "395bitstream" / "cuper-tapa-spmv-u55c-20260522.xclbin"
             return run_command([
                 "make",
                 "run-cuper-tapa-spmv",
@@ -703,10 +703,10 @@ def handle_archived_action(version: CodeVersion,
         if answer == "2":
             return run_command(["make", "run-cuper-pcg-tapa", f"DATASET={dataset.path}"], cwd=root)
         if answer == "3":
-            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 DLC/Cuper/Cuper_2022.xclbin: ")
+            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin: ")
             if bitfile is None:
                 return 0
-            bitfile_path = Path(bitfile) if bitfile else root / "DLC" / "Cuper" / "Cuper_2022.xclbin"
+            bitfile_path = Path(bitfile) if bitfile else root / "395bitstream" / "cuper-tapa-spmv-u55c-20260522.xclbin"
             return run_command([
                 "make",
                 "run-cuper-pcg-tapa",
