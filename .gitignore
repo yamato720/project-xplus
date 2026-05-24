@@ -28,3 +28,8 @@ hd_visual/
 *.csv
 *.run_summary
 docs/refer/*.pdf
+
+# Local source/bitstream snapshots under bitstream_archive are documentation-only in Git.
+bitstream_archive/2026-05-24-current-spmv-bitstreams/**
+!bitstream_archive/2026-05-24-current-spmv-bitstreams/
+!bitstream_archive/2026-05-24-current-spmv-bitstreams/README.md

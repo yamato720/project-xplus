@@ -15,7 +15,6 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
-| `cuper-notapa-pcg-fpga-legacy-packed16hbm-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG legacy | FPGA kernel | 旧 packed16hbm control-kernel | 历史对照 |
 
 TAPA Cuper / FPGA-PCG 的当前目标名预留为：
 
@@ -72,22 +71,13 @@ make cuper-control-xrt-host
   --max-iters 1000
 ```
 
-legacy no-TAPA FPGA-PCG：
-
-```bash
-./build/xplus_cuper_control_xrt_host \
-  395bitstream/cuper-notapa-pcg-fpga-legacy-packed16hbm-u55c-20260522.xclbin \
-  /path/to/dataset \
-  --tau 1e-8 \
-  --max-iters 1000
-```
-
 ## 口径说明
 
 - `spmv` 版只比较 Cuper SpMV kernel。TAPA 版和 no-TAPA 版都可以用 `--spmv-only` 跑纯 SpMV。
 - `pcg-fpga` 版把 PCG 控制、dot、alpha/beta、向量更新和收敛判断放进 FPGA kernel。
 - TAPA single SpMV 的旧兼容 host-PCG 路径仍可用，但不算当前四条主线里的 FPGA-PCG。
 - no-TAPA single SpMV 的 host-PCG 兼容路径也仍可用，主要用于复用 `cuper_packed_spmv_kernel` 做对照。
+- legacy packed16hbm 版已从本同步目录移出，只在 `bitstream_archive/legacy-packed16hbm/README.md` 留文字记录；二进制文件在 U55C 服务器上保留。
 
 对比时至少记录：
 

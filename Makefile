@@ -540,21 +540,21 @@ run-cuper-pcg-tapa-fpga: $(CUPER_TAPA_PCG_FPGA_HOST)
 	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 
 run-cuper-notapa-pcg-xrt: $(CUPER_NOTAPA_PCG_XRT_HOST)
-	@test -f "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" || (echo "ERROR: xclbin not found: $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin. Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw)" && exit 1)
+	@test -f "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" || (echo "ERROR: xclbin not found: $(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin). Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw), or pass BITFILE=/path/to/cuper_packed_spmv_kernel.xclbin" && exit 1)
 ifeq ($(TARGET),hw)
-	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 else
 	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/emconfig.json TARGET=$(TARGET) BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
-	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 endif
 
 run-cuper-notapa-spmv-xrt: $(CUPER_NOTAPA_PCG_XRT_HOST)
-	@test -f "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" || (echo "ERROR: xclbin not found: $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin. Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw)" && exit 1)
+	@test -f "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" || (echo "ERROR: xclbin not found: $(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin). Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw), or pass BITFILE=/path/to/cuper_packed_spmv_kernel.xclbin" && exit 1)
 ifeq ($(TARGET),hw)
-	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 else
 	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/emconfig.json TARGET=$(TARGET) BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
-	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(or $(BITFILE),$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 endif
 
 run-cuper-control-local: $(CUPER_CONTROL_LOCAL_HOST)
@@ -562,12 +562,12 @@ run-cuper-control-local: $(CUPER_CONTROL_LOCAL_HOST)
 
 run-cuper-control-xrt: $(CUPER_CONTROL_XRT_HOST)
 ifeq ($(TARGET),hw)
-	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-hw" && exit 1)
-	$(XRT_RUN_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	@test -f "$(or $(BITFILE),$(CUPER_CONTROL_XCLBIN))" || (echo "ERROR: xclbin not found: $(or $(BITFILE),$(CUPER_CONTROL_XCLBIN)). Build it first with: make build-cuper-control-hw, or pass BITFILE=/path/to/cuper_pcg_control_kernel.xclbin" && exit 1)
+	$(XRT_RUN_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(or $(BITFILE),$(CUPER_CONTROL_XCLBIN))" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 else
-	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-sw" && exit 1)
+	@test -f "$(or $(BITFILE),$(CUPER_CONTROL_XCLBIN))" || (echo "ERROR: xclbin not found: $(or $(BITFILE),$(CUPER_CONTROL_XCLBIN)). Build it first with: make build-cuper-control-sw, or pass BITFILE=/path/to/cuper_pcg_control_kernel.xclbin" && exit 1)
 	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
-	$(XRT_RUN_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+	$(XRT_RUN_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(or $(BITFILE),$(CUPER_CONTROL_XCLBIN))" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 endif
 
 run-cuper-pcg-notapa-xrt: $(CUPER_CONTROL_XRT_HOST)

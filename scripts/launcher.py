@@ -595,11 +595,16 @@ def handle_active_action(version: CodeVersion,
                 return 0
             return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
         if answer == "5":
+            bitfile = ask_text("输入 no-TAPA Cuper SpMV bitstream 路径，直接回车使用 395bitstream/cuper-notapa-spmv-u55c-20260524.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "395bitstream" / "cuper-notapa-spmv-u55c-20260524.xclbin"
             return run_command([
                 "make",
                 "run-cuper-notapa-spmv-xrt",
                 "TARGET=hw",
                 f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
             ], cwd=root)
 
     if version.runner == "cuper_tapa_fpga_pcg":
@@ -740,11 +745,16 @@ def handle_archived_action(version: CodeVersion,
                 return 0
             return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
         if answer == "5":
+            bitfile = ask_text("输入 no-TAPA Cuper SpMV bitstream 路径，直接回车使用 395bitstream/cuper-notapa-spmv-u55c-20260524.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "395bitstream" / "cuper-notapa-spmv-u55c-20260524.xclbin"
             return run_command([
                 "make",
                 "run-cuper-notapa-pcg-xrt",
                 "TARGET=hw",
                 f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
             ], cwd=root)
 
     if version.runner == "cuper_pcg" and answer == "1":
