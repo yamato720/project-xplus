@@ -1,8 +1,8 @@
 # 2026-05-24 Current SpMV Bitstream Snapshot
 
 这个目录是 2026-05-24 的本地快照，保存当前两版 SpMV bitstream 以及对应源码。
-GitHub 只同步本 `README.md`；本目录下的 `.xclbin`、`.xclbin.info` 和 `sources/`
-源码副本都由 `.gitignore` 忽略，不会上传。
+GitHub 同步本 `README.md`、`.xclbin.info` 和 `sources/` 源码副本；
+本目录下的 `.xclbin` 大文件由 `.gitignore` 忽略，不会上传。
 
 ## Scope
 
@@ -58,12 +58,11 @@ sources/
 
 ## Git Policy
 
-`.gitignore` 中对此目录有专门规则：
+`.gitignore` 默认忽略所有 `.xclbin`，只对 `395bitstream/*.xclbin` 开例外。
+因此本归档目录内的 bitstream 二进制留在本地，不会通过 GitHub 同步。
+源码快照和 `.xclbin.info` 不再额外忽略，可以正常进入 Git。
 
 ```text
-bitstream_archive/2026-05-24-current-spmv-bitstreams/**
-!bitstream_archive/2026-05-24-current-spmv-bitstreams/
-!bitstream_archive/2026-05-24-current-spmv-bitstreams/README.md
+*.xclbin
+!395bitstream/*.xclbin
 ```
-
-因此本地快照会留在当前机器或 U55C 服务器工作区，但不会通过 GitHub 同步。

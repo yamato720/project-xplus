@@ -29,7 +29,4 @@ hd_visual/
 *.run_summary
 docs/refer/*.pdf
 
-# Local source/bitstream snapshots under bitstream_archive are documentation-only in Git.
-bitstream_archive/2026-05-24-current-spmv-bitstreams/**
-!bitstream_archive/2026-05-24-current-spmv-bitstreams/
-!bitstream_archive/2026-05-24-current-spmv-bitstreams/README.md
+# Archived .xclbin files stay local; source snapshots and .xclbin.info may be tracked.
