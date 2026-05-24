@@ -11,8 +11,31 @@
 | 默认 control-kernel 版 | 当前单 control-kernel 版 | FPGA kernel 内 | `pcg_control_kernel.cpp` 内部 | 当前默认 XRT/HLS 主线 |
 | Cuper-PCG 软件版 | Cuper-PCG 版 | host | Cuper 风格 FP32 软件 SpMV | 验证 Cuper 数据格式和 PCG 外层流程 |
 | Cuper-PCG TAPA 版 | Cuper-PCG TAPA 版 | host | `DLC/Cuper` TAPA kernel | 当前最新 TAPA Cuper 硬件实验 |
+| Cuper-PCG TAPA 全 FPGA 版 | Cuper-PCG TAPA FPGA 版 | FPGA TAPA kernel 内 | `DLC/Cuper` TAPA Cuper SpMV task graph | 当前正在实现的满血 Cuper + FPGA 内 PCG 版本 |
 | Cuper-PCG control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | Cuper column-batch/row-tile SpMV | 把 Cuper SpMV 和 PCG 控制合进一个 kernel 的实验版 |
 | Cuper-PCG fullcuper control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | 手拆 TAPA Cuper 思路后的 16 HBM/512-bit/8-lane SpMV | 当前最接近满血 Cuper 进入 PCG kernel 的实验版 |
+
+## 当前源码版本速查
+
+这几个名字很容易混在一起，先按源码入口区分：
+
+| 源码/目标 | 当前版本含义 | PCG 在哪里 | 备注 |
+| --- | --- | --- | --- |
+| `DLC/Cuper/kernels/Cuper.cpp` / `Cuper(...)` | 原始 TAPA Cuper SpMV | host | 只做 SpMV，不做 PCG 收敛、`alpha/beta` 或向量更新 |
+| `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg(...)` | TAPA Cuper + FPGA 内 PCG 新版 | FPGA | 保留 TAPA Cuper 16 路 HBM SpMV task graph，并新增 FPGA 内 PCG controller |
+| `host/cuper_tapa_pcg_main.cpp` | TAPA Cuper SpMV + host PCG | host | 服务器实测大矩阵很快的旧 TAPA 对照版 |
+| `host/cuper_tapa_pcg_fpga_main.cpp` | 调用 `CuperPcg` 的 host | FPGA | host 只准备 Cuper 矩阵格式、向量 BO、启动一次 TAPA kernel |
+| `kernels/cuper_pcg_control_kernel.cpp` | HLS control-kernel / fullcuper 路线 | FPGA | 不是 TAPA task graph，是手拆 Cuper 思路后的 HLS kernel |
+| `host/cuper_control_xrt_host.cpp` | 调用 `cuper_pcg_control_kernel` 的 XRT host | FPGA | 用于 `395bitstream/cuper_pcg_control_*` 这批 bitstream |
+| `kernels/pcg_control_kernel.cpp` | Project-XPlus 默认 control-kernel | FPGA | 默认 Jacobi-PCG 路线，SpMV 不是 Cuper/TAPA |
+
+当前新增的 `CuperPcg` 不替代原来的 `Cuper`。同一个 `DLC/Cuper/kernels/Cuper.cpp`
+里现在同时有两个顶层：
+
+```text
+Cuper     : TAPA Cuper SpMV only，给 host-PCG 旧对照版用
+CuperPcg  : TAPA Cuper SpMV + FPGA 内 PCG，给当前满血 Cuper 移植实验用
+```
 
 ## 1. 多 kernel 普通版
 
@@ -175,11 +198,13 @@ Cuper(
 
 特点：
 
-- 当前最新 TAPA 版不是把 PCG 塞进 Cuper kernel。
+- 这是服务器实测大矩阵性能最好的旧对照版之一。
+- 这个版本不是把 PCG 塞进 Cuper kernel。
 - `DLC/Cuper/kernels/Cuper.cpp` 只做 Cuper 风格 SpMV。
 - `host/cuper_tapa_pcg_main.cpp` 把 TAPA Cuper 包装成 `CuperTapaSpmv`。
 - `host/cuper_pcg_solver.hpp` 仍在 host 侧执行 PCG 主循环。
 - `Iteration_num` 是 Cuper kernel 内重复执行 SpMV 的计数/性能参数，不是 PCG 迭代控制。
+- 如果性能对比里看到这个版本，应该理解为 `TAPA Cuper SpMV + host PCG`，不是全流程 FPGA PCG。
 
 当前硬件产物：
 
@@ -211,7 +236,94 @@ Project-XS/example/project_xplus_hls/reports/xo_report.html
 Project-XS/example/project_xplus_hls/reports/xo_report_analysis.html
 ```
 
-## 6. Cuper-PCG control-kernel 版
+## 6. Cuper-PCG TAPA 全 FPGA 版
+
+定位：
+
+```text
+host launch 一次 CuperPcg
+FPGA TAPA kernel 内完成 Cuper SpMV、Jacobi-PCG 初始化、PCG 主循环、
+alpha/beta、x/r/z/p/ap 更新、收敛判断和状态写回
+```
+
+主要源码：
+
+```text
+host/cuper_tapa_pcg_fpga_main.cpp
+DLC/Cuper/include/Cuper.h
+DLC/Cuper/kernels/Cuper.cpp
+cfg/connectivity_cuper_tapa_pcg_u55c.cfg
+```
+
+TAPA kernel 顶层参数：
+
+```cpp
+CuperPcg(
+  SpElement_list_ptr,
+  Matrix_data_0..15,
+  B,
+  M_inv,
+  X,
+  R,
+  Z,
+  P,
+  AP,
+  Metrics,
+  Status,
+  Batch_num,
+  Matrix_len,
+  Row_num,
+  Column_num,
+  Max_iters,
+  Tau
+)
+```
+
+特点：
+
+- 这是当前正在移植的“满血 TAPA Cuper + FPGA 内 PCG”路线。
+- SpMV 仍走 `DLC/Cuper/kernels/Cuper.cpp` 的 TAPA task graph 风格，不是 `kernels/cuper_pcg_control_kernel.cpp` 那条手拆 HLS 路线。
+- `CuperPcg` 内新增 `Pcg_Controller`，负责 PCG 初始化、每轮发起 SpMV、计算 `alpha/beta`、更新 `x/r/z/p/ap`、写回 `metrics/status`。
+- 矩阵仍是 Cuper 的 16 路 HBM 输入：`Matrix_data_0..15 -> HBM[0..15]`。
+- PCG 向量和状态额外放在 HBM：`B/M_inv/X/R/Z/P/AP -> HBM[16..22]`，`Metrics/Status -> HBM[23]`。
+- 当前显式用到 HBM[0..23]。它吃满的是原 Cuper 16 路矩阵并行度，不是 U55C 32 个 HBM bank 全部打满。
+- host 只负责把 CSR 转成 Cuper 的 `SpElement`/HBM channel 格式，分配 BO，然后启动一次 `CuperPcg`。
+
+常用命令：
+
+```bash
+make cuper-tapa-pcg-fpga-host
+make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 TAU=1e-8 MAX_ITERS=100 DIFF_TOL=1e-3
+make build-cuper-tapa-pcg TARGET=sw_emu
+make build-cuper-tapa-pcg-hw
+make cuper-tapa-pcg-hw-tmux
+```
+
+当前已验证状态：
+
+```text
+软件仿真已通过 n512 小数据集：
+iter=41
+status=converged
+max_rel_diff 约 6.14e-7
+```
+
+当前硬件构建状态：
+
+```text
+build/hw/CuperPcg.xo 已生成
+build/hw/CuperPcg.xclbin 正在 tmux 中做 Vitis/Vivado hw link
+tmux session: project-xplus-cuper-tapa-pcg-hw
+log: logs/cuper_tapa_pcg_hw_20260522_224057.log
+```
+
+注意事项：
+
+- `CuperPcg` 是新实验路线，性能还没有服务器实测。
+- 预期目标是保持 TAPA Cuper 大矩阵 SpMV 吞吐，同时去掉 host 每轮 PCG 控制和向量往返。
+- 风险主要在综合/实现耗时、资源、时序，以及 PCG controller 是否限制原 TAPA Cuper 的流水。
+
+## 7. Cuper-PCG control-kernel 版
 
 定位：
 

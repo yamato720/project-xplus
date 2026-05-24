@@ -3,7 +3,7 @@
 
 #include "../include/cg_common.hpp"
 #include "dataset_bridge.hpp"
-#include "multi_kernel_solver.hpp"
+#include "pcg_common.hpp"
 
 #include <algorithm>
 #include <chrono>

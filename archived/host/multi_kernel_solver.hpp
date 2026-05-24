@@ -1,7 +1,7 @@
 #ifndef PROJECT_XPLUS_MULTI_KERNEL_SOLVER_HPP
 #define PROJECT_XPLUS_MULTI_KERNEL_SOLVER_HPP
 
-#include "../include/cg_common.hpp"
+#include "../../include/cg_common.hpp"
 #include "../include/cg_kernels.hpp"
 #include "dataset_bridge.hpp"
 

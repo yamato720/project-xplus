@@ -1,4 +1,4 @@
-#include "../include/cg_common.hpp"
+#include "../../include/cg_common.hpp"
 
 namespace {
 

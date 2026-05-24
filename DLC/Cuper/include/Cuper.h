@@ -68,4 +68,28 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            const INDEX_TYPE Iteration_num
           );
 
+// TAPA Cuper + FPGA-side Jacobi-PCG 顶层。
+//
+// 这个版本保留 Cuper 的 TAPA SpMV task graph，但不再让 host 每轮调用
+// SpMV。PCG controller 在 FPGA 内部发起每次 SpMV、消费 y=A*x/A*p，
+// 并更新 x/r/z/p、metrics/status。
+void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+              tapa::mmap<double> B,
+              tapa::mmap<double> M_inv,
+              tapa::mmap<double> X,
+              tapa::mmap<double> R,
+              tapa::mmap<double> Z,
+              tapa::mmap<double> P,
+              tapa::mmap<double> AP,
+              tapa::mmap<double> Metrics,
+              tapa::mmap<INDEX_TYPE> Status,
+              const INDEX_TYPE Batch_num,
+              const INDEX_TYPE Matrix_len,
+              const INDEX_TYPE Row_num,
+              const INDEX_TYPE Column_num,
+              const INDEX_TYPE Max_iters,
+              const double Tau
+             );
+
 #endif

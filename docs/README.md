@@ -17,6 +17,8 @@
 
 - [Cuper 大矩阵拆分运行方案](design/cuper_large_matrix_split_zh.md)
   - 说明 `DLC/Cuper` 的 slice/window 限制，以及大矩阵按 tile 拆给 Cuper 的方案。
+- [Cuper / CuperPcg 比特流构建尝试记录](design/cuper_tapa_pcg_bitstream_attempts_zh.md)
+  - 记录当前几版 Cuper-PCG xclbin、TAPA CuperPcg 全 FPGA 版的失败日志和后续优化方向。
 - [滑动窗口 SpMV 与 dataflow 实验记录](design/spmv_windowed_dataflow_zh.md)
   - 说明默认 control-kernel 路径里的滑动窗口 SpMV。
 - [SpMV block/window 原理图](design/spmv_block_window_principle_zh.html)

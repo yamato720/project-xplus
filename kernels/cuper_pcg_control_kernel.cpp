@@ -2,6 +2,16 @@
 
 #include <cstdint>
 
+// no-TAPA Cuper 的两个主线 kernel 都在本文件中：
+//
+//   1. cuper_packed_spmv_kernel
+//      只执行一次 y = A * x，用于 no-TAPA Cuper / single SpMV。
+//
+//   2. cuper_pcg_control_kernel
+//      在 FPGA 内执行完整 Jacobi-PCG，用于 no-TAPA Cuper / FPGA-PCG。
+//
+// 两个入口共用同一套 Cuper packed 16-HBM SpMV 数据流，区别在于
+// PCG 控制和向量更新是在 host 侧还是 kernel 侧。
 #if __has_include(<ap_int.h>)
 #include <ap_int.h>
 #define PROJECT_XPLUS_HAS_AP_INT 1
@@ -52,24 +62,24 @@ constexpr int kCuperLanesPerWord = 8;
 constexpr int kCuperXBankNum = 4;
 constexpr int kCuperUramDepth = 6144;
 constexpr int kCuperMaxBatchCount = 4096;
+constexpr int kDotPartialCount = 16;
 
 #if PROJECT_XPLUS_HAS_AP_INT
 using cuper_word_t = ap_uint<512>;
 using cuper_matrix_ptr_t = const cuper_word_t*;
 
-inline unsigned long read_cuper_matrix_lane(cuper_matrix_ptr_t matrix_data,
-                                            const int index,
-                                            const int lane) {
+inline unsigned long read_cuper_matrix_lane(const cuper_word_t word, const int lane) {
 #pragma HLS INLINE
-    const cuper_word_t word = matrix_data[index];
     return static_cast<unsigned long>(word(63 + 64 * lane, 64 * lane));
 }
 #else
+using cuper_word_t = unsigned long;
 using cuper_matrix_ptr_t = const unsigned long*;
 
 inline unsigned long read_cuper_matrix_lane(cuper_matrix_ptr_t matrix_data,
                                             const int index,
                                             const int lane) {
+#pragma HLS INLINE
     return matrix_data[index * kCuperLanesPerWord + lane];
 }
 #endif
@@ -91,6 +101,15 @@ struct CuperBatchParam {
     int begin;
     int end;
     int slice_begin;
+};
+
+struct CuperXPacket {
+    spmv_data_t values[16];
+};
+
+struct PcgInitResult {
+    data_t rz[kDotPartialCount];
+    data_t rr[kDotPartialCount];
 };
 
 inline data_t abs_value(const data_t value) {
@@ -147,17 +166,25 @@ load_x_slice_loop:
     }
 }
 
-void load_x_slice_stream(hls::stream<data_t>& x_stream,
+void load_x_slice_stream(hls::stream<CuperXPacket>& x_stream,
                          spmv_data_t x_slice[kCuperXBankNum][kCuperSliceWidth]) {
 #pragma HLS INLINE off
-load_x_slice_stream_loop:
-    for (int offset = 0; offset < kCuperSliceWidth; ++offset) {
+    // 原 TAPA Cuper 用 float_v16 流传 x。这里也按 16-lane packet
+    // 传输 x slice，减少 stream token 数量和 loader 控制开销。
+load_x_slice_packets:
+    for (int packet_index = 0; packet_index < kCuperSliceWidth / 16; ++packet_index) {
 #pragma HLS PIPELINE II = 1
-        const spmv_data_t value = static_cast<spmv_data_t>(x_stream.read());
-    load_x_slice_banks:
-        for (int bank = 0; bank < kCuperXBankNum; ++bank) {
+        const CuperXPacket packet = x_stream.read();
+    load_x_slice_lanes:
+        for (int lane = 0; lane < 16; ++lane) {
 #pragma HLS UNROLL
-            x_slice[bank][offset] = value;
+            const int offset = (packet_index << 4) + lane;
+            const spmv_data_t value = packet.values[lane];
+        load_x_slice_banks:
+            for (int bank = 0; bank < kCuperXBankNum; ++bank) {
+#pragma HLS UNROLL
+                x_slice[bank][offset] = value;
+            }
         }
     }
 }
@@ -167,7 +194,7 @@ void broadcast_cuper_inputs(const index_t* sp_element_list_ptr,
                             const int batch_count,
                             const int n,
                             hls::stream<CuperBatchParam> batch_streams[kCuperHbmChannelNum],
-                            hls::stream<data_t> x_streams[kCuperHbmChannelNum]) {
+                            hls::stream<CuperXPacket> x_streams[kCuperHbmChannelNum]) {
 #pragma HLS INLINE off
     int begin = sp_element_list_ptr[0];
 
@@ -184,15 +211,21 @@ broadcast_batch_loop:
             batch_streams[channel].write(param);
         }
 
-    broadcast_x_slice:
-        for (int offset = 0; offset < kCuperSliceWidth; ++offset) {
+    broadcast_x_packets:
+        for (int packet_index = 0; packet_index < kCuperSliceWidth / 16; ++packet_index) {
 #pragma HLS PIPELINE II = 1
-            const int global_col = slice_begin + offset;
-            const data_t value = (global_col < n) ? x[global_col] : 0.0;
+            CuperXPacket packet;
+        fill_x_packet:
+            for (int lane = 0; lane < 16; ++lane) {
+#pragma HLS UNROLL
+                const int global_col = slice_begin + (packet_index << 4) + lane;
+                packet.values[lane] =
+                    (global_col < n) ? static_cast<spmv_data_t>(x[global_col]) : 0.0f;
+            }
         broadcast_x_channels:
             for (int channel = 0; channel < kCuperHbmChannelNum; ++channel) {
 #pragma HLS UNROLL
-                x_streams[channel].write(value);
+                x_streams[channel].write(packet);
             }
         }
 
@@ -232,7 +265,7 @@ void process_cuper_channel_stream(cuper_matrix_ptr_t matrix_data,
                                   const int batch_count,
                                   const int n,
                                   hls::stream<CuperBatchParam>& batch_stream,
-                                  hls::stream<data_t>& x_stream,
+                                  hls::stream<CuperXPacket>& x_stream,
                                   hls::stream<CuperOutputItem>& output_stream) {
 #pragma HLS INLINE off
     // 每个 lane 只负责一部分固定行。active_depth 是该 lane 需要保存的
@@ -274,17 +307,32 @@ process_cuper_channel_loop:
 #pragma HLS DEPENDENCE variable = local_y_odd inter true distance = 10
             // 一个 matrix_data channel 的同一 index 连续存 8 个 lane word。
             // lane 完全展开后，每拍并行处理 8 个候选非零元。
+#if PROJECT_XPLUS_HAS_AP_INT
+            // 硬件路径必须显式只读一次 512-bit word，再拆 8 个 64-bit lane。
+            // 如果在展开的 lane 循环里各自读 matrix_data[index]，HLS 可能会
+            // 生成 8 个同地址读请求或把循环 II 拉高，吞吐会和 TAPA Cuper 差很多。
+            const cuper_word_t matrix_word = matrix_data[index];
+#endif
     process_lanes:
             for (int lane = 0; lane < kCuperPePerHbm; ++lane) {
 #pragma HLS UNROLL
                 int packed_row = 0;
                 const spmv_data_t product =
+#if PROJECT_XPLUS_HAS_AP_INT
+                    decode_product(read_cuper_matrix_lane(matrix_word, lane),
+                                   param.slice_begin,
+                                   x_slice,
+                                   lane,
+                                   packed_row,
+                                   n);
+#else
                     decode_product(read_cuper_matrix_lane(matrix_data, index, lane),
                                    param.slice_begin,
                                    x_slice,
                                    lane,
                                    packed_row,
                                    n);
+#endif
                 if ((packed_row & (1 << 17)) == 0) {
                     const int row_group = packed_row >> 1;
                     if (row_group >= 0 && row_group < active_depth) {
@@ -314,13 +362,43 @@ flush_local_y:
     }
 }
 
-void write_cuper_output_item(data_t* y, const CuperOutputItem& item, const int n) {
+template <bool InitializeVectors>
+void write_cuper_output_item(data_t* y,
+                             const data_t* b,
+                             const data_t* m_inv,
+                             data_t* r,
+                             data_t* z,
+                             data_t* p,
+                             const CuperOutputItem& item,
+                             const int n,
+                             const int partial_bank,
+                             PcgInitResult& init_result) {
 #pragma HLS INLINE
     if (item.even_row < n) {
-        y[item.even_row] = item.even_value;
+        const data_t y_value = static_cast<data_t>(item.even_value);
+        y[item.even_row] = y_value;
+        if (InitializeVectors) {
+            const data_t r_value = b[item.even_row] - y_value;
+            const data_t z_value = m_inv[item.even_row] * r_value;
+            r[item.even_row] = r_value;
+            z[item.even_row] = z_value;
+            p[item.even_row] = z_value;
+            init_result.rz[partial_bank] += r_value * z_value;
+            init_result.rr[partial_bank] += r_value * r_value;
+        }
     }
     if (item.odd_row < n) {
-        y[item.odd_row] = item.odd_value;
+        const data_t y_value = static_cast<data_t>(item.odd_value);
+        y[item.odd_row] = y_value;
+        if (InitializeVectors) {
+            const data_t r_value = b[item.odd_row] - y_value;
+            const data_t z_value = m_inv[item.odd_row] * r_value;
+            r[item.odd_row] = r_value;
+            z[item.odd_row] = z_value;
+            p[item.odd_row] = z_value;
+            init_result.rz[partial_bank] += r_value * z_value;
+            init_result.rr[partial_bank] += r_value * r_value;
+        }
     }
 }
 
@@ -378,6 +456,7 @@ CuperOutputItem read_cuper_output_item(hls::stream<CuperOutputItem>& output_stre
     }
 }
 
+template <bool InitializeVectors>
 void write_cuper_outputs(hls::stream<CuperOutputItem>& output_stream_0,
                          hls::stream<CuperOutputItem>& output_stream_1,
                          hls::stream<CuperOutputItem>& output_stream_2,
@@ -394,10 +473,26 @@ void write_cuper_outputs(hls::stream<CuperOutputItem>& output_stream_0,
                          hls::stream<CuperOutputItem>& output_stream_13,
                          hls::stream<CuperOutputItem>& output_stream_14,
                          hls::stream<CuperOutputItem>& output_stream_15,
+                         const data_t* b,
+                         const data_t* m_inv,
                          data_t* y,
+                         data_t* r,
+                         data_t* z,
+                         data_t* p,
+                         data_t* init_rz_out,
+                         data_t* init_rr_out,
                          const int n) {
 #pragma HLS INLINE off
     const int active_depth = (n + (2 * kCuperPeNum - 1)) / (2 * kCuperPeNum);
+    PcgInitResult init_result{};
+#pragma HLS ARRAY_PARTITION variable = init_result.rz complete dim = 1
+#pragma HLS ARRAY_PARTITION variable = init_result.rr complete dim = 1
+init_pcg_partials:
+    for (int index = 0; index < kDotPartialCount; ++index) {
+#pragma HLS UNROLL
+        init_result.rz[index] = 0.0;
+        init_result.rr[index] = 0.0;
+    }
 
     // 16 路 channel 的输出行互不重叠。按 Cuper 的 packet_id 顺序交错读取，
     // 等价于 TAPA Vector_Checker/Mult_Sort_Tree 把各路 float_v2 重新排回
@@ -429,11 +524,33 @@ write_row_groups:
                                        output_stream_14,
                                        output_stream_15,
                                        channel);
-            write_cuper_output_item(y, item, n);
+            const int dot_bank = packet_offset & (kDotPartialCount - 1);
+            write_cuper_output_item<InitializeVectors>(y,
+                                                       b,
+                                                       m_inv,
+                                                       r,
+                                                       z,
+                                                       p,
+                                                       item,
+                                                       n,
+                                                       dot_bank,
+                                                       init_result);
         }
     }
+
+    data_t init_rz = 0.0;
+    data_t init_rr = 0.0;
+reduce_init_partials:
+    for (int index = 0; index < kDotPartialCount; ++index) {
+#pragma HLS UNROLL
+        init_rz += init_result.rz[index];
+        init_rr += init_result.rr[index];
+    }
+    *init_rz_out = init_rz;
+    *init_rr_out = init_rr;
 }
 
+template <bool InitializeVectors>
 void cuper_packed_spmv_dataflow(const index_t* sp_element_list_ptr,
                                 cuper_matrix_ptr_t matrix_data_0,
                                 cuper_matrix_ptr_t matrix_data_1,
@@ -452,7 +569,14 @@ void cuper_packed_spmv_dataflow(const index_t* sp_element_list_ptr,
                                 cuper_matrix_ptr_t matrix_data_14,
                                 cuper_matrix_ptr_t matrix_data_15,
                                 const data_t* x,
+                                const data_t* b,
+                                const data_t* m_inv,
                                 data_t* y,
+                                data_t* r,
+                                data_t* z,
+                                data_t* p,
+                                data_t* init_rz_out,
+                                data_t* init_rr_out,
                                 const int batch_count,
                                 const int n) {
 #pragma HLS INLINE off
@@ -473,7 +597,7 @@ void cuper_packed_spmv_dataflow(const index_t* sp_element_list_ptr,
     hls::stream<CuperOutputItem> output_stream_14;
     hls::stream<CuperOutputItem> output_stream_15;
     hls::stream<CuperBatchParam> batch_streams[kCuperHbmChannelNum];
-    hls::stream<data_t> x_streams[kCuperHbmChannelNum];
+    hls::stream<CuperXPacket> x_streams[kCuperHbmChannelNum];
 #pragma HLS STREAM variable = output_stream_0 depth = 512
 #pragma HLS STREAM variable = output_stream_1 depth = 512
 #pragma HLS STREAM variable = output_stream_2 depth = 512
@@ -491,7 +615,7 @@ void cuper_packed_spmv_dataflow(const index_t* sp_element_list_ptr,
 #pragma HLS STREAM variable = output_stream_14 depth = 512
 #pragma HLS STREAM variable = output_stream_15 depth = 512
 #pragma HLS STREAM variable = batch_streams depth = 4
-#pragma HLS STREAM variable = x_streams depth = 512
+#pragma HLS STREAM variable = x_streams depth = 64
 #pragma HLS ARRAY_PARTITION variable = batch_streams complete dim = 1
 #pragma HLS ARRAY_PARTITION variable = x_streams complete dim = 1
 
@@ -517,26 +641,34 @@ void cuper_packed_spmv_dataflow(const index_t* sp_element_list_ptr,
     process_cuper_channel_stream(matrix_data_14, 14, batch_count, n, batch_streams[14], x_streams[14], output_stream_14);
     process_cuper_channel_stream(matrix_data_15, 15, batch_count, n, batch_streams[15], x_streams[15], output_stream_15);
 
-    write_cuper_outputs(output_stream_0,
-                        output_stream_1,
-                        output_stream_2,
-                        output_stream_3,
-                        output_stream_4,
-                        output_stream_5,
-                        output_stream_6,
-                        output_stream_7,
-                        output_stream_8,
-                        output_stream_9,
-                        output_stream_10,
-                        output_stream_11,
-                        output_stream_12,
-                        output_stream_13,
-                        output_stream_14,
-                        output_stream_15,
-                        y,
-                        n);
+    write_cuper_outputs<InitializeVectors>(output_stream_0,
+                                           output_stream_1,
+                                           output_stream_2,
+                                           output_stream_3,
+                                           output_stream_4,
+                                           output_stream_5,
+                                           output_stream_6,
+                                           output_stream_7,
+                                           output_stream_8,
+                                           output_stream_9,
+                                           output_stream_10,
+                                           output_stream_11,
+                                           output_stream_12,
+                                           output_stream_13,
+                                           output_stream_14,
+                                           output_stream_15,
+                                           b,
+                                           m_inv,
+                                           y,
+                                           r,
+                                           z,
+                                           p,
+                                           init_rz_out,
+                                           init_rr_out,
+                                           n);
 }
 
+template <bool InitializeVectors>
 void cuper_packed_spmv(const index_t* sp_element_list_ptr,
                        cuper_matrix_ptr_t matrix_data_0,
                        cuper_matrix_ptr_t matrix_data_1,
@@ -555,31 +687,45 @@ void cuper_packed_spmv(const index_t* sp_element_list_ptr,
                        cuper_matrix_ptr_t matrix_data_14,
                        cuper_matrix_ptr_t matrix_data_15,
                        const data_t* x,
+                       const data_t* b,
+                       const data_t* m_inv,
                        data_t* y,
+                       data_t* r,
+                       data_t* z,
+                       data_t* p,
+                       data_t* init_rz_out,
+                       data_t* init_rr_out,
                        const int batch_count,
                        const int n) {
 #pragma HLS INLINE off
-    cuper_packed_spmv_dataflow(sp_element_list_ptr,
-                               matrix_data_0,
-                               matrix_data_1,
-                               matrix_data_2,
-                               matrix_data_3,
-                               matrix_data_4,
-                               matrix_data_5,
-                               matrix_data_6,
-                               matrix_data_7,
-                               matrix_data_8,
-                               matrix_data_9,
-                               matrix_data_10,
-                               matrix_data_11,
-                               matrix_data_12,
-                               matrix_data_13,
-                               matrix_data_14,
-                               matrix_data_15,
-                               x,
-                               y,
-                               batch_count,
-                               n);
+    cuper_packed_spmv_dataflow<InitializeVectors>(sp_element_list_ptr,
+                                                  matrix_data_0,
+                                                  matrix_data_1,
+                                                  matrix_data_2,
+                                                  matrix_data_3,
+                                                  matrix_data_4,
+                                                  matrix_data_5,
+                                                  matrix_data_6,
+                                                  matrix_data_7,
+                                                  matrix_data_8,
+                                                  matrix_data_9,
+                                                  matrix_data_10,
+                                                  matrix_data_11,
+                                                  matrix_data_12,
+                                                  matrix_data_13,
+                                                  matrix_data_14,
+                                                  matrix_data_15,
+                                                  x,
+                                                  b,
+                                                  m_inv,
+                                                  y,
+                                                  r,
+                                                  z,
+                                                  p,
+                                                  init_rz_out,
+                                                  init_rr_out,
+                                                  batch_count,
+                                                  n);
 }
 
 data_t dot_vectors(const data_t* lhs, const data_t* rhs, const int n) {
@@ -667,32 +813,32 @@ void cuper_pcg_control_kernel(const project_xplus::cgsolver::index_t* sp_element
 #pragma HLS INTERFACE s_axilite port = batch_count bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
-#pragma HLS INTERFACE m_axi port = sp_element_list_ptr offset = slave bundle = gmem_meta
-#pragma HLS INTERFACE m_axi port = matrix_data_0 offset = slave bundle = gmem_matrix0
-#pragma HLS INTERFACE m_axi port = matrix_data_1 offset = slave bundle = gmem_matrix1
-#pragma HLS INTERFACE m_axi port = matrix_data_2 offset = slave bundle = gmem_matrix2
-#pragma HLS INTERFACE m_axi port = matrix_data_3 offset = slave bundle = gmem_matrix3
-#pragma HLS INTERFACE m_axi port = matrix_data_4 offset = slave bundle = gmem_matrix4
-#pragma HLS INTERFACE m_axi port = matrix_data_5 offset = slave bundle = gmem_matrix5
-#pragma HLS INTERFACE m_axi port = matrix_data_6 offset = slave bundle = gmem_matrix6
-#pragma HLS INTERFACE m_axi port = matrix_data_7 offset = slave bundle = gmem_matrix7
-#pragma HLS INTERFACE m_axi port = matrix_data_8 offset = slave bundle = gmem_matrix8
-#pragma HLS INTERFACE m_axi port = matrix_data_9 offset = slave bundle = gmem_matrix9
-#pragma HLS INTERFACE m_axi port = matrix_data_10 offset = slave bundle = gmem_matrix10
-#pragma HLS INTERFACE m_axi port = matrix_data_11 offset = slave bundle = gmem_matrix11
-#pragma HLS INTERFACE m_axi port = matrix_data_12 offset = slave bundle = gmem_matrix12
-#pragma HLS INTERFACE m_axi port = matrix_data_13 offset = slave bundle = gmem_matrix13
-#pragma HLS INTERFACE m_axi port = matrix_data_14 offset = slave bundle = gmem_matrix14
-#pragma HLS INTERFACE m_axi port = matrix_data_15 offset = slave bundle = gmem_matrix15
-#pragma HLS INTERFACE m_axi port = b offset = slave bundle = gmem_b
-#pragma HLS INTERFACE m_axi port = m_inv offset = slave bundle = gmem_minv
-#pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x
-#pragma HLS INTERFACE m_axi port = r offset = slave bundle = gmem_r
-#pragma HLS INTERFACE m_axi port = z offset = slave bundle = gmem_z
-#pragma HLS INTERFACE m_axi port = p offset = slave bundle = gmem_p
-#pragma HLS INTERFACE m_axi port = ap offset = slave bundle = gmem_ap
-#pragma HLS INTERFACE m_axi port = metrics offset = slave bundle = gmem_metrics
-#pragma HLS INTERFACE m_axi port = status offset = slave bundle = gmem_status
+#pragma HLS INTERFACE m_axi port = sp_element_list_ptr offset = slave bundle = gmem_meta num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = matrix_data_0 offset = slave bundle = gmem_matrix0 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_1 offset = slave bundle = gmem_matrix1 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_2 offset = slave bundle = gmem_matrix2 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_3 offset = slave bundle = gmem_matrix3 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_4 offset = slave bundle = gmem_matrix4 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_5 offset = slave bundle = gmem_matrix5 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_6 offset = slave bundle = gmem_matrix6 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_7 offset = slave bundle = gmem_matrix7 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_8 offset = slave bundle = gmem_matrix8 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_9 offset = slave bundle = gmem_matrix9 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_10 offset = slave bundle = gmem_matrix10 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_11 offset = slave bundle = gmem_matrix11 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_12 offset = slave bundle = gmem_matrix12 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_13 offset = slave bundle = gmem_matrix13 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_14 offset = slave bundle = gmem_matrix14 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_15 offset = slave bundle = gmem_matrix15 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = b offset = slave bundle = gmem_b num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = m_inv offset = slave bundle = gmem_minv num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x num_read_outstanding = 16 num_write_outstanding = 16 max_read_burst_length = 64 max_write_burst_length = 64
+#pragma HLS INTERFACE m_axi port = r offset = slave bundle = gmem_r num_read_outstanding = 16 num_write_outstanding = 16 max_read_burst_length = 64 max_write_burst_length = 64
+#pragma HLS INTERFACE m_axi port = z offset = slave bundle = gmem_z num_read_outstanding = 16 num_write_outstanding = 16 max_read_burst_length = 64 max_write_burst_length = 64
+#pragma HLS INTERFACE m_axi port = p offset = slave bundle = gmem_p num_read_outstanding = 16 num_write_outstanding = 16 max_read_burst_length = 64 max_write_burst_length = 64
+#pragma HLS INTERFACE m_axi port = ap offset = slave bundle = gmem_ap num_read_outstanding = 16 num_write_outstanding = 16 max_read_burst_length = 64 max_write_burst_length = 64
+#pragma HLS INTERFACE m_axi port = metrics offset = slave bundle = gmem_metrics num_write_outstanding = 4 max_write_burst_length = 16
+#pragma HLS INTERFACE m_axi port = status offset = slave bundle = gmem_status num_write_outstanding = 4 max_write_burst_length = 16
 
     data_t rz = 0.0;
     data_t rr = 0.0;
@@ -714,43 +860,37 @@ void cuper_pcg_control_kernel(const project_xplus::cgsolver::index_t* sp_element
         return;
     }
 
-    // 初始 SpMV：ap = A * x0。现在 SpMV 只负责写 ap；
-    // 点积统一放在独立向量流水里，避免 Cuper 写回阶段额外读 x/p。
-    cuper_packed_spmv(sp_element_list_ptr,
-                      matrix_data_0,
-                      matrix_data_1,
-                      matrix_data_2,
-                      matrix_data_3,
-                      matrix_data_4,
-                      matrix_data_5,
-                      matrix_data_6,
-                      matrix_data_7,
-                      matrix_data_8,
-                      matrix_data_9,
-                      matrix_data_10,
-                      matrix_data_11,
-                      matrix_data_12,
-                      matrix_data_13,
-                      matrix_data_14,
-                      matrix_data_15,
-                      x,
-                      ap,
-                      batch_count,
-                      n);
-
-init_vectors:
-    for (int index = 0; index < n; ++index) {
-#pragma HLS PIPELINE II = 1
-        // 标准 Jacobi 预条件 PCG 初始化：
-        // r0 = b - A*x0, z0 = M^-1*r0, p0 = z0。
-        const data_t r_value = b[index] - ap[index];
-        const data_t z_value = m_inv[index] * r_value;
-        r[index] = r_value;
-        z[index] = z_value;
-        p[index] = z_value;
-        rz += r_value * z_value;
-        rr += r_value * r_value;
-    }
+    // 初始 SpMV：ap = A * x0，并在写回 AP 时直接初始化 r/z/p。
+    // 这样省掉原先 init_vectors 对 b/m_inv/ap 的独立 HBM 扫描。
+    data_t unused_init_metric = 0.0;
+    cuper_packed_spmv<true>(sp_element_list_ptr,
+                            matrix_data_0,
+                            matrix_data_1,
+                            matrix_data_2,
+                            matrix_data_3,
+                            matrix_data_4,
+                            matrix_data_5,
+                            matrix_data_6,
+                            matrix_data_7,
+                            matrix_data_8,
+                            matrix_data_9,
+                            matrix_data_10,
+                            matrix_data_11,
+                            matrix_data_12,
+                            matrix_data_13,
+                            matrix_data_14,
+                            matrix_data_15,
+                            x,
+                            b,
+                            m_inv,
+                            ap,
+                            r,
+                            z,
+                            p,
+                            &rz,
+                            &rr,
+                            batch_count,
+                            n);
 
 pcg_loop:
     for (int iteration = 0; iteration < max_iters; ++iteration) {
@@ -763,28 +903,37 @@ pcg_loop:
             break;
         }
 
-        // ap = A*p。随后用独立向量流水计算 p^T * ap。
-        cuper_packed_spmv(sp_element_list_ptr,
-                          matrix_data_0,
-                          matrix_data_1,
-                          matrix_data_2,
-                          matrix_data_3,
-                          matrix_data_4,
-                          matrix_data_5,
-                          matrix_data_6,
-                          matrix_data_7,
-                          matrix_data_8,
-                          matrix_data_9,
-                          matrix_data_10,
-                          matrix_data_11,
-                          matrix_data_12,
-                          matrix_data_13,
-                          matrix_data_14,
-                          matrix_data_15,
-                          p,
-                          ap,
-                          batch_count,
-                          n);
+        // ap = A*p。p^T * AP 不能放进 SpMV 的 DATAFLOW writer 里，
+        // 否则 HLS 会看到 gmem_p 被 broadcast 和 writer 两个 process 同时读。
+        // 先保持单独 dot 扫描，后续再用更细粒度 task 拆分消掉这次 HBM 往返。
+        cuper_packed_spmv<false>(sp_element_list_ptr,
+                                 matrix_data_0,
+                                 matrix_data_1,
+                                 matrix_data_2,
+                                 matrix_data_3,
+                                 matrix_data_4,
+                                 matrix_data_5,
+                                 matrix_data_6,
+                                 matrix_data_7,
+                                 matrix_data_8,
+                                 matrix_data_9,
+                                 matrix_data_10,
+                                 matrix_data_11,
+                                 matrix_data_12,
+                                 matrix_data_13,
+                                 matrix_data_14,
+                                 matrix_data_15,
+                                 p,
+                                 b,
+                                 m_inv,
+                                 ap,
+                                 r,
+                                 z,
+                                 p,
+                                 &unused_init_metric,
+                                 &unused_init_metric,
+                                 batch_count,
+                                 n);
         p_ap = dot_vectors(p, ap, n);
 
         if (invalid_scalar(p_ap) || abs_value(p_ap) <= kBreakdownEps) {
@@ -857,6 +1006,110 @@ update_p_loop:
     metrics[3] = alpha;
     status[0] = status_code;
     status[1] = iterations;
+}
+
+void cuper_packed_spmv_kernel(const project_xplus::cgsolver::index_t* sp_element_list_ptr,
+                              cuper_matrix_ptr_t matrix_data_0,
+                              cuper_matrix_ptr_t matrix_data_1,
+                              cuper_matrix_ptr_t matrix_data_2,
+                              cuper_matrix_ptr_t matrix_data_3,
+                              cuper_matrix_ptr_t matrix_data_4,
+                              cuper_matrix_ptr_t matrix_data_5,
+                              cuper_matrix_ptr_t matrix_data_6,
+                              cuper_matrix_ptr_t matrix_data_7,
+                              cuper_matrix_ptr_t matrix_data_8,
+                              cuper_matrix_ptr_t matrix_data_9,
+                              cuper_matrix_ptr_t matrix_data_10,
+                              cuper_matrix_ptr_t matrix_data_11,
+                              cuper_matrix_ptr_t matrix_data_12,
+                              cuper_matrix_ptr_t matrix_data_13,
+                              cuper_matrix_ptr_t matrix_data_14,
+                              cuper_matrix_ptr_t matrix_data_15,
+                              const project_xplus::cgsolver::data_t* x,
+                              project_xplus::cgsolver::data_t* y,
+                              int batch_count,
+                              int n) {
+// 单 SpMV 顶层 kernel。
+//
+// 这个入口只复用 Cuper packed SpMV 数据通路，不触碰 PCG 状态：
+//   sp_element_list_ptr + matrix_data_0..15 + x -> y
+// host/cuper_notapa_pcg_xrt_main.cpp 用它做 TAPA/no-TAPA SpMV 吞吐对比。
+#pragma HLS INTERFACE s_axilite port = sp_element_list_ptr bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_0 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_1 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_2 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_3 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_4 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_5 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_6 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_7 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_8 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_9 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_10 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_11 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_12 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_13 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_14 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_15 bundle = control
+#pragma HLS INTERFACE s_axilite port = x bundle = control
+#pragma HLS INTERFACE s_axilite port = y bundle = control
+#pragma HLS INTERFACE s_axilite port = batch_count bundle = control
+#pragma HLS INTERFACE s_axilite port = n bundle = control
+#pragma HLS INTERFACE s_axilite port = return bundle = control
+
+#pragma HLS INTERFACE m_axi port = sp_element_list_ptr offset = slave bundle = gmem_meta num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = matrix_data_0 offset = slave bundle = gmem_matrix0 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_1 offset = slave bundle = gmem_matrix1 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_2 offset = slave bundle = gmem_matrix2 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_3 offset = slave bundle = gmem_matrix3 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_4 offset = slave bundle = gmem_matrix4 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_5 offset = slave bundle = gmem_matrix5 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_6 offset = slave bundle = gmem_matrix6 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_7 offset = slave bundle = gmem_matrix7 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_8 offset = slave bundle = gmem_matrix8 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_9 offset = slave bundle = gmem_matrix9 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_10 offset = slave bundle = gmem_matrix10 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_11 offset = slave bundle = gmem_matrix11 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_12 offset = slave bundle = gmem_matrix12 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_13 offset = slave bundle = gmem_matrix13 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_14 offset = slave bundle = gmem_matrix14 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_15 offset = slave bundle = gmem_matrix15 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = y offset = slave bundle = gmem_y num_write_outstanding = 16 max_write_burst_length = 64
+
+    if (n <= 0 || batch_count <= 0 || batch_count > kCuperMaxBatchCount) {
+        return;
+    }
+
+    data_t unused_init_metric = 0.0;
+    cuper_packed_spmv<false>(sp_element_list_ptr,
+                             matrix_data_0,
+                             matrix_data_1,
+                             matrix_data_2,
+                             matrix_data_3,
+                             matrix_data_4,
+                             matrix_data_5,
+                             matrix_data_6,
+                             matrix_data_7,
+                             matrix_data_8,
+                             matrix_data_9,
+                             matrix_data_10,
+                             matrix_data_11,
+                             matrix_data_12,
+                             matrix_data_13,
+                             matrix_data_14,
+                             matrix_data_15,
+                             x,
+                             x,
+                             x,
+                             y,
+                             y,
+                             y,
+                             y,
+                             &unused_init_metric,
+                             &unused_init_metric,
+                             batch_count,
+                             n);
 }
 
 }

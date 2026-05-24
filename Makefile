@@ -34,6 +34,7 @@ VPP ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/v++,v++)
 VIVADO ?= $(if $(VIVADO_ROOT),$(VIVADO_ROOT)/bin/vivado,vivado)
 EMCONFIGUTIL ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/bin/emconfigutil,emconfigutil)
 VITIS_SETTINGS ?= $(if $(VITIS_ROOT),$(VITIS_ROOT)/settings64.sh)
+CUPER_TAPA_PCG_CLOCK_PERIOD ?= 3.3
 VITIS_HLS_ROOT ?= $(strip $(shell \
 	if [ -n "$$XILINX_HLS" ] && [ -d "$$XILINX_HLS/include" ]; then \
 		printf '%s\n' "$$XILINX_HLS"; \
@@ -57,17 +58,25 @@ TAPA_ROOT ?= $(strip $(shell \
 
 ROOT_DIR := $(abspath .)
 BUILD_DIR := $(ROOT_DIR)/build
+CUPER_NOTAPA_BUILD_DIR ?= $(ROOT_DIR)/cuper-pcg-notapa
 TARGET_BUILD_DIR := $(BUILD_DIR)/$(TARGET)
 HOST_DIR := $(ROOT_DIR)/host
 INCLUDE_DIR := $(ROOT_DIR)/include
 SRC_DIR := $(ROOT_DIR)/src
 KERNEL_DIR := $(ROOT_DIR)/kernels
 CFG_DIR := $(ROOT_DIR)/cfg
+ARCHIVED_DIR := $(ROOT_DIR)/archived
+ARCHIVED_HOST_DIR := $(ARCHIVED_DIR)/host
+ARCHIVED_INCLUDE_DIR := $(ARCHIVED_DIR)/include
+ARCHIVED_KERNEL_DIR := $(ARCHIVED_DIR)/kernels
+ARCHIVED_CFG_DIR := $(ARCHIVED_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 CUPER_DIR := $(ROOT_DIR)/DLC/Cuper
 CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
+CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
+CUPER_TAPA_PCG_CFG := $(CFG_DIR)/connectivity_cuper_tapa_pcg_u55c.cfg
 VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
 VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
 ANALYSIS_TARGET ?= hw
@@ -77,7 +86,7 @@ ANALYSIS_REPORT_DIR ?= $(ANALYSIS_BUILD_DIR)/_x_temp/reports/analysis
 VIVADO_ANALYSIS_INPUT ?= $(ANALYSIS_VIVADO_LINK_DIR)
 VIVADO_ANALYSIS_RUN ?= impl_1
 VIVADO_ANALYSIS_REPORTS ?= all
-VIVADO_ANALYSIS_CFG := $(CFG_DIR)/vivado_analysis_reports.cfg
+VIVADO_ANALYSIS_CFG := $(ARCHIVED_CFG_DIR)/vivado_analysis_reports.cfg
 ENABLE_VIVADO_ANALYSIS ?= 1
 VIVADO_PACKAGE_DIR := $(BUILD_DIR)/packages
 VIVADO_PACKAGE_NAME ?= project-xplus-vivado-view
@@ -102,6 +111,8 @@ HW_XCLBIN := $(BUILD_DIR)/hw/cgsolver_jacobi_pcg.xclbin
 LOCAL_HOST := $(BUILD_DIR)/xplus_host
 CUPER_PCG_HOST := $(BUILD_DIR)/xplus_cuper_pcg_host
 CUPER_TAPA_PCG_HOST := $(BUILD_DIR)/xplus_cuper_tapa_pcg_host
+CUPER_TAPA_PCG_FPGA_HOST := $(BUILD_DIR)/xplus_cuper_tapa_pcg_fpga_host
+CUPER_NOTAPA_PCG_XRT_HOST := $(BUILD_DIR)/xplus_cuper_notapa_pcg_xrt_host
 CUPER_CONTROL_LOCAL_HOST := $(BUILD_DIR)/xplus_cuper_control_local_host
 CUPER_CONTROL_XRT_HOST := $(BUILD_DIR)/xplus_cuper_control_xrt_host
 XRT_HOST := $(BUILD_DIR)/xplus_xrt_host
@@ -115,14 +126,14 @@ KERNEL_NAMES := pcg_control_kernel
 # 内部 SpMV 已经切到 4x4 block/bitmap 格式，host 会在运行时把 CSR
 # 转换成 b_row_ptr / b_col_idx / blocks 三个 BO。
 #
-# 注意：SPMV_KERNEL_SOURCE 只影响下面保留的旧 spmv_csr_kernel.xo
+# 注意：SPMV_KERNEL_SOURCE 只影响归档保留的旧 spmv_csr_kernel.xo
 # 编译规则；当前 XOS := $(XO_PCG_CONTROL)，所以默认 build-sw/build-hw
 # 不会把独立的 spmv_csr_kernel.xo 或 spmv_blocked_kernel.xo 链接进 xclbin。
 #
-# spmv_blocked_kernel.cpp 仍保留为旧拆分 kernel 的参考实现；默认 PCG
-# 路径真正使用的是 kernels/pcg_control_kernel.cpp 里的
+# spmv_blocked_kernel.cpp 仍归档为旧拆分 kernel 的参考实现；默认 PCG
+# 路径真正使用的是 archived/kernels/pcg_control_kernel.cpp 里的
 # spmv_blocked_local(...)。
-SPMV_KERNEL_SOURCE ?= $(KERNEL_DIR)/spmv_csr_kernel.cpp
+SPMV_KERNEL_SOURCE ?= $(ARCHIVED_KERNEL_DIR)/spmv_csr_kernel.cpp
 XO_SP_MV := $(BUILD_DIR)/spmv_csr_kernel.xo
 XO_INIT := $(BUILD_DIR)/init_pcg_kernel.xo
 XO_DOT := $(BUILD_DIR)/dot_kernel.xo
@@ -138,6 +149,10 @@ XOS := $(XO_PCG_CONTROL)
 XCLBIN := $(TARGET_BUILD_DIR)/cgsolver_jacobi_pcg.xclbin
 CUPER_CONTROL_XO := $(TARGET_BUILD_DIR)/cuper_pcg_control_kernel.xo
 CUPER_CONTROL_XCLBIN := $(TARGET_BUILD_DIR)/cuper_pcg_control_kernel.xclbin
+CUPER_SPMV_XO := $(TARGET_BUILD_DIR)/cuper_packed_spmv_kernel.xo
+CUPER_SPMV_XCLBIN := $(TARGET_BUILD_DIR)/cuper_packed_spmv_kernel.xclbin
+CUPER_TAPA_PCG_XO := $(TARGET_BUILD_DIR)/CuperPcg.xo
+CUPER_TAPA_PCG_XCLBIN := $(TARGET_BUILD_DIR)/CuperPcg.xclbin
 EMCONFIG := $(TARGET_BUILD_DIR)/emconfig.json
 
 XRT_CXXFLAGS := $(CXXFLAGS) -Wall -Wextra -I$(XILINX_XRT)/include
@@ -164,8 +179,8 @@ TAPA_LDFLAGS += -Wl,-rpath,$(XILINX_XRT)/lib
 
 VPP_FLAGS += -t $(TARGET) --platform $(XPLATFORM) --save-temps
 VPP_FLAGS += --temp_dir $(TARGET_BUILD_DIR)/_x_temp
-VPP_FLAGS += -I$(INCLUDE_DIR) -I$(KERNEL_DIR)
-VPP_LDFLAGS += --config $(CFG_DIR)/connectivity_u55c.cfg
+VPP_FLAGS += -I$(INCLUDE_DIR) -I$(KERNEL_DIR) -I$(ARCHIVED_KERNEL_DIR) -I$(ARCHIVED_INCLUDE_DIR)
+VPP_LDFLAGS += --config $(ARCHIVED_CFG_DIR)/connectivity_u55c.cfg
 ifeq ($(TARGET),hw)
 ifeq ($(ENABLE_VIVADO_ANALYSIS),1)
 VPP_LDFLAGS += --config $(VIVADO_ANALYSIS_CFG)
@@ -190,7 +205,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-control-local run-cuper-control-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw cuper-control-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
 
 all: run-local
 
@@ -208,6 +223,9 @@ help:
 	@echo "  make build-cuper-control-sw"
 	@echo "  make run-cuper-control-xrt TARGET=sw_emu DATASET=data/suitesparse/Schmid/csr/thermal2_n16"
 	@echo "  make cuper-control-hw-tmux"
+	@echo "  make cuper-pcg-notapa-hw-tmux"
+	@echo "  make cuper-pcg-notapa-spmv-hw-tmux"
+	@echo "  make run-cuper-notapa-pcg-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/thermal2_n16"
 	@echo ""
 	@echo "Build XRT host only:"
 	@echo "  make xrt-host"
@@ -283,6 +301,10 @@ cuper-pcg-host: $(CUPER_PCG_HOST)
 
 cuper-tapa-pcg-host: $(CUPER_TAPA_PCG_HOST)
 
+cuper-tapa-pcg-fpga-host: $(CUPER_TAPA_PCG_FPGA_HOST)
+
+cuper-notapa-pcg-xrt-host: $(CUPER_NOTAPA_PCG_XRT_HOST)
+
 cuper-control-local-host: $(CUPER_CONTROL_LOCAL_HOST)
 
 cuper-control-xrt-host: $(CUPER_CONTROL_XRT_HOST)
@@ -291,13 +313,16 @@ xrt-host: $(XRT_HOST)
 
 launch: launcher
 
-launcher menu: $(LOCAL_HOST) $(CUPER_PCG_HOST) $(CUPER_CONTROL_LOCAL_HOST) $(CUPER_CONTROL_XRT_HOST) $(XRT_HOST)
+launcher menu:
 	@$(PYTHON) "$(SCRIPT_DIR)/launcher.py" \
 		--vitis-settings "$(VITIS_SETTINGS)" \
 		--local-host "$(LOCAL_HOST)" \
 		--cuper-pcg-host "$(CUPER_PCG_HOST)" \
 		--cuper-tapa-pcg-host "$(CUPER_TAPA_PCG_HOST)" \
+		--cuper-tapa-pcg-fpga-host "$(CUPER_TAPA_PCG_FPGA_HOST)" \
+		--cuper-notapa-pcg-xrt-host "$(CUPER_NOTAPA_PCG_XRT_HOST)" \
 		--cuper-control-local-host "$(CUPER_CONTROL_LOCAL_HOST)" \
+		--cuper-control-xrt-host "$(CUPER_CONTROL_XRT_HOST)" \
 		--xrt-host "$(XRT_HOST)" \
 		--hw-xclbin "$(HW_XCLBIN)" \
 		--sw-xclbin "$(SW_XCLBIN)" \
@@ -324,52 +349,70 @@ cuper-hw-tmux:
 cuper-run-hw:
 	@$(MAKE) -C "$(CUPER_DIR)" run-hw MATRIX="$(or $(MATRIX),data/matrices/sit100/sit100.mtx)"
 
-$(LOCAL_HOST): $(HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(INCLUDE_DIR)/cg_kernels.hpp $(KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/main.cpp $(KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)
+$(LOCAL_HOST): $(ARCHIVED_HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(ARCHIVED_HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(ARCHIVED_INCLUDE_DIR)/cg_kernels.hpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(ARCHIVED_INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/main.cpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)
 
-$(CUPER_PCG_HOST): $(HOST_DIR)/cuper_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_pcg_main.cpp $(KERNEL_DIR)/cg_kernels.cpp -o $(CUPER_PCG_HOST)
+$(CUPER_PCG_HOST): $(ARCHIVED_HOST_DIR)/cuper_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/cuper_pcg_main.cpp -o $(CUPER_PCG_HOST)
 
-$(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | $(BUILD_DIR) tapa-env
+$(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | $(BUILD_DIR) tapa-env
 	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_HOST) $(TAPA_LDFLAGS)
 
-$(CUPER_CONTROL_LOCAL_HOST): $(HOST_DIR)/cuper_control_local_main.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_control_local_main.cpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp -o $(CUPER_CONTROL_LOCAL_HOST)
+$(CUPER_TAPA_PCG_FPGA_HOST): $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | $(BUILD_DIR) tapa-env
+	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_FPGA_HOST) $(TAPA_LDFLAGS)
 
-$(CUPER_CONTROL_XRT_HOST): $(HOST_DIR)/cuper_control_xrt_host.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+$(CUPER_NOTAPA_PCG_XRT_HOST): $(HOST_DIR)/cuper_notapa_pcg_xrt_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_notapa_pcg_xrt_main.cpp -o $(CUPER_NOTAPA_PCG_XRT_HOST) $(XRT_LDFLAGS)
+
+$(CUPER_CONTROL_LOCAL_HOST): $(ARCHIVED_HOST_DIR)/cuper_control_local_main.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/cuper_control_local_main.cpp $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp -o $(CUPER_CONTROL_LOCAL_HOST)
+
+$(CUPER_CONTROL_XRT_HOST): $(HOST_DIR)/cuper_control_xrt_host.cpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/cuper_control_xrt_host.cpp -o $(CUPER_CONTROL_XRT_HOST) $(XRT_LDFLAGS)
 
-$(XRT_HOST): $(HOST_DIR)/xrt_host.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
-	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR) $(HOST_DIR)/xrt_host.cpp -o $(XRT_HOST) $(XRT_LDFLAGS)
+$(XRT_HOST): $(ARCHIVED_HOST_DIR)/xrt_host.cpp $(ARCHIVED_HOST_DIR)/report_io.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/dataset_bridge.hpp $(HOST_DIR)/cpu_reference.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
+	$(CXX) $(XRT_CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/xrt_host.cpp -o $(XRT_HOST) $(XRT_LDFLAGS)
 
 $(XO_SP_MV): $(SPMV_KERNEL_SOURCE) $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	# 这里统一按 -k spmv_csr_kernel 编译，对外保持原 kernel 名字不变。
 	# 因此切换到 blocked 版本时，只需要替换源文件，不需要改 xrt_host 或 connectivity。
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k spmv_csr_kernel -o $@ $<
 
-$(XO_INIT): $(KERNEL_DIR)/init_pcg_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_INIT): $(ARCHIVED_KERNEL_DIR)/init_pcg_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k init_pcg_kernel -o $@ $<
 
-$(XO_DOT): $(KERNEL_DIR)/dot_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_DOT): $(ARCHIVED_KERNEL_DIR)/dot_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k dot_kernel -o $@ $<
 
-$(XO_UPDATE_XRZ): $(KERNEL_DIR)/update_xrz_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_UPDATE_XRZ): $(ARCHIVED_KERNEL_DIR)/update_xrz_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k update_xrz_kernel -o $@ $<
 
-$(XO_UPDATE_P): $(KERNEL_DIR)/update_p_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_UPDATE_P): $(ARCHIVED_KERNEL_DIR)/update_p_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k update_p_kernel -o $@ $<
 
-$(XO_PCG_CONTROL): $(KERNEL_DIR)/pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+$(XO_PCG_CONTROL): $(ARCHIVED_KERNEL_DIR)/pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k pcg_control_kernel -o $@ $<
 
 $(CUPER_CONTROL_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k cuper_pcg_control_kernel -o $@ $<
 
-$(XCLBIN): $(XOS) $(CFG_DIR)/connectivity_u55c.cfg | $(TARGET_BUILD_DIR) env
+$(CUPER_SPMV_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k cuper_packed_spmv_kernel -o $@ $<
+
+$(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h | $(TARGET_BUILD_DIR) tapa-env
+	cd "$(CUPER_DIR)" && source scripts/env_u55c.sh && tapa -w "$(TARGET_BUILD_DIR)/tapa_CuperPcg" compile -f kernels/Cuper.cpp -t CuperPcg -p "$(DEVICE)" --clock-period "$(CUPER_TAPA_PCG_CLOCK_PERIOD)" -j "$${JOBS:-$$(nproc)}" --enable-synth-util -c "-I$(CUPER_DIR)/include" -o "$(CUPER_TAPA_PCG_XO)"
+
+$(XCLBIN): $(XOS) $(ARCHIVED_CFG_DIR)/connectivity_u55c.cfg | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) $(VPP_LDFLAGS) -o $@ $(XOS)
 
 $(CUPER_CONTROL_XCLBIN): $(CUPER_CONTROL_XO) $(CUPER_CONTROL_CFG) | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_CONTROL_CFG) -o $@ $(CUPER_CONTROL_XO)
+
+$(CUPER_SPMV_XCLBIN): $(CUPER_SPMV_XO) $(CUPER_SPMV_CFG) | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_SPMV_CFG) -o $@ $(CUPER_SPMV_XO)
+
+$(CUPER_TAPA_PCG_XCLBIN): $(CUPER_TAPA_PCG_XO) $(CUPER_TAPA_PCG_CFG) | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_CFG) -o $@ $(CUPER_TAPA_PCG_XO)
 
 $(EMCONFIG): | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(EMCONFIGUTIL) --platform $(XPLATFORM) --od .
@@ -390,6 +433,63 @@ build-cuper-control-sw:
 build-cuper-control-hw:
 	$(MAKE) build-cuper-control TARGET=hw
 
+build-cuper-pcg-notapa: build-cuper-pcg-notapa-hw
+
+build-cuper-pcg-notapa-sw:
+	$(MAKE) build-cuper-control TARGET=sw_emu BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+
+build-cuper-pcg-notapa-hw:
+	$(MAKE) build-cuper-control TARGET=hw BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+
+build-cuper-pcg-notapa-spmv: build-cuper-pcg-notapa-spmv-hw
+
+build-cuper-pcg-notapa-spmv-sw:
+	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/sw_emu/cuper_packed_spmv_kernel.xclbin TARGET=sw_emu BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+
+build-cuper-pcg-notapa-spmv-hw:
+	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/hw/cuper_packed_spmv_kernel.xclbin TARGET=hw BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+
+build-cuper-tapa-pcg: $(CUPER_TAPA_PCG_XCLBIN)
+
+build-cuper-tapa-pcg-hw:
+	$(MAKE) build-cuper-tapa-pcg TARGET=hw
+
+cuper-pcg-notapa-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-pcg-notapa-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-pcg-notapa-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-pcg-notapa-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_pcg_notapa_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-pcg-notapa-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) build-cuper-pcg-notapa-hw 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-pcg-notapa-hw"; \
+	echo "log: $$log"; \
+	echo "build_dir: $(CUPER_NOTAPA_BUILD_DIR)"; \
+	echo "xclbin: $(CUPER_NOTAPA_BUILD_DIR)/hw/cuper_pcg_control_kernel.xclbin"; \
+	echo "attach: tmux attach -t project-xplus-cuper-pcg-notapa-hw"; \
+	echo "tail: tail -f $$log"
+
+cuper-pcg-notapa-spmv-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-pcg-notapa-spmv-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-pcg-notapa-spmv-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-pcg-notapa-spmv-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_pcg_notapa_spmv_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-pcg-notapa-spmv-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) build-cuper-pcg-notapa-spmv-hw 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-pcg-notapa-spmv-hw"; \
+	echo "log: $$log"; \
+	echo "build_dir: $(CUPER_NOTAPA_BUILD_DIR)"; \
+	echo "xclbin: $(CUPER_NOTAPA_BUILD_DIR)/hw/cuper_packed_spmv_kernel.xclbin"; \
+	echo "attach: tmux attach -t project-xplus-cuper-pcg-notapa-spmv-hw"; \
+	echo "tail: tail -f $$log"
+
 cuper-control-hw-tmux:
 	@mkdir -p "$(LOG_DIR)"
 	@if tmux has-session -t "project-xplus-cuper-control-hw" 2>/dev/null; then \
@@ -406,6 +506,22 @@ cuper-control-hw-tmux:
 	echo "attach: tmux attach -t project-xplus-cuper-control-hw"; \
 	echo "tail: tail -f $$log"
 
+cuper-tapa-pcg-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-tapa-pcg-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-tapa-pcg-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_tapa_pcg_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-tapa-pcg-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) build-cuper-tapa-pcg-hw 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-tapa-pcg-hw"; \
+	echo "log: $$log"; \
+	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-hw"; \
+	echo "tail: tail -f $$log"
+
 run: run-local
 
 run-local: $(LOCAL_HOST)
@@ -416,6 +532,30 @@ run-cuper-pcg: $(CUPER_PCG_HOST)
 
 run-cuper-pcg-tapa: $(CUPER_TAPA_PCG_HOST)
 	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-tapa-spmv: $(CUPER_TAPA_PCG_HOST)
+	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-pcg-tapa-fpga: $(CUPER_TAPA_PCG_FPGA_HOST)
+	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-notapa-pcg-xrt: $(CUPER_NOTAPA_PCG_XRT_HOST)
+	@test -f "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" || (echo "ERROR: xclbin not found: $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin. Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw)" && exit 1)
+ifeq ($(TARGET),hw)
+	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+else
+	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/emconfig.json TARGET=$(TARGET) BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+endif
+
+run-cuper-notapa-spmv-xrt: $(CUPER_NOTAPA_PCG_XRT_HOST)
+	@test -f "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" || (echo "ERROR: xclbin not found: $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin. Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw)" && exit 1)
+ifeq ($(TARGET),hw)
+	$(XRT_RUN_ENV_CMD) $(CUPER_NOTAPA_PCG_XRT_HOST) "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+else
+	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/emconfig.json TARGET=$(TARGET) BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_NOTAPA_PCG_XRT_HOST)" "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+endif
 
 run-cuper-control-local: $(CUPER_CONTROL_LOCAL_HOST)
 	$(CUPER_CONTROL_LOCAL_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n1024)" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
@@ -428,6 +568,15 @@ else
 	@test -f "$(CUPER_CONTROL_XCLBIN)" || (echo "ERROR: xclbin not found: $(CUPER_CONTROL_XCLBIN). Build it first with: make build-cuper-control-sw" && exit 1)
 	$(MAKE) $(EMCONFIG) TARGET=$(TARGET)
 	$(XRT_RUN_ENV_CMD) cd $(TARGET_BUILD_DIR) && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_CONTROL_XCLBIN)" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+endif
+
+run-cuper-pcg-notapa-xrt: $(CUPER_CONTROL_XRT_HOST)
+	@test -f "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_pcg_control_kernel.xclbin" || (echo "ERROR: xclbin not found: $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_pcg_control_kernel.xclbin. Build it first with: make build-cuper-pcg-notapa-hw" && exit 1)
+ifeq ($(TARGET),hw)
+	$(XRT_RUN_ENV_CMD) $(CUPER_CONTROL_XRT_HOST) "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_pcg_control_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+else
+	$(MAKE) $(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/emconfig.json TARGET=$(TARGET) BUILD_DIR="$(CUPER_NOTAPA_BUILD_DIR)"
+	$(XRT_RUN_ENV_CMD) cd "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)" && EMCONFIG_PATH=$$PWD XCL_EMULATION_MODE=$(TARGET) "$(CUPER_CONTROL_XRT_HOST)" "$(CUPER_NOTAPA_BUILD_DIR)/$(TARGET)/cuper_pcg_control_kernel.xclbin" "$(abspath $(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16))" $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 endif
 
 run-xrt: $(XRT_HOST)

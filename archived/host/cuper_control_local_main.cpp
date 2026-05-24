@@ -1,6 +1,6 @@
 #include "cuper_control_matrix.hpp"
 #include "cpu_reference.hpp"
-#include "multi_kernel_solver.hpp"
+#include "pcg_common.hpp"
 #include "run_defaults.hpp"
 
 #include <algorithm>

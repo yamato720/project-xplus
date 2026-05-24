@@ -1,6 +1,6 @@
 #include "cuper_control_matrix.hpp"
 #include "cpu_reference.hpp"
-#include "multi_kernel_solver.hpp"
+#include "pcg_common.hpp"
 #include "run_defaults.hpp"
 
 #include <algorithm>
@@ -19,6 +19,12 @@
 #include "experimental/xrt_device.h"
 #include "experimental/xrt_kernel.h"
 
+// 主线 4：no-TAPA Cuper / FPGA-PCG。
+//
+// 这个 host 启动 kernels/cuper_pcg_control_kernel.cpp 里的
+// cuper_pcg_control_kernel。PCG 控制、向量更新、收敛判断和 Cuper packed
+// SpMV 都在一个 HLS kernel 内完成，host 只做数据打包、一次 XRT launch、
+// 结果读回和 CPU reference 校验。
 namespace {
 
 using project_xplus::cgsolver::CuperControlMatrix;
@@ -76,6 +82,8 @@ double elapsed_ms(const std::chrono::steady_clock::time_point start,
 
 HostOptions parse_args(int argc, char** argv) {
     HostOptions options;
+    // full-FPGA no-TAPA PCG 默认仍走 build/<target>，而单 SpMV no-TAPA
+    // 入口使用 cuper-pcg-notapa/<target>，两条路线的 xclbin 名不同。
     options.xclbin_path =
         project_xplus::cgsolver::run_defaults::project_root(argv[0]) / "build" /
         project_xplus::cgsolver::run_defaults::xrt_target() / "cuper_pcg_control_kernel.xclbin";
@@ -188,6 +196,8 @@ int main(int argc, char** argv) {
         std::vector<data_t> z(static_cast<std::size_t>(dataset.n()), 0.0);
         std::vector<data_t> p(static_cast<std::size_t>(dataset.n()), 0.0);
         std::vector<data_t> ap(static_cast<std::size_t>(dataset.n()), 0.0);
+        // Jacobi 预条件 M^{-1} 在 host 侧从 CSR 对角线生成，作为只读 BO
+        // 传给 FPGA；PCG 迭代过程中 z = M^{-1} r 在 kernel 内更新。
         std::vector<data_t> m_inv = project_xplus::cgsolver::build_jacobi_inverse(dataset);
         std::vector<data_t> metrics(4, 0.0);
         std::vector<int> status(2, 0);
@@ -226,6 +236,8 @@ int main(int argc, char** argv) {
         const auto bo_setup_end = std::chrono::steady_clock::now();
 
         // 单次 launch 内完成初始 SpMV、PCG 迭代和状态/metrics 写回。
+        // 这是本路线和 no-TAPA single SpMV host 的核心区别：这里启动的是
+        // cuper_pcg_control_kernel，而不是 cuper_packed_spmv_kernel。
         const auto kernel_start = std::chrono::steady_clock::now();
         auto run = kernel(sp_ptr_bo,
                           matrix0_bo,

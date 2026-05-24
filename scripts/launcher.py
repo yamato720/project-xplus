@@ -37,52 +37,87 @@ class CodeVersion:
     spmv_arg: str | None = None
 
 
-CODE_VERSIONS = [
+CUPER_CODE_VERSIONS = [
+    CodeVersion(
+        key="cuper_tapa_spmv",
+        title="TAPA Cuper / single SpMV",
+        description="只运行 DLC/Cuper TAPA SpMV kernel，用于测纯 SpMV；兼容已有 Cuper_2022.xclbin。",
+        runner="cuper_tapa_spmv",
+        requires_kmax=False,
+    ),
+    CodeVersion(
+        key="cuper_notapa_spmv",
+        title="no-TAPA Cuper / single SpMV",
+        description="只运行 no-TAPA XRT cuper_packed_spmv_kernel，用于和 TAPA SpMV 精准对比。",
+        runner="cuper_notapa_spmv",
+        requires_kmax=False,
+    ),
+    CodeVersion(
+        key="cuper_tapa_fpga_pcg",
+        title="TAPA Cuper / FPGA-PCG",
+        description="TAPA CuperPcg：PCG 控制、向量更新和 Cuper SpMV 都在 FPGA kernel 内。",
+        runner="cuper_tapa_fpga_pcg",
+        requires_kmax=False,
+    ),
+    CodeVersion(
+        key="cuper_notapa_fpga_pcg",
+        title="no-TAPA Cuper / FPGA-PCG",
+        description="no-TAPA HLS cuper_pcg_control_kernel：PCG 控制、向量更新和 Cuper SpMV 都在 FPGA kernel 内；默认使用 cuper-pcg-notapa build。",
+        runner="cuper_notapa_fpga_pcg",
+        requires_kmax=False,
+    ),
+]
+
+
+ARCHIVED_CODE_VERSIONS = [
+    CodeVersion(
+        key="cuper_host_pcg_tapa",
+        title="compat: Cuper host-PCG / TAPA SpMV",
+        description="兼容旧流程：host 控制 PCG，每轮调用 TAPA Cuper SpMV bitstream。",
+        runner="cuper_host_pcg_tapa",
+        requires_kmax=False,
+    ),
+    CodeVersion(
+        key="cuper_host_pcg_notapa",
+        title="compat: Cuper host-PCG / no-TAPA SpMV",
+        description="兼容旧流程：host 控制 PCG，每轮调用 no-TAPA cuper_packed_spmv_kernel。",
+        runner="cuper_host_pcg_notapa",
+        requires_kmax=False,
+    ),
+    CodeVersion(
+        key="cuper_pcg_sw",
+        title="Cuper host-PCG / software SpMV",
+        description="Host 控制 PCG，SpMV 使用 Cuper slice/window 风格的软件适配；仅作为 CPU/debug 对照。",
+        runner="cuper_pcg",
+        requires_kmax=False,
+    ),
     CodeVersion(
         key="local_csr",
-        title="多 kernel 普通版",
-        description="本地直接调用 spmv_csr/init/dot/update_*，用于对照旧的 CSR 多阶段流程。",
+        title="archived: 多 kernel 普通版",
+        description="旧 CSR 多阶段流程，本地直接调用 spmv_csr/init/dot/update_*。",
         runner="local",
         requires_kmax=True,
         spmv_arg="csr",
     ),
     CodeVersion(
         key="local_blocked",
-        title="多 kernel 分块版",
-        description="本地直接调用同一套多阶段流程，但 SpMV 入口切到 spmv_blocked_kernel。",
+        title="archived: 多 kernel 分块版",
+        description="旧多阶段流程，SpMV 入口切到 spmv_blocked_kernel。",
         runner="local",
         requires_kmax=True,
         spmv_arg="blocked",
     ),
     CodeVersion(
         key="xrt_control",
-        title="当前单 control-kernel 版",
-        description="XRT xclbin 只启动 pcg_control_kernel，PCG 控制、windowed block SpMV 和退出判断都在 FPGA kernel 内。",
+        title="archived: 旧单 control-kernel 版",
+        description="旧 pcg_control_kernel 路径，非 Cuper windowed/block SpMV。",
         runner="xrt",
         requires_kmax=False,
     ),
-    CodeVersion(
-        key="cuper_pcg",
-        title="Cuper-PCG 版",
-        description="Project-XPlus 新 PCG 版本：host 控制 PCG，SpMV 阶段使用 Cuper slice/window 风格的 FP32 软件适配。",
-        runner="cuper_pcg",
-        requires_kmax=False,
-    ),
-    CodeVersion(
-        key="cuper_pcg_tapa",
-        title="Cuper-PCG TAPA 版",
-        description="Project-XPlus 新 PCG 版本：host 控制 PCG，SpMV 阶段直接调用 DLC/Cuper 的 TAPA kernel。",
-        runner="cuper_pcg_tapa",
-        requires_kmax=False,
-    ),
-    CodeVersion(
-        key="cuper_control",
-        title="Cuper-PCG control-kernel 版",
-        description="Project-XPlus 新 PCG control kernel：host launch 一次，PCG 控制和 Cuper column-batch/row-tile SpMV 都在 kernel 内。",
-        runner="cuper_control",
-        requires_kmax=False,
-    ),
 ]
+
+
+CODE_VERSIONS = CUPER_CODE_VERSIONS
 
 
 def count_words(path: Path) -> int:
@@ -265,34 +300,56 @@ def print_datasets(datasets: list[Dataset], root: Path) -> None:
         rel = dataset.path.relative_to(root)
         print(f"  {idx:2d}. [{status:9s}] {dataset.name:16s} n={dataset.n:<8d} nnz={dataset.nnz:<10d} {rel}")
     print()
-    print("说明：build/run 表示本地多 kernel 版也可构建/运行；staged 表示数据已在本地，XRT control-kernel 版可尝试构建/运行。")
+    print("说明：build/run 表示 archived 本地多 kernel 版也可运行；staged 表示数据已在本地，Cuper/XRT 路径可尝试运行。")
 
 
-def print_code_versions() -> None:
+def print_code_versions(versions: list[CodeVersion] = CODE_VERSIONS, archived: bool = False) -> None:
     print()
-    print("实现版本：")
-    for index, version in enumerate(CODE_VERSIONS, start=1):
+    print("Archived/debug 实现版本：" if archived else "Cuper 实现版本：")
+    for index, version in enumerate(versions, start=1):
         limit = "kMaxN<=1024" if version.requires_kmax else "大矩阵路径"
         print(f"  {index}. {version.title} [{limit}]")
         print(f"     {version.description}")
+    if not archived:
+        print("  a. archived/debug 旧实现")
 
 
-def ask_code_version(dataset: Dataset) -> CodeVersion | None:
+def ask_code_version_from(dataset: Dataset,
+                          versions: list[CodeVersion],
+                          archived: bool = False) -> CodeVersion | None:
     while True:
-        print_code_versions()
+        print_code_versions(versions, archived)
         answer = ask_text("选择实现版本，或 q 返回: ")
         if answer is None or answer.lower() in {"q", "quit", "exit"}:
             return None
         if answer.isdigit():
             index = int(answer)
-            if 1 <= index <= len(CODE_VERSIONS):
-                version = CODE_VERSIONS[index - 1]
+            if 1 <= index <= len(versions):
+                version = versions[index - 1]
                 if version.requires_kmax and dataset.n > KMAX_N:
                     print(f"{version.title} 受 kMaxN={KMAX_N} 限制，不能运行 n={dataset.n} 的数据集。")
                     pause()
                     continue
                 return version
-        print(f"请输入 1-{len(CODE_VERSIONS)}，或 q 返回。")
+        print(f"请输入 1-{len(versions)}，或 q 返回。")
+
+
+def ask_code_version(dataset: Dataset) -> CodeVersion | None:
+    while True:
+        print_code_versions(CODE_VERSIONS)
+        answer = ask_text("选择 Cuper 实现版本，a 查看 archived/debug，或 q 返回: ")
+        if answer is None or answer.lower() in {"q", "quit", "exit"}:
+            return None
+        if answer.lower() == "a":
+            archived_version = ask_code_version_from(dataset, ARCHIVED_CODE_VERSIONS, archived=True)
+            if archived_version is not None:
+                return archived_version
+            continue
+        if answer.isdigit():
+            index = int(answer)
+            if 1 <= index <= len(CODE_VERSIONS):
+                return CODE_VERSIONS[index - 1]
+        print(f"请输入 1-{len(CODE_VERSIONS)}、a，或 q 返回。")
 
 
 def print_result(rc: int) -> None:
@@ -318,6 +375,16 @@ def build_cuper_pcg_host(root: Path) -> int:
 
 def build_cuper_tapa_pcg_host(root: Path) -> int:
     return run_command(["make", "cuper-tapa-pcg-host"], cwd=root)
+
+
+def confirm_long_build(message: str) -> bool:
+    print(message)
+    confirm = ask_text("确认要开始长时间构建，请输入 BUILD: ")
+    if confirm != LONG_BUILD_CONFIRM:
+        print("已取消。")
+        pause()
+        return False
+    return True
 
 
 def build_sw_xclbin(root: Path) -> int:
@@ -447,6 +514,340 @@ def report_menu(root: Path) -> int:
         print("请输入 1-3，或 q 返回。")
 
 
+def print_active_actions(version: CodeVersion) -> None:
+    print("构建/运行：")
+    if version.runner == "cuper_tapa_spmv":
+        print("  1. build host")
+        print("  2. run single SpMV software simulation")
+        print("  3. run single SpMV hardware bitstream")
+        print("  4. smoke test single SpMV")
+        print("  5. build DLC/Cuper SpMV HW bitstream in tmux")
+    elif version.runner == "cuper_notapa_spmv":
+        print("  1. build host")
+        print("  2. build sw_emu SpMV xclbin")
+        print("  3. run single SpMV sw_emu")
+        print("  4. build HW SpMV xclbin in tmux")
+        print("  5. run single SpMV hardware")
+    elif version.runner == "cuper_tapa_fpga_pcg":
+        print("  1. build host")
+        print("  2. run TAPA FPGA-PCG software simulation")
+        print("  3. run TAPA FPGA-PCG hardware bitstream")
+        print("  4. smoke test software simulation")
+        print("  5. build TAPA FPGA-PCG HW bitstream in tmux")
+    elif version.runner == "cuper_notapa_fpga_pcg":
+        print("  1. build XRT host")
+        print("  2. build sw_emu FPGA-PCG xclbin")
+        print("  3. run no-TAPA FPGA-PCG sw_emu")
+        print("  4. build HW FPGA-PCG xclbin in tmux")
+        print("  5. run no-TAPA FPGA-PCG hardware")
+        print("  6. build/run local C++ mirror")
+    else:
+        raise RuntimeError(f"not an active Cuper runner: {version.runner}")
+
+
+def handle_active_action(version: CodeVersion,
+                         answer: str,
+                         dataset: Dataset,
+                         args: argparse.Namespace,
+                         root: Path) -> int | None:
+    if version.runner == "cuper_tapa_spmv":
+        if answer == "1":
+            return build_cuper_tapa_pcg_host(root)
+        if answer == "2":
+            return run_command(["make", "run-cuper-tapa-spmv", f"DATASET={dataset.path}"], cwd=root)
+        if answer == "3":
+            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 DLC/Cuper/Cuper_2022.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "DLC" / "Cuper" / "Cuper_2022.xclbin"
+            return run_command([
+                "make",
+                "run-cuper-tapa-spmv",
+                f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
+            ], cwd=root)
+        if answer == "4":
+            return run_command([
+                "make",
+                "run-cuper-tapa-spmv",
+                f"DATASET={dataset.path}",
+                "DIFF_TOL=1e-1",
+            ], cwd=root)
+        if answer == "5":
+            if not confirm_long_build("DLC/Cuper TAPA SpMV 硬件 bitstream 编译可能持续数小时。"):
+                return 0
+            return run_command(["make", "cuper-hw-tmux"], cwd=root)
+
+    if version.runner == "cuper_notapa_spmv":
+        if answer == "1":
+            return run_command(["make", "cuper-notapa-pcg-xrt-host"], cwd=root)
+        if answer == "2":
+            return run_command(["make", "build-cuper-pcg-notapa-spmv-sw"], cwd=root)
+        if answer == "3":
+            return run_command([
+                "make",
+                "run-cuper-notapa-spmv-xrt",
+                "TARGET=sw_emu",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+        if answer == "4":
+            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+                return 0
+            return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
+        if answer == "5":
+            return run_command([
+                "make",
+                "run-cuper-notapa-spmv-xrt",
+                "TARGET=hw",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+
+    if version.runner == "cuper_tapa_fpga_pcg":
+        if answer == "1":
+            return run_command(["make", "cuper-tapa-pcg-fpga-host"], cwd=root)
+        if answer == "2":
+            return run_command(["make", "run-cuper-pcg-tapa-fpga", f"DATASET={dataset.path}"], cwd=root)
+        if answer == "3":
+            bitfile = ask_text("输入 TAPA CuperPcg bitstream 路径，直接回车使用 build/hw/CuperPcg.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "build" / "hw" / "CuperPcg.xclbin"
+            return run_command([
+                "make",
+                "run-cuper-pcg-tapa-fpga",
+                f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
+            ], cwd=root)
+        if answer == "4":
+            return run_command([
+                "make",
+                "run-cuper-pcg-tapa-fpga",
+                f"DATASET={dataset.path}",
+                "MAX_ITERS=1",
+                "TAU=1e6",
+                "DIFF_TOL=1e-1",
+            ], cwd=root)
+        if answer == "5":
+            if not confirm_long_build("TAPA CuperPcg 硬件 bitstream 编译可能持续数小时。"):
+                return 0
+            return run_command(["make", "cuper-tapa-pcg-hw-tmux"], cwd=root)
+
+    if version.runner == "cuper_notapa_fpga_pcg":
+        if answer == "1":
+            return run_command(["make", "cuper-control-xrt-host"], cwd=root)
+        if answer == "2":
+            return run_command(["make", "build-cuper-pcg-notapa-sw"], cwd=root)
+        if answer == "3":
+            return run_command([
+                "make",
+                "run-cuper-pcg-notapa-xrt",
+                "TARGET=sw_emu",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+        if answer == "4":
+            if not confirm_long_build("no-TAPA FPGA-PCG 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+                return 0
+            return run_command(["make", "cuper-pcg-notapa-hw-tmux"], cwd=root)
+        if answer == "5":
+            return run_command([
+                "make",
+                "run-cuper-pcg-notapa-xrt",
+                "TARGET=hw",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+        if answer == "6":
+            return run_command(["make", "run-cuper-control-local", f"DATASET={dataset.path}"], cwd=root)
+
+    return None
+
+
+def print_archived_actions(version: CodeVersion) -> None:
+    print("构建/运行：")
+    if version.runner == "cuper_host_pcg_tapa":
+        print("  1. build host")
+        print("  2. run compat host-PCG software simulation")
+        print("  3. run compat host-PCG hardware bitstream")
+        print("  4. smoke test compat host-PCG")
+    elif version.runner == "cuper_host_pcg_notapa":
+        print("  1. build host")
+        print("  2. build sw_emu SpMV xclbin")
+        print("  3. run compat host-PCG sw_emu")
+        print("  4. build HW SpMV xclbin in tmux")
+        print("  5. run compat host-PCG hardware")
+    elif version.runner == "local":
+        print("  1. build local host")
+        print("  2. build/run local host")
+    elif version.runner == "cuper_pcg":
+        print("  1. build Cuper-PCG software host")
+        print("  2. build/run Cuper-PCG software host")
+    elif version.runner == "xrt":
+        print("  1. build XRT host")
+        print("  2. build sw_emu xclbin")
+        print("  3. build hw bitstream")
+        print("  4. build/run hardware xclbin")
+        print("  5. build/run hardware xclbin + report")
+        print("  6. build/run sw_emu xclbin")
+        print("  7. build/run sw_emu xclbin + report")
+    else:
+        raise RuntimeError(f"not an archived runner: {version.runner}")
+
+
+def handle_archived_action(version: CodeVersion,
+                           answer: str,
+                           dataset: Dataset,
+                           args: argparse.Namespace,
+                           root: Path) -> int | None:
+    if version.runner == "cuper_host_pcg_tapa":
+        if answer == "1":
+            return build_cuper_tapa_pcg_host(root)
+        if answer == "2":
+            return run_command(["make", "run-cuper-pcg-tapa", f"DATASET={dataset.path}"], cwd=root)
+        if answer == "3":
+            bitfile = ask_text("输入 TAPA Cuper SpMV bitstream 路径，直接回车使用 DLC/Cuper/Cuper_2022.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "DLC" / "Cuper" / "Cuper_2022.xclbin"
+            return run_command([
+                "make",
+                "run-cuper-pcg-tapa",
+                f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
+            ], cwd=root)
+        if answer == "4":
+            return run_command([
+                "make",
+                "run-cuper-pcg-tapa",
+                f"DATASET={dataset.path}",
+                "MAX_ITERS=1",
+                "TAU=1e6",
+                "DIFF_TOL=1e-1",
+            ], cwd=root)
+
+    if version.runner == "cuper_host_pcg_notapa":
+        if answer == "1":
+            return run_command(["make", "cuper-notapa-pcg-xrt-host"], cwd=root)
+        if answer == "2":
+            return run_command(["make", "build-cuper-pcg-notapa-spmv-sw"], cwd=root)
+        if answer == "3":
+            return run_command([
+                "make",
+                "run-cuper-notapa-pcg-xrt",
+                "TARGET=sw_emu",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+        if answer == "4":
+            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+                return 0
+            return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
+        if answer == "5":
+            return run_command([
+                "make",
+                "run-cuper-notapa-pcg-xrt",
+                "TARGET=hw",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+
+    if version.runner == "cuper_pcg" and answer == "1":
+        return build_cuper_pcg_host(root)
+
+    if version.runner == "cuper_pcg" and answer == "2":
+        return run_command([str(args.cuper_pcg_host), str(dataset.path)], cwd=root)
+
+    if version.runner == "local" and answer == "1":
+        return build_local_host(root)
+
+    if version.runner == "local" and answer == "2":
+        command = [str(args.local_host), str(dataset.path)]
+        if version.spmv_arg is not None:
+            command.extend(["--spmv", version.spmv_arg])
+        return run_command(command, cwd=root)
+
+    if version.runner == "xrt" and answer == "1":
+        return build_xrt_host(root)
+
+    if version.runner == "xrt" and answer == "2":
+        return build_sw_xclbin(root)
+
+    if version.runner == "xrt" and answer == "3":
+        return build_hw_xclbin(root)
+
+    if version.runner == "xrt" and answer == "4":
+        return run_xrt_command(
+            args.xrt_host,
+            args.hw_xclbin,
+            dataset,
+            args.vitis_settings,
+            None,
+            root,
+        )
+
+    if version.runner == "xrt" and answer == "5":
+        reports = root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        stem = f"HW_{dataset.name}"
+        json_out = reports / f"{stem}.json"
+        txt_out = reports / f"{stem}.txt"
+        html_out = reports / f"{stem}.html"
+        html_static_out = reports / f"{stem}_static.html"
+        rc = run_xrt_command(
+            args.xrt_host,
+            args.hw_xclbin,
+            dataset,
+            args.vitis_settings,
+            None,
+            root,
+            json_out=json_out,
+            txt_out=txt_out,
+        )
+        if rc == 0:
+            render_report(root, json_out, html_out, html_static_out)
+            print(f"report json: {json_out}")
+            print(f"report txt : {txt_out}")
+            print(f"report html: {html_out}")
+            print(f"report html static: {html_static_out}")
+        return rc
+
+    if version.runner == "xrt" and answer == "6":
+        return run_xrt_command(
+            args.xrt_host,
+            args.sw_xclbin,
+            dataset,
+            args.vitis_settings,
+            "sw_emu",
+            root,
+            args.sw_emu_dir,
+        )
+
+    if version.runner == "xrt" and answer == "7":
+        reports = root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        stem = f"SW_{dataset.name}"
+        json_out = reports / f"{stem}.json"
+        txt_out = reports / f"{stem}.txt"
+        html_out = reports / f"{stem}.html"
+        html_static_out = reports / f"{stem}_static.html"
+        rc = run_xrt_command(
+            args.xrt_host,
+            args.sw_xclbin,
+            dataset,
+            args.vitis_settings,
+            "sw_emu",
+            root,
+            emconfig_path=args.sw_emu_dir,
+            json_out=json_out,
+            txt_out=txt_out,
+        )
+        if rc == 0:
+            render_report(root, json_out, html_out, html_static_out)
+            print(f"report json: {json_out}")
+            print(f"report txt : {txt_out}")
+            print(f"report html: {html_out}")
+            print(f"report html static: {html_static_out}")
+        return rc
+
+    return None
+
+
 def action_menu(dataset: Dataset, args: argparse.Namespace, root: Path) -> int:
     while True:
         print()
@@ -454,45 +855,21 @@ def action_menu(dataset: Dataset, args: argparse.Namespace, root: Path) -> int:
         print(f"路径: {dataset.path}")
         print(f"来源: {dataset.source}")
         if not dataset.runnable:
-            print(f"注意：n>{KMAX_N}，本地多 kernel 版不能跑；Cuper-PCG 和 XRT control-kernel 版可以尝试运行。")
+            print(f"注意：n>{KMAX_N}，archived 本地多 kernel 版不能跑；Cuper/XRT 路径可以尝试运行。")
 
         version = ask_code_version(dataset)
         if version is None:
             return 0
+        archived = version in ARCHIVED_CODE_VERSIONS
 
         while True:
             print()
             print(f"已选择实现: {version.title}")
             print()
-            print("构建/运行：")
-            if version.runner == "local":
-                print("  1. build local host")
-                print("  2. build/run local host")
-            elif version.runner == "cuper_pcg":
-                print("  1. build Cuper-PCG host")
-                print("  2. build/run Cuper-PCG host")
-                print("  3. open DLC/Cuper launcher")
-                print("  4. build DLC/Cuper HW bitstream in tmux")
-            elif version.runner == "cuper_pcg_tapa":
-                print("  1. build Cuper-PCG TAPA host")
-                print("  2. build/run Cuper-PCG TAPA host")
-                print("  3. build/run Cuper-PCG TAPA host smoke test")
-                print("  4. build DLC/Cuper HW bitstream in tmux")
-            elif version.runner == "cuper_control":
-                print("  1. build Cuper-PCG control local host")
-                print("  2. build/run Cuper-PCG control local host")
-                print("  3. build Cuper-PCG control XRT host")
-                print("  4. build sw_emu Cuper-PCG control xclbin")
-                print("  5. build/run sw_emu Cuper-PCG control xclbin")
-                print("  6. build hw Cuper-PCG control xclbin in tmux")
+            if archived:
+                print_archived_actions(version)
             else:
-                print("  1. build XRT host")
-                print("  2. build sw_emu xclbin")
-                print("  3. build hw bitstream")
-                print("  4. build/run hardware xclbin")
-                print("  5. build/run hardware xclbin + report")
-                print("  6. build/run sw_emu xclbin")
-                print("  7. build/run sw_emu xclbin + report")
+                print_active_actions(version)
             print("  q. 返回实现版本选择")
             try:
                 answer = input("选择操作: ").strip().lower()
@@ -502,214 +879,26 @@ def action_menu(dataset: Dataset, args: argparse.Namespace, root: Path) -> int:
             if answer in {"q", "quit", "exit"}:
                 break
 
-            if version.runner == "cuper_pcg" and answer == "1":
-                rc = build_cuper_pcg_host(root)
+            rc = (handle_archived_action if archived else handle_active_action)(
+                version, answer, dataset, args, root)
+            if rc is not None:
                 print_result(rc)
                 return rc
 
-            if version.runner == "cuper_pcg" and answer == "2":
-                rc = run_command([str(args.cuper_pcg_host), str(dataset.path)], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg" and answer == "3":
-                rc = run_cuper_launcher(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg" and answer == "4":
-                rc = run_command(["make", "cuper-hw-tmux"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg_tapa" and answer == "1":
-                rc = build_cuper_tapa_pcg_host(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg_tapa" and answer == "2":
-                rc = run_command([str(args.cuper_tapa_pcg_host), str(dataset.path)], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg_tapa" and answer == "3":
-                rc = run_command([
-                    str(args.cuper_tapa_pcg_host),
-                    str(dataset.path),
-                    "--max-iters",
-                    "1",
-                    "--tau",
-                    "1e6",
-                    "--diff-tol",
-                    "1e-1",
-                ], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_pcg_tapa" and answer == "4":
-                rc = run_command(["make", "cuper-hw-tmux"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "1":
-                rc = run_command(["make", "cuper-control-local-host"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "2":
-                rc = run_command([str(args.cuper_control_local_host), str(dataset.path)], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "3":
-                rc = run_command(["make", "cuper-control-xrt-host"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "4":
-                rc = run_command(["make", "build-cuper-control-sw"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "5":
-                rc = run_command([
-                    "make",
-                    "run-cuper-control-xrt",
-                    "TARGET=sw_emu",
-                    f"DATASET={dataset.path}",
-                ], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "cuper_control" and answer == "6":
-                print("硬件 bitstream 编译可能持续数小时。")
-                confirm = ask_text("确认要在 tmux 里构建 Cuper-PCG control HW，请输入 BUILD: ")
-                if confirm != LONG_BUILD_CONFIRM:
-                    print("已取消。")
-                    pause()
-                    continue
-                rc = run_command(["make", "cuper-control-hw-tmux"], cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "local" and answer == "1":
-                rc = build_local_host(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "local" and answer == "2":
-                command = [str(args.local_host), str(dataset.path)]
-                if version.spmv_arg is not None:
-                    command.extend(["--spmv", version.spmv_arg])
-                rc = run_command(command, cwd=root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "1":
-                rc = build_xrt_host(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "2":
-                rc = build_sw_xclbin(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "3":
-                rc = build_hw_xclbin(root)
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "4":
-                rc = run_xrt_command(
-                    args.xrt_host,
-                    args.hw_xclbin,
-                    dataset,
-                    args.vitis_settings,
-                    None,
-                    root,
-                )
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "5":
-                reports = root / "reports"
-                reports.mkdir(parents=True, exist_ok=True)
-                stem = f"HW_{dataset.name}"
-                json_out = reports / f"{stem}.json"
-                txt_out = reports / f"{stem}.txt"
-                html_out = reports / f"{stem}.html"
-                html_static_out = reports / f"{stem}_static.html"
-                rc = run_xrt_command(
-                    args.xrt_host,
-                    args.hw_xclbin,
-                    dataset,
-                    args.vitis_settings,
-                    None,
-                    root,
-                    json_out=json_out,
-                    txt_out=txt_out,
-                )
-                if rc == 0:
-                    render_report(root, json_out, html_out, html_static_out)
-                    print(f"report json: {json_out}")
-                    print(f"report txt : {txt_out}")
-                    print(f"report html: {html_out}")
-                    print(f"report html static: {html_static_out}")
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "6":
-                rc = run_xrt_command(
-                    args.xrt_host,
-                    args.sw_xclbin,
-                    dataset,
-                    args.vitis_settings,
-                    "sw_emu",
-                    root,
-                    args.sw_emu_dir,
-                )
-                print_result(rc)
-                return rc
-
-            if version.runner == "xrt" and answer == "7":
-                reports = root / "reports"
-                reports.mkdir(parents=True, exist_ok=True)
-                stem = f"SW_{dataset.name}"
-                json_out = reports / f"{stem}.json"
-                txt_out = reports / f"{stem}.txt"
-                html_out = reports / f"{stem}.html"
-                html_static_out = reports / f"{stem}_static.html"
-                rc = run_xrt_command(
-                    args.xrt_host,
-                    args.sw_xclbin,
-                    dataset,
-                    args.vitis_settings,
-                    "sw_emu",
-                    root,
-                    emconfig_path=args.sw_emu_dir,
-                    json_out=json_out,
-                    txt_out=txt_out,
-                )
-                if rc == 0:
-                    render_report(root, json_out, html_out, html_static_out)
-                    print(f"report json: {json_out}")
-                    print(f"report txt : {txt_out}")
-                    print(f"report html: {html_out}")
-                    print(f"report html static: {html_static_out}")
-                print_result(rc)
-                return rc
-
-            if version.runner == "local":
+            if archived and version.runner == "local":
                 print("请输入 1-2，或 q 返回。")
-            elif version.runner == "cuper_pcg":
+            elif archived and version.runner == "xrt":
+                print("请输入 1-7，或 q 返回。")
+            elif archived and version.runner == "cuper_host_pcg_tapa":
                 print("请输入 1-4，或 q 返回。")
-            elif version.runner == "cuper_pcg_tapa":
-                print("请输入 1-4，或 q 返回。")
-            elif version.runner == "cuper_control":
+            elif archived and version.runner == "cuper_host_pcg_notapa":
+                print("请输入 1-5，或 q 返回。")
+            elif archived:
+                print("请输入 1-2，或 q 返回。")
+            elif version.runner == "cuper_notapa_fpga_pcg":
                 print("请输入 1-6，或 q 返回。")
             else:
-                print("请输入 1-7，或 q 返回。")
+                print("请输入 1-5，或 q 返回。")
 
 
 def parse_args() -> argparse.Namespace:
@@ -719,7 +908,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-host", type=Path, default=root / "build" / "xplus_host")
     parser.add_argument("--cuper-pcg-host", type=Path, default=root / "build" / "xplus_cuper_pcg_host")
     parser.add_argument("--cuper-tapa-pcg-host", type=Path, default=root / "build" / "xplus_cuper_tapa_pcg_host")
+    parser.add_argument("--cuper-tapa-pcg-fpga-host", type=Path, default=root / "build" / "xplus_cuper_tapa_pcg_fpga_host")
+    parser.add_argument("--cuper-notapa-pcg-xrt-host", type=Path, default=root / "build" / "xplus_cuper_notapa_pcg_xrt_host")
     parser.add_argument("--cuper-control-local-host", type=Path, default=root / "build" / "xplus_cuper_control_local_host")
+    parser.add_argument("--cuper-control-xrt-host", type=Path, default=root / "build" / "xplus_cuper_control_xrt_host")
     parser.add_argument("--xrt-host", type=Path, default=root / "build" / "xplus_xrt_host")
     parser.add_argument("--hw-xclbin", type=Path, default=root / "build" / "hw" / "cgsolver_jacobi_pcg.xclbin")
     parser.add_argument("--sw-xclbin", type=Path, default=root / "build" / "sw_emu" / "cgsolver_jacobi_pcg.xclbin")

@@ -20,6 +20,14 @@
 #include "Cuper.h"
 #include "Cuper_common.h"
 
+// 主线 1：TAPA Cuper / single SpMV。
+//
+// 这个 host 当前承担两个用途：
+//   1. --spmv-only：只启动 TAPA Cuper SpMV，用来和 no-TAPA SpMV 精确对比。
+//   2. 默认模式：保留旧 bitstream 兼容路径，在 host 侧完成 PCG 剩余部分。
+//
+// 因此本文件里的 TAPA kernel 只负责 y = A * x；PCG 控制是否执行，
+// 取决于 main() 里选择 spmv-only 还是 compat host-PCG 分支。
 namespace {
 
 template <typename T>
@@ -37,12 +45,15 @@ struct CliOptions {
     double tau = project_xplus::cgsolver::run_defaults::kTau;
     int max_iters = project_xplus::cgsolver::run_defaults::kMaxIters;
     double diff_tol = 1.0e-3;
+    // true 时只测一次或多次 Cuper SpMV，不进入 host-side PCG 主循环。
+    bool spmv_only = false;
+    int spmv_repeats = 1;
 };
 
 void usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
               << " [dataset_dir] [--bitstream path] [--tau value] [--max-iters value]"
-              << " [--diff-tol value]\n";
+              << " [--diff-tol value] [--spmv-only] [--spmv-repeats value]\n";
 }
 
 std::string env_or_empty(const char* name) {
@@ -82,6 +93,13 @@ CliOptions parse_args(int argc, char** argv) {
                 throw std::runtime_error("--diff-tol requires a value");
             }
             options.diff_tol = std::stod(argv[++index]);
+        } else if (arg == "--spmv-only") {
+            options.spmv_only = true;
+        } else if (arg == "--spmv-repeats") {
+            if (index + 1 >= argc) {
+                throw std::runtime_error("--spmv-repeats requires a value");
+            }
+            options.spmv_repeats = std::stoi(argv[++index]);
         } else {
             throw std::runtime_error("unknown argument: " + arg);
         }
@@ -95,6 +113,9 @@ CliOptions parse_args(int argc, char** argv) {
     }
     if (options.diff_tol <= 0.0) {
         throw std::runtime_error("--diff-tol must be positive");
+    }
+    if (options.spmv_repeats <= 0) {
+        throw std::runtime_error("--spmv-repeats must be positive");
     }
 
     return options;
@@ -272,14 +293,74 @@ int main(int argc, char** argv) {
         config.max_iters = options.max_iters;
 
         std::cout << "[xplus] dataset=" << options.dataset_dir
-                  << " mode=cuper-pcg-tapa"
+                  << " mode=" << (options.spmv_only ? "cuper-spmv-tapa" : "cuper-pcg-tapa")
                   << " spmv=tapa-cuper"
                   << " bitstream=" << (options.bitstream.empty() ? "<software-sim>" : options.bitstream)
                   << "\n";
 
-        // TAPA 版 PCG 的硬件部分到这里为止只是一个 SpMV 后端。
-        // 下面的 run_cuper_pcg_solver_with_backend 会在 host 侧循环调用 spmv。
         CuperTapaSpmv spmv(dataset, options.bitstream);
+        if (options.spmv_only) {
+            // 主线入口：TAPA Cuper single SpMV。
+            //
+            // 输入固定用 dataset.b()，CPU 的 Dataset::spmv 作为校验基准。
+            // 这里只计 Cuper kernel 的 SpMV 时间，不把 PCG 的 dot/update
+            // 或 host 端收敛判断混进测量口径。
+            std::vector<data_t> input = dataset.b();
+            std::vector<data_t> output(static_cast<std::size_t>(dataset.n()), 0.0);
+            std::vector<data_t> expected;
+            dataset.spmv(input, expected);
+
+            CuperPcgResult spmv_result;
+            spmv_result.timing.plan_ms = spmv.plan_ms();
+            for (int repeat = 0; repeat < options.spmv_repeats; ++repeat) {
+                spmv(input, output, spmv_result);
+            }
+
+            double max_abs_diff = 0.0;
+            double max_rel_diff = 0.0;
+            for (std::size_t index = 0; index < output.size(); ++index) {
+                const double abs_diff = std::fabs(output[index] - expected[index]);
+                const double rel_diff = abs_diff / std::max(std::fabs(expected[index]), 1.0e-12);
+                max_abs_diff = std::max(max_abs_diff, abs_diff);
+                max_rel_diff = std::max(max_rel_diff, rel_diff);
+            }
+
+            const double kernel_seconds = spmv_result.timing.spmv_ms * 1.0e-3;
+            const double gflops = kernel_seconds > 0.0
+                                      ? (2.0 * static_cast<double>(dataset.nnz()) *
+                                         static_cast<double>(spmv_result.timing.spmv_calls)) /
+                                            kernel_seconds / 1.0e9
+                                      : 0.0;
+
+            std::cout << std::scientific << std::setprecision(12);
+            std::cout << "[done] mode=spmv_only"
+                      << " spmv_calls=" << std::defaultfloat << spmv_result.timing.spmv_calls
+                      << std::scientific
+                      << " status=ok\n";
+            std::cout << "[check] max_abs_diff=" << max_abs_diff
+                      << " max_rel_diff=" << max_rel_diff
+                      << " diff_tol=" << options.diff_tol << "\n";
+            std::cout << "[timing-ms] plan=" << spmv_result.timing.plan_ms
+                      << " spmv_total=" << spmv_result.timing.spmv_ms
+                      << " spmv_calls=" << std::defaultfloat << spmv_result.timing.spmv_calls
+                      << std::scientific
+                      << " spmv_avg="
+                      << (spmv_result.timing.spmv_calls > 0
+                              ? spmv_result.timing.spmv_ms / spmv_result.timing.spmv_calls
+                              : 0.0)
+                      << " gflops=" << gflops << "\n";
+
+            if (max_abs_diff > options.diff_tol && max_rel_diff > options.diff_tol) {
+                return 3;
+            }
+            return 0;
+        }
+
+        // 兼容入口：旧 TAPA Cuper bitstream 只会做 SpMV。
+        //
+        // 为了还能跑已有 bitstream，这里继续把每轮 PCG 的 SpMV 委托给
+        // CuperTapaSpmv，其余 alpha/beta、dot、向量更新和收敛判断都留在 host。
+        // 这不是四条主线里的 full-FPGA-PCG，只作为兼容/对照保留。
         CuperPcgResult cuper_result =
             project_xplus::cgsolver::run_cuper_pcg_solver_with_backend(
                 dataset, config, spmv.backend_info(), spmv.plan_ms(), spmv, &std::cout);

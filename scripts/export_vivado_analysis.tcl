@@ -167,7 +167,7 @@ if {[file isfile $input_path] && [file extension $input_path] eq ".dcp"} {
 if {!$opened_design} {
   log_line "ERROR: no implemented design is open."
   log_line "The current build may only contain the xclbin/project shell, not the completed Vivado run directory."
-  log_line "Rebuild hardware with 'make build-hw' so cfg/vivado_analysis_reports.cfg is applied, or preserve the Vivado impl run."
+  log_line "Rebuild hardware with 'make build-hw' so archived/cfg/vivado_analysis_reports.cfg is applied, or preserve the Vivado impl run."
   close $manifest
   exit 3
 }
