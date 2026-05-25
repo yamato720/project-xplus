@@ -466,6 +466,9 @@ void Reordering(vector<SpElement> &temp_SpElement_list,
     INDEX_TYPE org_row_idx;
 
     for(INDEX_TYPE p = 0; p < temp_SpElement_list.size(); ++p) {
+        // Cuper accumulator 不是按原始全局 row 直接寻址，而是按
+        // 2 * NUM_PE 的交错组来聚合。这个 org_row_idx 后面会被编码进
+        // SpElement 的 rowIdx，硬件端再用它作为局部 URAM 累加地址。
         org_row_idx = temp_SpElement_list[p].rowIdx / (2 * NUM_PE);
         INDEX_TYPE win_row_idx = sliding_window[org_row_idx] + WIDTH;
         INDEX_TYPE insert_flag = 1;
@@ -484,6 +487,11 @@ void Reordering(vector<SpElement> &temp_SpElement_list,
         }
 
         scheduled_SpElement[win_row_idx].colIdx = temp_SpElement_list[p].colIdx - base_col_index;
+        // 这里写入的是 Cuper 内部 row 编码，不是原始全局 row：
+        //   bit0      : 原始 row 的奇偶，用来选择 ping/pong 累加阵列
+        //   bit[17:1] : org_row_idx，作为局部累加地址
+        //   bit17=1   : 空元素/padding 标记
+        // 因此 65535 不是这个字段的直接全局行号边界。
         scheduled_SpElement[win_row_idx].rowIdx = org_row_idx * 2 + (temp_SpElement_list[p].rowIdx % 2);
         scheduled_SpElement[win_row_idx].val = temp_SpElement_list[p].val;
         sliding_window[org_row_idx] = win_row_idx;
@@ -525,17 +533,21 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                 Sort_Slice_Row(sliceMatrix.sliceVal[j]);
 
                 for(INDEX_TYPE k = 0; k < slicennzR; ++k) {
-                    // 【核心逻辑】：确保奇偶对齐
                     INDEX_TYPE row = sliceMatrix.sliceVal[j].RowIdx[k];
-INDEX_TYPE packet_id = row / 2; // 每两个 float 组成一个 float_v2 包
+                    // 每两个 float 组成一个 float_v2 包。这里的分配顺序必须
+                    // 和 Pcg_Vector_Checker / Mult_Sort_Tree 的输出顺序一致，
+                    // 否则会出现行号错位，板上大矩阵时也更容易卡在流控上。
+                    INDEX_TYPE packet_id = row / 2;
 
-// 关键映射变换（根据硬件 Interleaving 步幅推导）
-INDEX_TYPE checker_id = packet_id % 8;        // 映射到 8 个 Checker
-INDEX_TYPE acc_offset = (packet_id / 8) % 2;   // 每个 Checker 内部轮询 2 个 Acc
-INDEX_TYPE pe_in_acc  = (packet_id / 16) % 8;  // 每个 Acc 内部轮询 8 个 PE
+                    // 关键映射变换：先映射到 8 个 checker，再映射到
+                    // checker 内的 ping/pong 偏移，最后映射到每组 8 个 PE。
+                    INDEX_TYPE checker_id = packet_id % 8;
+                    INDEX_TYPE acc_offset = (packet_id / 8) % 2;
+                    INDEX_TYPE pe_in_acc  = (packet_id / 16) % 8;
 
-// 重新组合物理 PE 编号
-INDEX_TYPE p = (checker_id * 2 + acc_offset) * 8 + pe_in_acc;
+                    // 重新组合物理 PE 编号。NUM_PE 在当前配置中是
+                    // HBM_CHANNEL_NUM * PE_NUM，也就是 16 * 8 个物理槽位。
+                    INDEX_TYPE p = (checker_id * 2 + acc_offset) * 8 + pe_in_acc;
                     temp_SpElement_list_pes[p].push_back(SpElement(sliceMatrix.sliceVal[j].ColIdx[k], sliceMatrix.sliceVal[j].RowIdx[k], sliceMatrix.sliceVal[j].Val[k]));
                 }
             }
@@ -575,12 +587,17 @@ void Create_SpElement_list_for_all_channels(const vector<vector<SpElement> > &Sp
         Matrix_fpga_data[c].assign(Matrix_fpga_data_channel_size, 0);
     }
     
+    // 每个 HBM channel 的一个 512-bit beat 包含 8 个 64-bit SpElement：
+    //   [63:50] colIdx，相对当前 column batch 的局部列号，14 bit
+    //   [49:32] rowIdx，Reordering 后的 Cuper 内部 row 编码，18 bit
+    //   [31:0]  value，float32 非零值
+    // rowIdx=0x3ffff 表示空槽；有效元素 bit17 必须为 0。
     for(INDEX_TYPE i = 0; i < max_len; ++i) {
         for(INDEX_TYPE c = 0; c < HBM_CHANNEL_NUM; ++c) {
             for(INDEX_TYPE j = 0; j < 8; ++j) {
-                // 【核心修改点】
-                // 这里的 pe_idx 必须和 Create_SpElement_list_for_all_PEs 的索引逻辑完全一致
-                // 即：物理通道 c 的第 j 个槽位，对应的就是 SpElement_list_pes 里的第 c*8 + j 个 PE
+                // 这里的 pe_idx 必须和 Create_SpElement_list_for_all_PEs 的
+                // 交错映射完全一致：物理通道 c 的第 j 个 64-bit 槽位，
+                // 对应 SpElement_list_pes 里的第 c * 8 + j 个 PE。
                 INDEX_TYPE pe_idx = c * 8 + j; 
 
                 SpElement sp = SpElement_list_pes[pe_idx][i];

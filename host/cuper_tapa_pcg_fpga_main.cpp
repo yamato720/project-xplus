@@ -157,6 +157,11 @@ CuperTapaMatrix build_tapa_matrix(const Dataset& dataset) {
 
     std::vector<std::vector<SpElement>> sp_element_list_pes;
     std::vector<INDEX_TYPE> sp_element_list_ptr;
+    // CuperPcg 和原 TAPA Cuper 共用同一套矩阵打包：
+    // CSR/COO -> SparseSlice -> SpElement list -> 16 路 HBM。
+    // 注意 SpElement 里的 rowIdx 会在 Reordering 中变成 Cuper 内部
+    // row 编码，不是原始全局 row；因此板上是否能过 65535 行，
+    // 主要看 Cuper 调度/流控和 host 返回路径，而不是这里的 int 行号宽度。
     Create_SpElement_list_for_all_PEs(HBM_CHANNEL_NUM * PE_NUM,
                                       dataset.n(),
                                       dataset.n(),

@@ -862,6 +862,9 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                      tapa::istream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
                      tapa::ostream<float_v2>      &Vector_Y_Stream) {
 #ifdef PINGPONG
+    // ping/pong 分别保存偶数行和奇数行的部分和。row 编码来自 host 侧
+    // Reordering：bit0 表示奇偶，bit[17:1] 是局部累加地址，bit17=1
+    // 表示空元素。这里不是按原始全局 row 直接索引。
     ap_uint<32> local_part_Y_ping[8][URAM_DEPTH];
 #pragma HLS bind_storage variable=local_part_Y_ping type=RAM_2P impl=URAM latency=1
 #pragma HLS array_partition complete variable=local_part_Y_ping dim=1
@@ -923,6 +926,9 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                         for (int p = 0; p < 8; ++p) {
                             ap_uint<18> a_row = matmultx.row[p];
 #ifdef PINGPONG
+                            // a_row[17] 为 1 是 padding/空元素；有效元素按
+                            // a_row[0] 分流到 ping/pong，地址使用 a_row(17,1)。
+                            // 所以这里的 18-bit row 不是 0..Row_num-1 的全局行号。
                             if (a_row[17] == 0 && a_row[0] == 0)
                                 Adder_p(a_row(17, 1), matmultx.val[p], local_part_Y_ping[p]);
                             if (a_row[17] == 0 && a_row[0] == 1)
@@ -1028,6 +1034,9 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     const INDEX_TYPE Row_num,
                     const INDEX_TYPE Max_iters,
                     const double Tau) {
+    // controller 和 SpMV 数据流之间用 float_v16 作为向量包。
+    // packet_count 只描述 PCG 向量长度，和 Cuper 内部 18-bit row 编码
+    // 不是一回事。
     const INDEX_TYPE packet_count = (Row_num + 15) >> 4;
     INDEX_TYPE status_code = kPcgStatusMaxIter;
     INDEX_TYPE iterations = 0;
@@ -1057,6 +1066,9 @@ send_init_matrix_command:
     init_spmv_stream:
         // 边发送 x0 边消费 A*x0，避免 SpMV 输出 FIFO 填满后反压整条
         // Cuper 数据流，而 controller 仍阻塞在继续写输入向量。
+        // 这个循环故意使用 full/empty + try_write/try_read 做非阻塞握手：
+        // 大矩阵时输入向量和输出结果会同时在流水里移动，不能拆成
+        // “先全部写完，再全部读完”的两段。
         for (INDEX_TYPE sent_packets = 0, received_packets = 0;
              received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
@@ -1132,6 +1144,8 @@ pcg_loop:
             // 每轮同样边发送 p 边消费 A*p。否则大矩阵时 controller 可能在
             // X_to_spmv.write() 等下游腾空间，而下游又在等 controller 读取
             // 已经算出的 SpMV 输出，形成硬件死锁。
+            // sent_packets 和 received_packets 独立推进，允许 Cuper SpMV
+            // 先产出部分 AP，也允许 controller 继续补发后续 p packet。
             for (INDEX_TYPE sent_packets = 0, received_packets = 0;
                  received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
@@ -1363,21 +1377,88 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     //   Pcg_* loader/Core/Accumulator/Checker/Mult_Sort_Tree
     //       -> 基本沿用原始 Cuper 的 16 HBM SpMV 流水
     //
+    // 下面这些 stream 数组可以按硬件连线图理解：
+    //
+    //   1. 参数/向量广播链，长度是 HBM_CHANNEL_NUM + 1：
+    //
+    //        PE_Param[0]        -> Core0 -> PE_Param[1]
+    //        PE_Param[1]        -> Core1 -> PE_Param[2]
+    //        ...
+    //        PE_Param[15]       -> Core15 -> PE_Param[16]
+    //
+    //        Vector_X_Stream[0] -> Core0 -> Vector_X_Stream[1]
+    //        Vector_X_Stream[1] -> Core1 -> Vector_X_Stream[2]
+    //        ...
+    //        Vector_X_Stream[15]-> Core15 -> Vector_X_Stream[16]
+    //
+    //      x0/p 向量不是复制出 16 个独立输入端口，而是通过 16 个 core
+    //      串接转发。每个 core 在转发同一份向量的同时，读取自己那一路
+    //      HBM 矩阵并计算局部 val * x[col]。
+    //
+    //   2. 矩阵/局部乘积并行数组，长度是 HBM_CHANNEL_NUM：
+    //
+    //        Matrix_data_0  -> Matrix_A_Stream[0]  -> Core0  -> Matrix_Mult_Vector_Stream[0]
+    //        Matrix_data_1  -> Matrix_A_Stream[1]  -> Core1  -> Matrix_Mult_Vector_Stream[1]
+    //        ...
+    //        Matrix_data_15 -> Matrix_A_Stream[15] -> Core15 -> Matrix_Mult_Vector_Stream[15]
+    //
+    //      这部分是真正的 16 路 HBM/SpMV 并行度。
+    //
+    //   3. SpMV 输出收敛链：
+    //
+    //        Matrix_Mult_Vector_Stream[0..15]
+    //             -> Pcg_Accumulator[0..15]
+    //             -> Vector_Y_Stream[0..15]
+    //             -> Pcg_Vector_Checker[0..7]
+    //             -> Vector_Y_Stream_Aftck[0..7]
+    //             -> Mult_Sort_Tree
+    //             -> Pcg_Spmv_Stream
+    //             -> Pcg_Controller
+    //
+    //      controller 最终看到的是一包包 float_v16 的 A*x0 或 A*p。
+    //
     // 这样 host 只 launch 一次 CuperPcg；PCG 每轮迭代都在这个 TAPA
     // task graph 内部完成，不再走 host 侧循环调用 Cuper。
+    //
+    // tapa::stream<T, DEPTH> 表示一条 FIFO；tapa::streams<T, N, DEPTH>
+    // 表示 N 条同类型 FIFO。T 是每个元素的数据类型，DEPTH 是每条 FIFO
+    // 的深度。下面这些 FIFO 就是各个 task 之间的硬件连线。
+    //
+    // 2 条命令流：controller 分别通知 ptr loader 和 vector loader
+    // 启动一次 SpMV。CuperSpmvCommand 当前只带 iteration_num。
     tapa::streams<CuperSpmvCommand, 2, 4>                   Command_Stream("Command_Stream");
+    // 16 条矩阵命令流：controller 给每个 HBM matrix loader 发同一轮
+    // SpMV 命令。HBM_CHANNEL_NUM 当前是 16。
     tapa::streams<CuperSpmvCommand, HBM_CHANNEL_NUM, 4>     Matrix_Command_Stream("Matrix_Command_Stream");
+    // controller 输出的 x0/p 向量流。float_v16 是 16 个 float 一包，
+    // 先进入 Pcg_Vector_Loader，再被广播到 16 个 core。
     tapa::stream<float_v16, 128>                            Pcg_X_Stream("Pcg_X_Stream");
+    // 参数广播链：PE_Param[0] 由 ptr loader 写入，随后 Core0..Core15
+    // 逐级转发到 PE_Param[16]。链尾由 Destroy_int 消费。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>     PE_Param("PE_Param");
+    // 向量广播链：Vector_X_Stream[0] 由 vector loader 写入，随后
+    // Core0..Core15 逐级转发到 Vector_X_Stream[16]。链尾由
+    // Destroy_float_v16 消费。
     tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 256>      Vector_X_Stream("Vector_X_Stream");
+    // 16 路矩阵数据流：每一路对应一个 HBM channel。ap_uint<512>
+    // 是一个 512-bit HBM beat，内部打包 8 个 64-bit SpElement。
     tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 64>        Matrix_A_Stream("Matrix_A_Stream");
+    // 16 路 accumulator 参数流：每个 core 给对应 accumulator 传 Row_num、
+    // Iteration_num 以及每个 batch 的矩阵边界。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>          Vector_Y_Param("Vector_Y_Param");
+    // 16 路局部乘积流：每个 core 输出自己 HBM 分片产生的 val * x[col]
+    // 及对应的 Cuper 内部 row 编码。
     tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 256>      Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
+    // 16 路 accumulator 输出流：每路输出 float_v2，也就是 ping/pong
+    // 合并后的两行 y 值。
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
+    // checker 后的 8 路输出流：过滤 padding 后交给 Mult_Sort_Tree，
+    // 最终重新拼成 float_v16 送回 Pcg_Controller。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
     // 直接把 Cuper 的 float_v16 SpMV 结果接回 controller。
     // 之前额外的 packetizer task 只包装一个未使用的 last 位；板上调试时
     // 该中间层会增加流控不确定性，所以这里保留 128 深度 FIFO 后直接消费。
+    // 这里也不再把 y 写回 HBM；CuperPcg 内部直接拿 A*x0/A*p 更新 PCG 状态。
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
 
     tapa::task()
@@ -1418,6 +1499,20 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke<tapa::detach, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader, Matrix_len, Matrix_data, Matrix_Command_Stream, Matrix_A_Stream)
         // 16 级 Cuper Core 链。PE_Param 和 Vector_X_Stream 在各级之间传递，
         // 每级消费一个 Matrix_data[channel]，输出该 channel 对 y 的部分贡献。
+        //
+        // 对第 i 级 core，可以按下面的通用形式读：
+        //
+        //   Pcg_Core(
+        //       PE_Param[i],                  // 参数输入，来自上一级或 ptr loader
+        //       Matrix_A_Stream[i],           // 第 i 个 HBM channel 的矩阵流
+        //       Vector_X_Stream[i],           // 向量输入，来自上一级或 vector loader
+        //       PE_Param[i + 1],              // 参数转发给下一级
+        //       Vector_X_Stream[i + 1],       // 向量转发给下一级
+        //       Vector_Y_Param[i],            // 给 accumulator 的输出行数/边界参数
+        //       Matrix_Mult_Vector_Stream[i]) // 第 i 路矩阵分片产生的局部乘积
+        //
+        // [0..15] 表示 16 路 HBM 矩阵通道和 16 个 SpMV core；[16] 只表示
+        // 串接链尾，不再对应新的矩阵通道。
         .invoke<tapa::detach>(Pcg_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
         .invoke<tapa::detach>(Pcg_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
         .invoke<tapa::detach>(Pcg_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
@@ -1434,6 +1529,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke<tapa::detach>(Pcg_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
         .invoke<tapa::detach>(Pcg_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
         .invoke<tapa::detach>(Pcg_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+        // 链尾 PE_Param[16] / Vector_X_Stream[16] 已经没有第 16 个 core 消费。
+        // Destroy_* 常驻读取尾流，防止最后一级 core 写满 FIFO 后反压整条链。
         .invoke<tapa::detach>(Destroy_int, PE_Param[HBM_CHANNEL_NUM])
         .invoke<tapa::detach>(Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM])
         // Cuper 输出端：累加各 PE 部分和，过滤 padding，排序/拼包后直接
