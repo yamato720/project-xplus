@@ -10,7 +10,7 @@ XPLATFORM ?= /opt/xilinx/platforms/$(DEVICE)/$(DEVICE).xpfm
 XILINX_XRT ?= /opt/xilinx/xrt
 
 ROOT_DIR := $(abspath .)
-BUILD_DIR := $(ROOT_DIR)/build
+BUILD_DIR ?= $(abspath $(ROOT_DIR)/../..)/cuper-tapa-spmv-build
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 HOST_DIR := $(ROOT_DIR)/host
@@ -46,7 +46,7 @@ help:
 	@echo "Targets:"
 	@echo "  make launch       Open the Cuper launcher"
 	@echo "  make launcher     Alias of make launch"
-	@echo "  make build-host   Build build/cuper_host"
+	@echo "  make build-host   Build $(BUILD_DIR)/cuper_host"
 	@echo "  make run-sw       Run software simulation, MATRIX=<path>"
 	@echo "  make build-xo     Build Cuper_2022.xo"
 	@echo "  make link-xclbin  Link Cuper_2022.xclbin"
@@ -60,22 +60,22 @@ clean:
 	rm -rf "$(BUILD_DIR)"
 
 launch launcher:
-	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
+	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
 
 build-host:
-	"$(SCRIPT_DIR)/build_host.sh"
+	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/build_host.sh"
 
 run-sw:
-	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"
 
 build-xo:
-	"$(SCRIPT_DIR)/build_xo_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/build_xo_u55c.sh"
 
 link-xclbin:
-	"$(SCRIPT_DIR)/link_xclbin_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
 
 hw-tmux:
-	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
+	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
 
 run-hw:
-	"$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/sit100/sit100.mtx)"

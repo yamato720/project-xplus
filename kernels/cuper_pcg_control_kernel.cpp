@@ -2,15 +2,19 @@
 
 #include <cstdint>
 
-// no-TAPA Cuper 的两个主线 kernel 都在本文件中：
+// no-TAPA Cuper 的主线 kernel 都在本文件中：
 //
 //   1. cuper_packed_spmv_kernel
 //      只执行一次 y = A * x，用于 no-TAPA Cuper / single SpMV。
 //
-//   2. cuper_pcg_control_kernel
+//   2. cuper_packed_spmv_4ch_kernel
+//      实验入口：仍使用同一套 16-HBM 打包数据，但每次只并行 4 个
+//      matrix channel，4 组顺序跑，用于验证降并发后是否能修复 Fmax。
+//
+//   3. cuper_pcg_control_kernel
 //      在 FPGA 内执行完整 Jacobi-PCG，用于 no-TAPA Cuper / FPGA-PCG。
 //
-// 两个入口共用同一套 Cuper packed 16-HBM SpMV 数据流，区别在于
+// 这些入口共用同一套 Cuper packed 16-HBM SpMV 数据格式，区别在于
 // PCG 控制和向量更新是在 host 侧还是 kernel 侧。
 #if __has_include(<ap_int.h>)
 #include <ap_int.h>
@@ -548,6 +552,228 @@ reduce_init_partials:
     }
     *init_rz_out = init_rz;
     *init_rr_out = init_rr;
+}
+
+constexpr int kCuperSpmvGroupChannels = 4;
+
+void broadcast_cuper_inputs_4ch(const index_t* sp_element_list_ptr,
+                                const data_t* x,
+                                const int batch_count,
+                                const int n,
+                                hls::stream<CuperBatchParam> batch_streams[kCuperSpmvGroupChannels],
+                                hls::stream<CuperXPacket> x_streams[kCuperSpmvGroupChannels]) {
+#pragma HLS INLINE off
+    int begin = sp_element_list_ptr[0];
+
+broadcast_4ch_batch_loop:
+    for (int batch = 0; batch < batch_count; ++batch) {
+#pragma HLS LOOP_TRIPCOUNT min = 1 max = 128
+        const int end = sp_element_list_ptr[batch + 1];
+        const int slice_begin = batch * kCuperSliceWidth;
+        const CuperBatchParam param{begin, end, slice_begin};
+
+    broadcast_4ch_param:
+        for (int channel = 0; channel < kCuperSpmvGroupChannels; ++channel) {
+#pragma HLS UNROLL
+            batch_streams[channel].write(param);
+        }
+
+    broadcast_4ch_x_packets:
+        for (int packet_index = 0; packet_index < kCuperSliceWidth / 16; ++packet_index) {
+#pragma HLS PIPELINE II = 1
+            CuperXPacket packet;
+        fill_4ch_x_packet:
+            for (int lane = 0; lane < 16; ++lane) {
+#pragma HLS UNROLL
+                const int global_col = slice_begin + (packet_index << 4) + lane;
+                packet.values[lane] =
+                    (global_col < n) ? static_cast<spmv_data_t>(x[global_col]) : 0.0f;
+            }
+        broadcast_4ch_x_channels:
+            for (int channel = 0; channel < kCuperSpmvGroupChannels; ++channel) {
+#pragma HLS UNROLL
+                x_streams[channel].write(packet);
+            }
+        }
+
+        begin = end;
+    }
+}
+
+CuperOutputItem read_cuper_output_item_4ch(hls::stream<CuperOutputItem>& output_stream_0,
+                                           hls::stream<CuperOutputItem>& output_stream_1,
+                                           hls::stream<CuperOutputItem>& output_stream_2,
+                                           hls::stream<CuperOutputItem>& output_stream_3,
+                                           const int stream_index) {
+#pragma HLS INLINE
+    switch (stream_index) {
+        case 0:
+            return output_stream_0.read();
+        case 1:
+            return output_stream_1.read();
+        case 2:
+            return output_stream_2.read();
+        default:
+            return output_stream_3.read();
+    }
+}
+
+void write_cuper_outputs_4ch(hls::stream<CuperOutputItem>& output_stream_0,
+                             hls::stream<CuperOutputItem>& output_stream_1,
+                             hls::stream<CuperOutputItem>& output_stream_2,
+                             hls::stream<CuperOutputItem>& output_stream_3,
+                             data_t* y,
+                             const int n) {
+#pragma HLS INLINE off
+    const int active_depth = (n + (2 * kCuperPeNum - 1)) / (2 * kCuperPeNum);
+    constexpr int kItemsPerRowGroup = kCuperSpmvGroupChannels * kCuperPePerHbm;
+
+write_4ch_row_groups:
+    for (int row_group = 0; row_group < active_depth; ++row_group) {
+    write_4ch_items:
+        for (int item_index = 0; item_index < kItemsPerRowGroup; ++item_index) {
+#pragma HLS PIPELINE II = 1
+            const int stream_index = item_index & (kCuperSpmvGroupChannels - 1);
+            const CuperOutputItem item = read_cuper_output_item_4ch(output_stream_0,
+                                                                   output_stream_1,
+                                                                   output_stream_2,
+                                                                   output_stream_3,
+                                                                   stream_index);
+            if (item.even_row < n) {
+                y[item.even_row] = static_cast<data_t>(item.even_value);
+            }
+            if (item.odd_row < n) {
+                y[item.odd_row] = static_cast<data_t>(item.odd_value);
+            }
+        }
+    }
+}
+
+void cuper_packed_spmv_4ch_dataflow(const index_t* sp_element_list_ptr,
+                                    cuper_matrix_ptr_t matrix_data_0,
+                                    cuper_matrix_ptr_t matrix_data_1,
+                                    cuper_matrix_ptr_t matrix_data_2,
+                                    cuper_matrix_ptr_t matrix_data_3,
+                                    const int channel_base,
+                                    const data_t* x,
+                                    data_t* y,
+                                    const int batch_count,
+                                    const int n) {
+#pragma HLS INLINE off
+    hls::stream<CuperOutputItem> output_stream_0;
+    hls::stream<CuperOutputItem> output_stream_1;
+    hls::stream<CuperOutputItem> output_stream_2;
+    hls::stream<CuperOutputItem> output_stream_3;
+    hls::stream<CuperBatchParam> batch_streams[kCuperSpmvGroupChannels];
+    hls::stream<CuperXPacket> x_streams[kCuperSpmvGroupChannels];
+#pragma HLS STREAM variable = output_stream_0 depth = 256
+#pragma HLS STREAM variable = output_stream_1 depth = 256
+#pragma HLS STREAM variable = output_stream_2 depth = 256
+#pragma HLS STREAM variable = output_stream_3 depth = 256
+#pragma HLS STREAM variable = batch_streams depth = 4
+#pragma HLS STREAM variable = x_streams depth = 64
+#pragma HLS ARRAY_PARTITION variable = batch_streams complete dim = 1
+#pragma HLS ARRAY_PARTITION variable = x_streams complete dim = 1
+
+#pragma HLS DATAFLOW
+    broadcast_cuper_inputs_4ch(sp_element_list_ptr, x, batch_count, n, batch_streams, x_streams);
+    process_cuper_channel_stream(matrix_data_0,
+                                 channel_base + 0,
+                                 batch_count,
+                                 n,
+                                 batch_streams[0],
+                                 x_streams[0],
+                                 output_stream_0);
+    process_cuper_channel_stream(matrix_data_1,
+                                 channel_base + 1,
+                                 batch_count,
+                                 n,
+                                 batch_streams[1],
+                                 x_streams[1],
+                                 output_stream_1);
+    process_cuper_channel_stream(matrix_data_2,
+                                 channel_base + 2,
+                                 batch_count,
+                                 n,
+                                 batch_streams[2],
+                                 x_streams[2],
+                                 output_stream_2);
+    process_cuper_channel_stream(matrix_data_3,
+                                 channel_base + 3,
+                                 batch_count,
+                                 n,
+                                 batch_streams[3],
+                                 x_streams[3],
+                                 output_stream_3);
+    write_cuper_outputs_4ch(output_stream_0, output_stream_1, output_stream_2, output_stream_3, y, n);
+}
+
+void cuper_packed_spmv_4ch(const index_t* sp_element_list_ptr,
+                           cuper_matrix_ptr_t matrix_data_0,
+                           cuper_matrix_ptr_t matrix_data_1,
+                           cuper_matrix_ptr_t matrix_data_2,
+                           cuper_matrix_ptr_t matrix_data_3,
+                           cuper_matrix_ptr_t matrix_data_4,
+                           cuper_matrix_ptr_t matrix_data_5,
+                           cuper_matrix_ptr_t matrix_data_6,
+                           cuper_matrix_ptr_t matrix_data_7,
+                           cuper_matrix_ptr_t matrix_data_8,
+                           cuper_matrix_ptr_t matrix_data_9,
+                           cuper_matrix_ptr_t matrix_data_10,
+                           cuper_matrix_ptr_t matrix_data_11,
+                           cuper_matrix_ptr_t matrix_data_12,
+                           cuper_matrix_ptr_t matrix_data_13,
+                           cuper_matrix_ptr_t matrix_data_14,
+                           cuper_matrix_ptr_t matrix_data_15,
+                           const data_t* x,
+                           data_t* y,
+                           const int batch_count,
+                           const int n) {
+#pragma HLS INLINE off
+#pragma HLS ALLOCATION instances = cuper_packed_spmv_4ch_dataflow limit = 1 function
+    // 一次只放 4 个 matrix channel 进 DATAFLOW 区域，4 组顺序执行。
+    // 这样保留原 16-HBM host 打包格式，同时显著降低单个调度区域的
+    // ap_enable/ap_block 扇出和跨 SLR URAM/DSP 布线压力。
+    cuper_packed_spmv_4ch_dataflow(sp_element_list_ptr,
+                                   matrix_data_0,
+                                   matrix_data_1,
+                                   matrix_data_2,
+                                   matrix_data_3,
+                                   0,
+                                   x,
+                                   y,
+                                   batch_count,
+                                   n);
+    cuper_packed_spmv_4ch_dataflow(sp_element_list_ptr,
+                                   matrix_data_4,
+                                   matrix_data_5,
+                                   matrix_data_6,
+                                   matrix_data_7,
+                                   4,
+                                   x,
+                                   y,
+                                   batch_count,
+                                   n);
+    cuper_packed_spmv_4ch_dataflow(sp_element_list_ptr,
+                                   matrix_data_8,
+                                   matrix_data_9,
+                                   matrix_data_10,
+                                   matrix_data_11,
+                                   8,
+                                   x,
+                                   y,
+                                   batch_count,
+                                   n);
+    cuper_packed_spmv_4ch_dataflow(sp_element_list_ptr,
+                                   matrix_data_12,
+                                   matrix_data_13,
+                                   matrix_data_14,
+                                   matrix_data_15,
+                                   12,
+                                   x,
+                                   y,
+                                   batch_count,
+                                   n);
 }
 
 template <bool InitializeVectors>
@@ -1110,6 +1336,105 @@ void cuper_packed_spmv_kernel(const project_xplus::cgsolver::index_t* sp_element
                              &unused_init_metric,
                              batch_count,
                              n);
+}
+
+void cuper_packed_spmv_4ch_kernel(const project_xplus::cgsolver::index_t* sp_element_list_ptr,
+                                  cuper_matrix_ptr_t matrix_data_0,
+                                  cuper_matrix_ptr_t matrix_data_1,
+                                  cuper_matrix_ptr_t matrix_data_2,
+                                  cuper_matrix_ptr_t matrix_data_3,
+                                  cuper_matrix_ptr_t matrix_data_4,
+                                  cuper_matrix_ptr_t matrix_data_5,
+                                  cuper_matrix_ptr_t matrix_data_6,
+                                  cuper_matrix_ptr_t matrix_data_7,
+                                  cuper_matrix_ptr_t matrix_data_8,
+                                  cuper_matrix_ptr_t matrix_data_9,
+                                  cuper_matrix_ptr_t matrix_data_10,
+                                  cuper_matrix_ptr_t matrix_data_11,
+                                  cuper_matrix_ptr_t matrix_data_12,
+                                  cuper_matrix_ptr_t matrix_data_13,
+                                  cuper_matrix_ptr_t matrix_data_14,
+                                  cuper_matrix_ptr_t matrix_data_15,
+                                  const project_xplus::cgsolver::data_t* x,
+                                  project_xplus::cgsolver::data_t* y,
+                                  int batch_count,
+                                  int n) {
+// 4-channel 实验 SpMV 顶层。
+//
+// ABI 和 cuper_packed_spmv_kernel 完全一致，host 只需要换 kernel name
+// 和 xclbin。这样可以直接比较：
+//   - 16ch：单个 DATAFLOW 区域内并行 16 个 matrix channel
+//   - 4ch ：单个 DATAFLOW 区域内并行 4 个 matrix channel，跑 4 组
+//
+// 预期是牺牲一部分吞吐，换取更低的 URAM/DSP/控制扇出和更好的布线频率。
+#pragma HLS INTERFACE s_axilite port = sp_element_list_ptr bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_0 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_1 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_2 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_3 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_4 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_5 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_6 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_7 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_8 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_9 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_10 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_11 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_12 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_13 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_14 bundle = control
+#pragma HLS INTERFACE s_axilite port = matrix_data_15 bundle = control
+#pragma HLS INTERFACE s_axilite port = x bundle = control
+#pragma HLS INTERFACE s_axilite port = y bundle = control
+#pragma HLS INTERFACE s_axilite port = batch_count bundle = control
+#pragma HLS INTERFACE s_axilite port = n bundle = control
+#pragma HLS INTERFACE s_axilite port = return bundle = control
+
+#pragma HLS INTERFACE m_axi port = sp_element_list_ptr offset = slave bundle = gmem_meta num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = matrix_data_0 offset = slave bundle = gmem_matrix0 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_1 offset = slave bundle = gmem_matrix1 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_2 offset = slave bundle = gmem_matrix2 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_3 offset = slave bundle = gmem_matrix3 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_4 offset = slave bundle = gmem_matrix4 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_5 offset = slave bundle = gmem_matrix5 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_6 offset = slave bundle = gmem_matrix6 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_7 offset = slave bundle = gmem_matrix7 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_8 offset = slave bundle = gmem_matrix8 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_9 offset = slave bundle = gmem_matrix9 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_10 offset = slave bundle = gmem_matrix10 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_11 offset = slave bundle = gmem_matrix11 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_12 offset = slave bundle = gmem_matrix12 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_13 offset = slave bundle = gmem_matrix13 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_14 offset = slave bundle = gmem_matrix14 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = matrix_data_15 offset = slave bundle = gmem_matrix15 num_read_outstanding = 32 max_read_burst_length = 128
+#pragma HLS INTERFACE m_axi port = x offset = slave bundle = gmem_x num_read_outstanding = 16 max_read_burst_length = 64
+#pragma HLS INTERFACE m_axi port = y offset = slave bundle = gmem_y num_write_outstanding = 16 max_write_burst_length = 64
+
+    if (n <= 0 || batch_count <= 0 || batch_count > kCuperMaxBatchCount) {
+        return;
+    }
+
+    cuper_packed_spmv_4ch(sp_element_list_ptr,
+                          matrix_data_0,
+                          matrix_data_1,
+                          matrix_data_2,
+                          matrix_data_3,
+                          matrix_data_4,
+                          matrix_data_5,
+                          matrix_data_6,
+                          matrix_data_7,
+                          matrix_data_8,
+                          matrix_data_9,
+                          matrix_data_10,
+                          matrix_data_11,
+                          matrix_data_12,
+                          matrix_data_13,
+                          matrix_data_14,
+                          matrix_data_15,
+                          x,
+                          y,
+                          batch_count,
+                          n);
 }
 
 }

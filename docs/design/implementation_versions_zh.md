@@ -25,7 +25,9 @@
 | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg(...)` | TAPA Cuper + FPGA 内 PCG 新版 | FPGA | 保留 TAPA Cuper 16 路 HBM SpMV task graph，并新增 FPGA 内 PCG controller |
 | `host/cuper_tapa_pcg_main.cpp` | TAPA Cuper SpMV + host PCG | host | 服务器实测大矩阵很快的旧 TAPA 对照版 |
 | `host/cuper_tapa_pcg_fpga_main.cpp` | 调用 `CuperPcg` 的 host | FPGA | host 只准备 Cuper 矩阵格式、向量 BO、启动一次 TAPA kernel |
-| `kernels/cuper_pcg_control_kernel.cpp` | HLS control-kernel / fullcuper 路线 | FPGA | 不是 TAPA task graph，是手拆 Cuper 思路后的 HLS kernel |
+| `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | no-TAPA single SpMV 16ch 路线 | host | 单次只做 `y=A*x`，用于和 TAPA SpMV 直接对比 |
+| `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_4ch_kernel` | no-TAPA single SpMV 4ch 降并发实验 | host | ABI 和 16ch 相同，但每次只并行 4 个 matrix channel，用于验证 Fmax 是否受 16 路 DATAFLOW 扇出限制 |
+| `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | HLS control-kernel / fullcuper 路线 | FPGA | 不是 TAPA task graph，是手拆 Cuper 思路后的 HLS kernel |
 | `host/cuper_control_xrt_host.cpp` | 调用 `cuper_pcg_control_kernel` 的 XRT host | FPGA | 用于 `395bitstream/cuper-notapa-pcg-fpga-*.xclbin` 这批 no-TAPA FPGA-PCG bitstream |
 | `kernels/pcg_control_kernel.cpp` | Project-XPlus 默认 control-kernel | FPGA | 默认 Jacobi-PCG 路线，SpMV 不是 Cuper/TAPA |
 
@@ -36,6 +38,22 @@
 Cuper     : TAPA Cuper SpMV only，给 host-PCG 旧对照版用
 CuperPcg  : TAPA Cuper SpMV + FPGA 内 PCG，给当前满血 Cuper 移植实验用
 ```
+
+## 当前 Cuper 主线构建目录
+
+为了避免四条 Cuper 主线互相覆盖 `build/hw`、`build/sw_emu` 和 `_x_temp`，
+当前 Makefile 默认把它们拆到四个独立目录：
+
+| 主线 | 默认构建目录 | 典型产物 |
+| --- | --- | --- |
+| TAPA Cuper / single SpMV | `cuper-tapa-spmv-build/` | `Cuper_2022.xo`, `Cuper_2022.xclbin`, `cuper_host` |
+| no-TAPA Cuper / single SpMV | `cuper-notapa-spmv-build/` | `hw/cuper_packed_spmv_kernel.xclbin` |
+| no-TAPA Cuper / single SpMV 4ch 实验 | `cuper-notapa-spmv-4ch-build/` | `hw/cuper_packed_spmv_4ch_kernel.xclbin` |
+| TAPA Cuper / FPGA-PCG | `cuper-tapa-fpga-pcg-build/` | `hw/CuperPcg.xo`, `hw/CuperPcg.xclbin` |
+| no-TAPA Cuper / FPGA-PCG | `cuper-notapa-fpga-pcg-build/` | `hw/cuper_pcg_control_kernel.xclbin` |
+
+历史目录 `build/` 仍保留给 archived/default Project-XPlus 路线使用；当前四个
+Cuper 主线不再默认写入 `build/`。
 
 ## 1. 多 kernel 普通版
 

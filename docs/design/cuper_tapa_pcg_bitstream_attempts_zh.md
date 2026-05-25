@@ -354,21 +354,199 @@ Pcg_Controller 内 update_p loop:   pipeline II=2
 移除 Explore routing directive，回到默认 routing
 ```
 
-当前状态：
+结果：
 
 ```text
-截至本文记录时仍在 tmux 中运行
+Run vpl: Step impl: Failed
+Run vpl: FINISHED. Run Status: impl ERROR
 tmux session: project-xplus-cuper-tapa-pcg-hw-ii2
-当前阶段: TAPA/Vivado synthesis，尚未进入最终 v++ link routing
+```
+
+实现耗时摘要：
+
+```text
+placement: 01h 30m 54s
+routing 到失败: 约 08h 47m
+总 elapsed: 11h 19m 14s
+Vivado impl peak memory: 约 21.6 GB
+```
+
+关键报错：
+
+```text
+Routing results verification failed due to partially-conflicted nets
+level0_i/ulp/CuperPcg_1/inst/Pcg_Controller_0/grp_Pcg_Controller_Pipeline_update_xrz_fu_993/mul4_reg_5760
+level0_i/ulp/CuperPcg_1/inst/Pcg_Controller_0/grp_Pcg_Controller_Pipeline_update_xrz_fu_993/mul3_reg_5860
+level0_i/ulp/CuperPcg_1/inst/Pcg_Controller_0/grp_Pcg_Controller_Pipeline_update_xrz_fu_993/ap_CS_fsm_reg[67]_rep_75
+```
+
+runme 中的 route 摘要：
+
+```text
+Number of Failed Nets = 0
+Number of Node Overlaps = 369
+CRITICAL WARNING: 589 signals failed to route due to routing congestion
 ```
 
 判断：
 
 - 这是对尝试 C 中 `update_xrz` 拥塞的直接处理。
 - 代价是 PCG 向量更新吞吐下降，但这些阶段通常不应该比 SpMV 更主导。
-- 如果仍失败且冲突继续集中在 `Pcg_Controller`，下一步应继续降低 controller
-  局部并发，或把 PCG controller 拆成更多 TAPA task，而不是只换 Vivado
-  routing strategy。
+- 相比 Explore 版本的 3577 overlaps，这轮降到 369 overlaps，方向有效但还不够。
+- HLS 报告显示 `update_xrz` 目标 II=2，实际 achieved II=5；单纯继续调
+  pragma 的收益有限。
+- 下一步应拆开 `update_xrz`，降低单个 pipeline 同时承担的 HBM 端口和
+  FP64 乘加数量，而不是只换 Vivado routing strategy。
+
+### 尝试 E：拆分 update_xrz 为 update_xr + update_z_reduce
+
+日志：
+
+```text
+logs/cuper_tapa_pcg_hw_split_update_20260524_232246.log
+```
+
+主要修改：
+
+```text
+update_xr:
+  读 X/P/R/AP
+  写 X/R
+  只做 x = x + alpha*p, r = r - alpha*ap
+
+update_z_reduce:
+  读 R/M_inv
+  写 Z
+  累计 rz_new 和 rr_new
+```
+
+判断：
+
+- 这会多读一次 R，向量更新阶段吞吐会下降。
+- 但当前失败不是算法功能问题，而是 `Pcg_Controller_Pipeline_update_xrz`
+  局部 routing hotspot。把一个大流水拆成两个窄流水，比单纯把 II=2 改成
+  II=4 更可能改变实际 RTL/布局压力。
+- 这版仍保留 AP HBM 中间数组，属于小步低风险改动；如果仍失败，再考虑更大
+  的 task 拆分或 AP 流式重构。
+
+结果：
+
+```text
+Run vpl: Step impl: Failed
+Run vpl: FINISHED. Run Status: impl ERROR
+Number of Failed Nets = 0
+Number of Node Overlaps = 2
+4 signals failed to route due to routing congestion
+```
+
+关键报错：
+
+```text
+Routing results verification failed due to partially-conflicted nets
+level0_i/ulp/CuperPcg_1/inst/Pcg_Controller_0/dadddsub_64ns_64ns_64_8_full_dsp_1_U82/grp_fu_2130_p2[17]
+level0_i/ulp/CuperPcg_1/inst/Pcg_Controller_0/grp_Pcg_Controller_Pipeline_init_vectors_fu_950/...
+```
+
+判断：
+
+- 拆分 `update_xrz` 明显有效：失败从尝试 D 的 369 个 node overlaps 降到
+  2 个 node overlaps。
+- 新热点转移到初始化阶段 `init_vectors` 和 FP64 add/sub。
+- 这说明当前已经接近 route 成功，下一步不应回退 update 拆分，而应继续拆
+  初始化流水。
+
+### 尝试 F：拆分 init_vectors 为 init_r + init_zp_reduce
+
+主要修改：
+
+```text
+init_r:
+  消费 A*x0
+  读 B
+  只计算并写 R = B - A*x0
+
+init_zp_reduce:
+  读 R/M_inv
+  写 Z/P
+  累计初始 rz 和 rr
+```
+
+判断：
+
+- 这会在初始化阶段多读一次 R。
+- 换来的收益是把 `B/M_inv/R/Z/P` 多 HBM 访问、FP64 sub/mul、两个 dot
+  accumulation 从同一条 `init_vectors` 流水里拆开。
+- 该修改直接针对尝试 E 最后剩下的 `init_vectors` route hotspot。
+- 软件仿真已通过：
+
+```text
+数据集: data/generated/cgsolver/n512
+TAU: 1e-8
+MAX_ITERS: 100
+结果: iter=41, status=converged
+max_rel_diff 约 6.14e-7
+```
+
+- 新 HLS 报告显示拆分生效：
+
+```text
+Pcg_Controller:
+  Instance 约 26.2k FF / 30.8k LUT / 11 DSP
+
+init_r_lanes:
+  achieved II=4, target II=4
+  约 592 FF / 2670 LUT / 0 DSP
+
+init_zp_reduce:
+  约 558 FF / 393 LUT / 0 DSP
+```
+
+- 对比尝试 E，原 `init_vectors` 约 15.7k FF / 11.2k LUT / 6 DSP，
+  `Pcg_Controller` 整体约 40.8k FF / 39.0k LUT / 17 DSP。拆分后
+  controller 局部资源压力明显下降。
+- hw build 已进入 tmux：
+
+```text
+session: project-xplus-cuper-tapa-pcg-hw-split-init
+log: logs/cuper_tapa_pcg_hw_split_init_20260525_100740.log
+build_dir: cuper-tapa-fpga-pcg-build/hw
+```
+
+结果：
+
+```text
+Run vpl: Step impl: Completed
+Run vpl: FINISHED. Run Status: impl Complete!
+Check VPL: 0 errors
+Check POST-VPL: 0 errors
+```
+
+产物：
+
+```text
+cuper-tapa-fpga-pcg-build/hw/CuperPcg.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin.info
+```
+
+构建/时钟摘要：
+
+```text
+v++ link total elapsed: 5h 20m 54s
+vpl elapsed:            5h 47m 16s
+routing:                2h 24m 11s
+bitgen:                 0h 41m 49s
+requested kernel clock: 300.0 MHz
+achieved kernel clock:  229.6 MHz
+```
+
+route/timing 结论：
+
+```text
+route verification passed
+setup failing endpoints: 0
+hold failing endpoints:  0
+```
 
 ## 失败模式归纳
 
@@ -399,11 +577,11 @@ routing 走到后段
 
 ## 后续建议
 
-短期可继续试的低风险方向：
+短期可继续优化的低风险方向：
 
-1. 如果 II=2 仍失败，把 `update_xrz/update_p` 进一步放宽到 II=4。
-2. 对 `init_vectors`、`consume_ap` 也考虑 II=2/4，因为失败日志里也出现过
-   `init_vectors` 和 FP64 add/sub。
+1. 服务器实测 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`，先确认功能和性能。
+2. 如果性能低于预期，优先看 `consume_ap`，当前 HLS 报告里它的 achieved II
+   仍为 128，可能是 FPGA-PCG 版的主要瓶颈。
 3. 继续保持较小的 TAPA FIFO depth，避免回到 `Matrix_A_Stream_*` BRAM
    冲突。
 4. 不优先继续尝试 Explore / AggressiveExplore；这条已经有反例。
@@ -428,6 +606,11 @@ routing 走到后段
 不是继续优化已经可用的 host-PCG 对照版，而是把 FPGA 内 PCG 做到不破坏
 TAPA Cuper 的布线和吞吐。
 
-截至本文记录，TAPA CuperPcg 全 FPGA 版功能上已经能软件仿真通过，但硬件
-route 尚未成功。失败集中在 TAPA stream BRAM 和后续 `Pcg_Controller` 局部
-布线热点，其中 `Pcg_Controller` 是当前最需要继续拆分或降并发的模块。
+截至本文记录，TAPA CuperPcg 全 FPGA 版已经在 U55C 上生成 bitstream：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin
+```
+
+这版功能上软件仿真通过，硬件实现 route/timing 也通过。后续重点从“能否
+route”切换为服务器实测性能和 `consume_ap` / FPGA 内 PCG 向量阶段优化。

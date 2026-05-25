@@ -2,12 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-$(cd "$ROOT_DIR/../.." && pwd)/cuper-tapa-spmv-build}"
 
 # shellcheck source=env_u55c.sh
 source "$ROOT_DIR/scripts/env_u55c.sh"
 
-OUTPUT_XO="${1:-$ROOT_DIR/Cuper_2022.xo}"
-WORK_DIR="${WORK_DIR:-$ROOT_DIR/run/tapa_u55c}"
+mkdir -p "$BUILD_DIR"
+
+OUTPUT_XO="${1:-$BUILD_DIR/Cuper_2022.xo}"
+WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_u55c}"
 CLOCK_PERIOD="${CLOCK_PERIOD:-2.0}"
 JOBS="${JOBS:-$(nproc)}"
 

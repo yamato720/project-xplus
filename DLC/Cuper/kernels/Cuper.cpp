@@ -1102,27 +1102,39 @@ send_x0:
             X_to_spmv.write(x_packet);
         }
 
-init_vectors:
-        // 消费 A*x0，完成 Jacobi-PCG 初始 r/z/p，同时累计 rz 和 rr。
+init_r:
+        // 第一段只消费 A*x0 并生成初始残差 R。上一版 init_vectors 同时读 B/M_inv、
+        // 写 R/Z/P、做 rz/rr 归约，route 最后 4 根冲突线集中在这条大流水。
+        // 拆开后用一次额外 R 读取换取更小的局部 FP64/HBM 访问压力。
         for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
 #pragma HLS loop_tripcount min=1 max=500000
             const PcgSpmvPacket ap_packet = Spmv_in.read();
-    init_lanes:
+    init_r_lanes:
             for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+#pragma HLS pipeline II=4
                 const INDEX_TYPE index = (packet << 4) + lane;
                 if (index < Row_num) {
                     const double b_value = B[index];
-                    const double minv_value = M_inv[index];
                     const double ap_value = static_cast<double>(ap_packet.values[lane]);
                     const double r_value = b_value - ap_value;
-                    const double z_value = minv_value * r_value;
                     R[index] = r_value;
-                    Z[index] = z_value;
-                    P[index] = z_value;
-                    rz += r_value * z_value;
-                    rr += r_value * r_value;
                 }
             }
+        }
+
+init_zp_reduce:
+        // 第二段再读 R/M_inv，初始化 Z/P 并累计 rz/rr。它和 update_z_reduce
+        // 形态接近，避免把 residual 初始化和 SpMV 输出消费挤在同一条流水里。
+        for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+#pragma HLS loop_tripcount min=1 max=8000000
+#pragma HLS pipeline II=4
+            const double r_value = R[index];
+            const double minv_value = M_inv[index];
+            const double z_value = minv_value * r_value;
+            Z[index] = z_value;
+            P[index] = z_value;
+            rz += r_value * z_value;
+            rr += r_value * r_value;
         }
 
 pcg_loop:
@@ -1186,26 +1198,35 @@ pcg_loop:
                 break;
             }
 
-            double rz_new = 0.0;
-            double rr_new = 0.0;
-    update_xrz:
-            // x/r/z 更新仍在 controller 内顺序完成。这里的双精度加乘
-            // 和多 HBM 读写会集中到一个较大的流水里。II=1 在 U55C 上
-            // 容易把 controller 周边布线挤爆，因此放宽到 II=2，优先
-            // 保证 full-FPGA 版本能稳定 route。
+    update_xr:
+            // 只更新 x/r。上一版把 x/r/z 更新、M_inv 读取、rz/rr 归约
+            // 都塞在同一个 update_xrz pipeline 里，route 失败集中在该
+            // pipeline 的 FP64 乘法和 AXI 读写附近。这里把它拆成两段，
+            // 用一次额外 R 读取换取更小的局部布线热点。
             for (INDEX_TYPE index = 0; index < Row_num; ++index) {
 #pragma HLS loop_tripcount min=1 max=8000000
-#pragma HLS pipeline II=2
+#pragma HLS pipeline II=4
                 const double x_value = X[index];
                 const double p_value = P[index];
                 const double r_value = R[index];
                 const double ap_value = AP[index];
-                const double minv_value = M_inv[index];
                 const double x_new = x_value + alpha * p_value;
                 const double r_new = r_value - alpha * ap_value;
-                const double z_new = minv_value * r_new;
                 X[index] = x_new;
                 R[index] = r_new;
+            }
+
+            double rz_new = 0.0;
+            double rr_new = 0.0;
+    update_z_reduce:
+            // 再更新 z 并累计新残差。该段只读 R/M_inv、写 Z，避免和
+            // update_xr 的 X/P/AP 访问以及 alpha 乘法挤在同一条流水里。
+            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+#pragma HLS loop_tripcount min=1 max=8000000
+#pragma HLS pipeline II=4
+                const double r_new = R[index];
+                const double minv_value = M_inv[index];
+                const double z_new = minv_value * r_new;
                 Z[index] = z_new;
                 rz_new += r_new * z_new;
                 rr_new += r_new * r_new;

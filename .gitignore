@@ -1,6 +1,11 @@
 build/
 build_control_probe/
 cuper-pcg-notapa/
+cuper-tapa-spmv-build/
+cuper-notapa-spmv-build/
+cuper-notapa-spmv-4ch-build/
+cuper-tapa-fpga-pcg-build/
+cuper-notapa-fpga-pcg-build/
 logs/
 reports/
 .Xil/

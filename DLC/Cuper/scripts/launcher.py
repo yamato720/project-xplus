@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -24,6 +25,10 @@ class Dataset:
 
 def shell_quote(value: Path | str) -> str:
     return shlex.quote(str(value))
+
+
+def default_build_dir(root: Path) -> Path:
+    return Path(os.environ.get("BUILD_DIR", root.parent.parent / "cuper-tapa-spmv-build")).resolve()
 
 
 def ask_text(prompt: str) -> str | None:
@@ -98,10 +103,11 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
             return 1
         subprocess.check_call(["tmux", "kill-session", "-t", session])
 
-    log_dir = root / "logs"
+    build_dir = default_build_dir(root)
+    log_dir = build_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "build_hw_tmux.log"
-    run_script_path = root / "build" / "run_hw_tmux.sh"
+    run_script_path = build_dir / "run_hw_tmux.sh"
     run_script_path.parent.mkdir(parents=True, exist_ok=True)
     run_script_path.write_text(
         "\n".join(
@@ -109,6 +115,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 "#!/usr/bin/env bash",
                 "set -uo pipefail",
                 f"cd {shell_quote(root)}",
+                f"export BUILD_DIR={shell_quote(build_dir)}",
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",
                 "date",
                 "rc=0",
@@ -169,9 +176,10 @@ def action_menu(dataset: Dataset, root: Path) -> int:
             print_result(rc)
             return rc
         if answer == "2":
+            build_dir = default_build_dir(root)
             command = (
                 "source scripts/env_u55c.sh && "
-                f"unset BITFILE && {shell_quote(root / 'build' / 'cuper_host')} {shell_quote(dataset.path)}"
+                f"unset BITFILE && {shell_quote(build_dir / 'cuper_host')} {shell_quote(dataset.path)}"
             )
             rc = run_shell(command, root)
             print_result(rc)
@@ -248,9 +256,10 @@ def main() -> int:
         return start_hw_tmux(root, args.session, args.force)
     if args.command == "run-sw":
         matrix = args.matrix.resolve()
+        build_dir = default_build_dir(root)
         command = (
             "source scripts/env_u55c.sh && "
-            f"unset BITFILE && {shell_quote(root / 'build' / 'cuper_host')} {shell_quote(matrix)}"
+            f"unset BITFILE && {shell_quote(build_dir / 'cuper_host')} {shell_quote(matrix)}"
         )
         return run_shell(command, root)
     if args.command == "run-hw":

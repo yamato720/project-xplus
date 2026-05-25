@@ -2,15 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-$(cd "$ROOT_DIR/../.." && pwd)/cuper-tapa-spmv-build}"
 
 # shellcheck source=env_u55c.sh
 source "$ROOT_DIR/scripts/env_u55c.sh"
 
-BITFILE="${BITFILE:-$ROOT_DIR/Cuper_2022.xclbin}"
+BITFILE="${BITFILE:-$BUILD_DIR/Cuper_2022.xclbin}"
 MATRIX_FILE="${1:-$ROOT_DIR/data/matrices/sit100/sit100.mtx}"
 
-if [[ ! -x "$ROOT_DIR/build/cuper_host" ]]; then
-  echo "Missing host executable: $ROOT_DIR/build/cuper_host" >&2
+if [[ ! -x "$BUILD_DIR/cuper_host" ]]; then
+  echo "Missing host executable: $BUILD_DIR/cuper_host" >&2
   echo "Run: $ROOT_DIR/scripts/build_host.sh" >&2
   exit 1
 fi
@@ -22,4 +23,4 @@ if [[ ! -f "$BITFILE" ]]; then
 fi
 
 export BITFILE
-exec "$ROOT_DIR/build/cuper_host" "$MATRIX_FILE"
+exec "$BUILD_DIR/cuper_host" "$MATRIX_FILE"

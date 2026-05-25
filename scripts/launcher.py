@@ -48,7 +48,7 @@ CUPER_CODE_VERSIONS = [
     CodeVersion(
         key="cuper_notapa_spmv",
         title="no-TAPA Cuper / single SpMV",
-        description="只运行 no-TAPA XRT cuper_packed_spmv_kernel，用于和 TAPA SpMV 精准对比。",
+        description="只运行 no-TAPA XRT SpMV kernel，用于和 TAPA SpMV 精准对比；含 16ch 与 4ch 降并发实验入口。",
         runner="cuper_notapa_spmv",
         requires_kmax=False,
     ),
@@ -62,7 +62,7 @@ CUPER_CODE_VERSIONS = [
     CodeVersion(
         key="cuper_notapa_fpga_pcg",
         title="no-TAPA Cuper / FPGA-PCG",
-        description="no-TAPA HLS cuper_pcg_control_kernel：PCG 控制、向量更新和 Cuper SpMV 都在 FPGA kernel 内；默认使用 cuper-pcg-notapa build。",
+        description="no-TAPA HLS cuper_pcg_control_kernel：PCG 控制、向量更新和 Cuper SpMV 都在 FPGA kernel 内；默认使用 cuper-notapa-fpga-pcg-build。",
         runner="cuper_notapa_fpga_pcg",
         requires_kmax=False,
     ),
@@ -528,6 +528,10 @@ def print_active_actions(version: CodeVersion) -> None:
         print("  3. run single SpMV sw_emu")
         print("  4. build HW SpMV xclbin in tmux")
         print("  5. run single SpMV hardware")
+        print("  6. build 4ch sw_emu SpMV xclbin")
+        print("  7. run 4ch single SpMV sw_emu")
+        print("  8. build 4ch HW SpMV xclbin in tmux")
+        print("  9. run 4ch single SpMV hardware")
     elif version.runner == "cuper_tapa_fpga_pcg":
         print("  1. build host")
         print("  2. run TAPA FPGA-PCG software simulation")
@@ -591,7 +595,7 @@ def handle_active_action(version: CodeVersion,
                 f"DATASET={dataset.path}",
             ], cwd=root)
         if answer == "4":
-            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-notapa-spmv-build/hw。"):
                 return 0
             return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
         if answer == "5":
@@ -606,6 +610,31 @@ def handle_active_action(version: CodeVersion,
                 f"DATASET={dataset.path}",
                 f"BITFILE={bitfile_path}",
             ], cwd=root)
+        if answer == "6":
+            return run_command(["make", "build-cuper-pcg-notapa-spmv-4ch-sw"], cwd=root)
+        if answer == "7":
+            return run_command([
+                "make",
+                "run-cuper-notapa-spmv-4ch-xrt",
+                "TARGET=sw_emu",
+                f"DATASET={dataset.path}",
+            ], cwd=root)
+        if answer == "8":
+            if not confirm_long_build("no-TAPA 4ch SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-notapa-spmv-4ch-build/hw。"):
+                return 0
+            return run_command(["make", "cuper-pcg-notapa-spmv-4ch-hw-tmux"], cwd=root)
+        if answer == "9":
+            bitfile = ask_text("输入 no-TAPA 4ch SpMV bitstream 路径，直接回车使用 cuper-notapa-spmv-4ch-build/hw/cuper_packed_spmv_4ch_kernel.xclbin: ")
+            if bitfile is None:
+                return 0
+            bitfile_path = Path(bitfile) if bitfile else root / "cuper-notapa-spmv-4ch-build" / "hw" / "cuper_packed_spmv_4ch_kernel.xclbin"
+            return run_command([
+                "make",
+                "run-cuper-notapa-spmv-4ch-xrt",
+                "TARGET=hw",
+                f"DATASET={dataset.path}",
+                f"BITFILE={bitfile_path}",
+            ], cwd=root)
 
     if version.runner == "cuper_tapa_fpga_pcg":
         if answer == "1":
@@ -613,10 +642,10 @@ def handle_active_action(version: CodeVersion,
         if answer == "2":
             return run_command(["make", "run-cuper-pcg-tapa-fpga", f"DATASET={dataset.path}"], cwd=root)
         if answer == "3":
-            bitfile = ask_text("输入 TAPA CuperPcg bitstream 路径，直接回车使用 build/hw/CuperPcg.xclbin: ")
+            bitfile = ask_text("输入 TAPA CuperPcg bitstream 路径，直接回车使用 cuper-tapa-fpga-pcg-build/hw/CuperPcg.xclbin: ")
             if bitfile is None:
                 return 0
-            bitfile_path = Path(bitfile) if bitfile else root / "build" / "hw" / "CuperPcg.xclbin"
+            bitfile_path = Path(bitfile) if bitfile else root / "cuper-tapa-fpga-pcg-build" / "hw" / "CuperPcg.xclbin"
             return run_command([
                 "make",
                 "run-cuper-pcg-tapa-fpga",
@@ -650,7 +679,7 @@ def handle_active_action(version: CodeVersion,
                 f"DATASET={dataset.path}",
             ], cwd=root)
         if answer == "4":
-            if not confirm_long_build("no-TAPA FPGA-PCG 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+            if not confirm_long_build("no-TAPA FPGA-PCG 硬件 bitstream 编译可能持续数小时，输出到 cuper-notapa-fpga-pcg-build/hw。"):
                 return 0
             return run_command(["make", "cuper-pcg-notapa-hw-tmux"], cwd=root)
         if answer == "5":
@@ -741,7 +770,7 @@ def handle_archived_action(version: CodeVersion,
                 f"DATASET={dataset.path}",
             ], cwd=root)
         if answer == "4":
-            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-pcg-notapa/hw。"):
+            if not confirm_long_build("no-TAPA standalone SpMV 硬件 bitstream 编译可能持续数小时，输出到 cuper-notapa-spmv-build/hw。"):
                 return 0
             return run_command(["make", "cuper-pcg-notapa-spmv-hw-tmux"], cwd=root)
         if answer == "5":
@@ -907,6 +936,8 @@ def action_menu(dataset: Dataset, args: argparse.Namespace, root: Path) -> int:
                 print("请输入 1-2，或 q 返回。")
             elif version.runner == "cuper_notapa_fpga_pcg":
                 print("请输入 1-6，或 q 返回。")
+            elif version.runner == "cuper_notapa_spmv":
+                print("请输入 1-9，或 q 返回。")
             else:
                 print("请输入 1-5，或 q 返回。")
 
@@ -917,11 +948,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, default=root)
     parser.add_argument("--local-host", type=Path, default=root / "build" / "xplus_host")
     parser.add_argument("--cuper-pcg-host", type=Path, default=root / "build" / "xplus_cuper_pcg_host")
-    parser.add_argument("--cuper-tapa-pcg-host", type=Path, default=root / "build" / "xplus_cuper_tapa_pcg_host")
-    parser.add_argument("--cuper-tapa-pcg-fpga-host", type=Path, default=root / "build" / "xplus_cuper_tapa_pcg_fpga_host")
-    parser.add_argument("--cuper-notapa-pcg-xrt-host", type=Path, default=root / "build" / "xplus_cuper_notapa_pcg_xrt_host")
-    parser.add_argument("--cuper-control-local-host", type=Path, default=root / "build" / "xplus_cuper_control_local_host")
-    parser.add_argument("--cuper-control-xrt-host", type=Path, default=root / "build" / "xplus_cuper_control_xrt_host")
+    parser.add_argument("--cuper-tapa-pcg-host", type=Path, default=root / "cuper-tapa-spmv-build" / "xplus_cuper_tapa_pcg_host")
+    parser.add_argument("--cuper-tapa-pcg-fpga-host", type=Path, default=root / "cuper-tapa-fpga-pcg-build" / "xplus_cuper_tapa_pcg_fpga_host")
+    parser.add_argument("--cuper-notapa-pcg-xrt-host", type=Path, default=root / "cuper-notapa-spmv-build" / "xplus_cuper_notapa_pcg_xrt_host")
+    parser.add_argument("--cuper-control-local-host", type=Path, default=root / "cuper-notapa-fpga-pcg-build" / "xplus_cuper_control_local_host")
+    parser.add_argument("--cuper-control-xrt-host", type=Path, default=root / "cuper-notapa-fpga-pcg-build" / "xplus_cuper_control_xrt_host")
     parser.add_argument("--xrt-host", type=Path, default=root / "build" / "xplus_xrt_host")
     parser.add_argument("--hw-xclbin", type=Path, default=root / "build" / "hw" / "cgsolver_jacobi_pcg.xclbin")
     parser.add_argument("--sw-xclbin", type=Path, default=root / "build" / "sw_emu" / "cgsolver_jacobi_pcg.xclbin")

@@ -46,6 +46,7 @@ struct HostOptions {
     unsigned int device_index = project_xplus::cgsolver::run_defaults::kDeviceIndex;
     bool spmv_only = false;
     int spmv_repeats = 1;
+    std::string kernel_name = "cuper_packed_spmv_kernel";
 };
 
 struct SpmvXrtTiming {
@@ -89,7 +90,8 @@ void usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
               << " [xclbin] [dataset_dir] [--tau value] [--max-iters value]"
               << " [--diff-tol value] [--device-index value]"
-              << " [--spmv-only] [--spmv-repeats value]\n";
+              << " [--spmv-only] [--spmv-repeats value]"
+              << " [--kernel-name value]\n";
 }
 
 double elapsed_ms(const std::chrono::steady_clock::time_point start,
@@ -99,10 +101,10 @@ double elapsed_ms(const std::chrono::steady_clock::time_point start,
 
 HostOptions parse_args(int argc, char** argv) {
     HostOptions options;
-    // no-TAPA SpMV 主线默认使用独立 build 目录 cuper-pcg-notapa，
+    // no-TAPA SpMV 主线默认使用独立 build 目录 cuper-notapa-spmv-build，
     // 避免和默认 build/sw_emu 或 build/hw 互相覆盖。
     options.xclbin_path =
-        project_xplus::cgsolver::run_defaults::project_root(argv[0]) / "cuper-pcg-notapa" /
+        project_xplus::cgsolver::run_defaults::project_root(argv[0]) / "cuper-notapa-spmv-build" /
         project_xplus::cgsolver::run_defaults::xrt_target() / "cuper_packed_spmv_kernel.xclbin";
     options.dataset_dir = project_xplus::cgsolver::run_defaults::dataset_dir(argv[0]);
 
@@ -143,6 +145,11 @@ HostOptions parse_args(int argc, char** argv) {
                 throw std::runtime_error("--spmv-repeats requires a value");
             }
             options.spmv_repeats = parse_int(argv[++index], "spmv_repeats");
+        } else if (arg == "--kernel-name") {
+            if (index + 1 >= argc) {
+                throw std::runtime_error("--kernel-name requires a value");
+            }
+            options.kernel_name = argv[++index];
         } else {
             throw std::runtime_error("unknown argument: " + arg);
         }
@@ -160,13 +167,16 @@ HostOptions parse_args(int argc, char** argv) {
     if (options.spmv_repeats <= 0) {
         throw std::runtime_error("--spmv-repeats must be positive");
     }
+    if (options.kernel_name.empty()) {
+        throw std::runtime_error("--kernel-name must not be empty");
+    }
 
     return options;
 }
 
 template <typename T>
 xrt::bo make_input_bo(xrt::device& device, xrt::kernel& kernel, int arg_index, const std::vector<T>& data) {
-    // 输入 BO 的 arg_index 必须和 cuper_packed_spmv_kernel 的参数顺序一致。
+    // 输入 BO 的 arg_index 必须和当前选择的 SpMV kernel 参数顺序一致。
     // connectivity cfg 根据端口名把这些 BO 绑到对应 HBM bank。
     xrt::bo bo(device, data.size() * sizeof(T), kernel.group_id(arg_index));
     auto mapped = bo.map<T*>();
@@ -205,12 +215,17 @@ int main(int argc, char** argv) {
         config.tau = options.tau;
         config.max_iters = options.max_iters;
 
+        const std::string spmv_label =
+            options.kernel_name == "cuper_packed_spmv_4ch_kernel"
+                ? "cuper-packed-16hbm-4ch"
+                : "cuper-packed-16hbm";
+
         std::cout << "[xplus-xrt] xclbin=" << options.xclbin_path
                   << " dataset=" << options.dataset_dir
                   << " mode="
                   << (options.spmv_only ? "cuper-spmv-notapa-xrt" : "cuper-pcg-notapa-host-pcg")
-                  << " kernel=cuper_packed_spmv_kernel"
-                  << " spmv=cuper-packed-16hbm"
+                  << " kernel=" << options.kernel_name
+                  << " spmv=" << spmv_label
                   << " batches=" << matrix.batch_count
                   << " matrix_len=" << matrix.matrix_len << "\n";
 
@@ -220,7 +235,7 @@ int main(int argc, char** argv) {
         const auto xrt_setup_start = std::chrono::steady_clock::now();
         xrt::device device(options.device_index);
         auto uuid = device.load_xclbin(options.xclbin_path.string());
-        xrt::kernel kernel(device, uuid, "cuper_packed_spmv_kernel");
+        xrt::kernel kernel(device, uuid, options.kernel_name.c_str());
         const auto xrt_setup_end = std::chrono::steady_clock::now();
         xrt_timing.xrt_setup_ms = elapsed_ms(xrt_setup_start, xrt_setup_end);
 
@@ -256,7 +271,7 @@ int main(int argc, char** argv) {
                             std::vector<data_t>& output,
                             CuperPcgResult& result) {
             // 这里是两种模式共用的最小 SpMV 调用单元：
-            //   input  -> x_bo -> cuper_packed_spmv_kernel -> y_bo -> output
+            //   input  -> x_bo -> 当前选择的 no-TAPA SpMV kernel -> y_bo -> output
             // result.timing.spmv_ms 只累计 kernel run.wait() 包住的时间。
             std::copy(input.begin(), input.end(), x_mapped);
 
@@ -364,7 +379,9 @@ int main(int argc, char** argv) {
         }
 
         CuperPcgBackendInfo backend{
-            "notapa-cuper-xrt-fp32-spmv+fp64-host-pcg",
+            spmv_label == "cuper-packed-16hbm-4ch"
+                ? "notapa-cuper-xrt-fp32-spmv-4ch+fp64-host-pcg"
+                : "notapa-cuper-xrt-fp32-spmv+fp64-host-pcg",
             CuperControlMatrix::kSliceWidth,
             static_cast<std::size_t>(matrix.batch_count),
         };
