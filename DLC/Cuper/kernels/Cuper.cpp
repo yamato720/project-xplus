@@ -603,13 +603,6 @@ struct CuperSpmvCommand {
     INDEX_TYPE iteration_num;
 };
 
-struct PcgSpmvPacket {
-    // SpMV 输出从 float_v16 包装成 packet 送回 PCG controller。
-    // last 当前只作为边界标记保留，controller 仍按 Row_num 推导包数消费。
-    float_v16 values;
-    bool last;
-};
-
 static constexpr INDEX_TYPE kPcgStatusConverged = 0;
 static constexpr INDEX_TYPE kPcgStatusMaxIter = 1;
 static constexpr INDEX_TYPE kPcgStatusBreakdown = 2;
@@ -1010,31 +1003,6 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
     }
 }
 
-// 将 Cuper SpMV 的 float_v16 结果转成 PCG controller 消费的 packet 流。
-//
-// 原始 Cuper 顶层这里会写回 Y_out HBM；CuperPcg 不写临时 y 到 HBM，
-// 而是直接把 A*x0 或 A*p 流回 controller，用来初始化 r/z/p 或计算 p^T A p。
-void Pcg_Vector_Packetizer(const INDEX_TYPE Row_num,
-                           tapa::istream<float_v16> &Vector_Y_Stream_Ans,
-                           tapa::ostream<PcgSpmvPacket> &Spmv_out) {
-    const INDEX_TYPE packet_count = (Row_num + 15) >> 4;
-
-    for (;;) {
-#pragma HLS loop_flatten off
-    write_packets:
-        for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
-#pragma HLS loop_tripcount min=1 max=500000
-#pragma HLS pipeline II=1
-            if (!Vector_Y_Stream_Ans.empty() && !Spmv_out.full()) {
-                PcgSpmvPacket out;
-                Vector_Y_Stream_Ans.try_read(out.values);
-                out.last = (packet + 1 == packet_count);
-                Spmv_out.try_write(out);
-            }
-        }
-    }
-}
-
 // FPGA 内 PCG 主控。
 //
 // 这是 CuperPcg 和 host-PCG 旧版的核心区别：
@@ -1047,7 +1015,7 @@ void Pcg_Vector_Packetizer(const INDEX_TYPE Row_num,
 void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
                     tapa::ostream<float_v16> &X_to_spmv,
-                    tapa::istream<PcgSpmvPacket> &Spmv_in,
+                    tapa::istream<float_v16> &Spmv_in,
                     tapa::mmap<double> B,
                     tapa::mmap<double> M_inv,
                     tapa::mmap<double> X,
@@ -1086,39 +1054,46 @@ send_init_matrix_command:
         Matrix_Command_out[index].write(command);
     }
 
-send_x0:
-        for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
+    init_spmv_stream:
+        // 边发送 x0 边消费 A*x0，避免 SpMV 输出 FIFO 填满后反压整条
+        // Cuper 数据流，而 controller 仍阻塞在继续写输入向量。
+        for (INDEX_TYPE sent_packets = 0, received_packets = 0;
+             received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
-            float_v16 x_packet;
-    fill_x0_packet:
-            for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-                const INDEX_TYPE index = (packet << 4) + lane;
-                double value = 0.0;
-                if (index < Row_num) {
-                    value = X[index];
+            if (sent_packets < packet_count && !X_to_spmv.full()) {
+                float_v16 x_packet;
+        fill_x0_packet:
+                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                    const INDEX_TYPE index = (sent_packets << 4) + lane;
+                    double value = 0.0;
+                    if (index < Row_num) {
+                        value = X[index];
+                    }
+                    x_packet[lane] = static_cast<VALUE_TYPE>(value);
                 }
-                x_packet[lane] = static_cast<VALUE_TYPE>(value);
+                X_to_spmv.try_write(x_packet);
+                ++sent_packets;
             }
-            X_to_spmv.write(x_packet);
-        }
 
-init_r:
-        // 第一段只消费 A*x0 并生成初始残差 R。上一版 init_vectors 同时读 B/M_inv、
-        // 写 R/Z/P、做 rz/rr 归约，route 最后 4 根冲突线集中在这条大流水。
-        // 拆开后用一次额外 R 读取换取更小的局部 FP64/HBM 访问压力。
-        for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
-#pragma HLS loop_tripcount min=1 max=500000
-            const PcgSpmvPacket ap_packet = Spmv_in.read();
-    init_r_lanes:
-            for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+            if (!Spmv_in.empty()) {
+                const INDEX_TYPE packet = received_packets;
+                float_v16 ap_packet;
+                Spmv_in.try_read(ap_packet);
+        init_r_lanes:
+                // 第一段只消费 A*x0 并生成初始残差 R。上一版 init_vectors 同时读 B/M_inv、
+                // 写 R/Z/P、做 rz/rr 归约，route 最后 4 根冲突线集中在这条大流水。
+                // 拆开后用一次额外 R 读取换取更小的局部 FP64/HBM 访问压力。
+                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
 #pragma HLS pipeline II=4
-                const INDEX_TYPE index = (packet << 4) + lane;
-                if (index < Row_num) {
-                    const double b_value = B[index];
-                    const double ap_value = static_cast<double>(ap_packet.values[lane]);
-                    const double r_value = b_value - ap_value;
-                    R[index] = r_value;
+                    const INDEX_TYPE index = (packet << 4) + lane;
+                    if (index < Row_num) {
+                        const double b_value = B[index];
+                        const double ap_value = static_cast<double>(ap_packet[lane]);
+                        const double r_value = b_value - ap_value;
+                        R[index] = r_value;
+                    }
                 }
+                ++received_packets;
             }
         }
 
@@ -1152,37 +1127,45 @@ pcg_loop:
                 Matrix_Command_out[index].write(command);
             }
 
-    send_p:
-            for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
-#pragma HLS loop_tripcount min=1 max=500000
-                float_v16 p_packet;
-        fill_p_packet:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-                    const INDEX_TYPE index = (packet << 4) + lane;
-                    double value = 0.0;
-                    if (index < Row_num) {
-                        value = P[index];
-                    }
-                    p_packet[lane] = static_cast<VALUE_TYPE>(value);
-                }
-                X_to_spmv.write(p_packet);
-            }
-
             p_ap = 0.0;
-    consume_ap:
-            // 消费 AP，同时累计 p^T AP。AP 写回 HBM 便于调试和 host 检查。
-            for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
+    iter_spmv_stream:
+            // 每轮同样边发送 p 边消费 A*p。否则大矩阵时 controller 可能在
+            // X_to_spmv.write() 等下游腾空间，而下游又在等 controller 读取
+            // 已经算出的 SpMV 输出，形成硬件死锁。
+            for (INDEX_TYPE sent_packets = 0, received_packets = 0;
+                 received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
-                const PcgSpmvPacket ap_packet = Spmv_in.read();
-        ap_lanes:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-                    const INDEX_TYPE index = (packet << 4) + lane;
-                    if (index < Row_num) {
-                        const double p_value = P[index];
-                        const double ap_value = static_cast<double>(ap_packet.values[lane]);
-                        AP[index] = ap_value;
-                        p_ap += p_value * ap_value;
+                if (sent_packets < packet_count && !X_to_spmv.full()) {
+                    float_v16 p_packet;
+            fill_p_packet:
+                    for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                        const INDEX_TYPE index = (sent_packets << 4) + lane;
+                        double value = 0.0;
+                        if (index < Row_num) {
+                            value = P[index];
+                        }
+                        p_packet[lane] = static_cast<VALUE_TYPE>(value);
                     }
+                    X_to_spmv.try_write(p_packet);
+                    ++sent_packets;
+                }
+
+                if (!Spmv_in.empty()) {
+                    const INDEX_TYPE packet = received_packets;
+                    float_v16 ap_packet;
+                    Spmv_in.try_read(ap_packet);
+            ap_lanes:
+                    // 消费 AP，同时累计 p^T AP。AP 写回 HBM 便于调试和 host 检查。
+                    for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                        const INDEX_TYPE index = (packet << 4) + lane;
+                        if (index < Row_num) {
+                            const double p_value = P[index];
+                            const double ap_value = static_cast<double>(ap_packet[lane]);
+                            AP[index] = ap_value;
+                            p_ap += p_value * ap_value;
+                        }
+                    }
+                    ++received_packets;
                 }
             }
 
@@ -1392,8 +1375,10 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 256>      Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
-    tapa::stream<float_v16, FIFO_DEPTH>                     Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");
-    tapa::stream<PcgSpmvPacket, 128>                        Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    // 直接把 Cuper 的 float_v16 SpMV 结果接回 controller。
+    // 之前额外的 packetizer task 只包装一个未使用的 last 位；板上调试时
+    // 该中间层会增加流控不确定性，所以这里保留 128 深度 FIFO 后直接消费。
+    tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
 
     tapa::task()
         // 唯一 join 的任务：PCG controller 完成后整个 kernel 才返回。
@@ -1455,7 +1440,6 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         // 回到 PCG controller，而不是像 Cuper(...) 那样写回 Y_out HBM。
         .invoke<tapa::detach, HBM_CHANNEL_NUM>(Pcg_Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
         .invoke<tapa::detach, 8>(Pcg_Vector_Checker, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck)
-        .invoke<tapa::detach>(Mult_Sort_Tree, Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans)
-        .invoke<tapa::detach>(Pcg_Vector_Packetizer, Row_num, Vector_Y_Stream_Ans, Pcg_Spmv_Stream)
+        .invoke<tapa::detach>(Mult_Sort_Tree, Vector_Y_Stream_Aftck, Pcg_Spmv_Stream)
     ;
 }
