@@ -81,6 +81,7 @@ SCRIPT_DIR := $(ROOT_DIR)/scripts
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 CUPER_DIR := $(ROOT_DIR)/DLC/Cuper
+CUPER_TAPA_KERNEL_HEADERS := $(wildcard $(CUPER_DIR)/kernels/detail/*.hpp)
 CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
 CUPER_SPMV_4CH_CFG := $(CFG_DIR)/connectivity_cuper_spmv_4ch_u55c.cfg
@@ -366,11 +367,11 @@ $(LOCAL_HOST): $(ARCHIVED_HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST
 $(CUPER_PCG_HOST): $(ARCHIVED_HOST_DIR)/cuper_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/cuper_pcg_main.cpp -o $(CUPER_PCG_HOST)
 
-$(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | tapa-env
+$(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_TAPA_KERNEL_HEADERS) | tapa-env
 	mkdir -p "$(@D)"
 	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_HOST) $(TAPA_LDFLAGS)
 
-$(CUPER_TAPA_PCG_FPGA_HOST): $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | tapa-env
+$(CUPER_TAPA_PCG_FPGA_HOST): $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_TAPA_KERNEL_HEADERS) | tapa-env
 	mkdir -p "$(@D)"
 	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_FPGA_HOST) $(TAPA_LDFLAGS) $(XRT_LDFLAGS)
 
@@ -418,7 +419,7 @@ $(CUPER_SPMV_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_c
 $(CUPER_SPMV_4CH_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k cuper_packed_spmv_4ch_kernel -o $@ $<
 
-$(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py | $(TARGET_BUILD_DIR) tapa-env
+$(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_TAPA_KERNEL_HEADERS) $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py | $(TARGET_BUILD_DIR) tapa-env
 	cd "$(CUPER_DIR)" && source scripts/env_u55c.sh && tapa -w "$(TARGET_BUILD_DIR)/tapa_CuperPcg" compile -f kernels/Cuper.cpp -t CuperPcg -p "$(DEVICE)" --clock-period "$(CUPER_TAPA_PCG_CLOCK_PERIOD)" -j "$${JOBS:-$$(nproc)}" --enable-synth-util -c "-I$(CUPER_DIR)/include" -o "$(CUPER_TAPA_PCG_XO)"
 	$(PYTHON) "$(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py" "$(CUPER_TAPA_PCG_XO)" --work-dir "$(TARGET_BUILD_DIR)/tapa_CuperPcg"
 
