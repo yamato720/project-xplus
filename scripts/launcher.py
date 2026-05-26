@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import html
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -109,15 +112,15 @@ ARCHIVED_CODE_VERSIONS = [
     ),
     CodeVersion(
         key="xrt_control",
-        title="archived: 旧单 control-kernel 版",
-        description="旧 pcg_control_kernel 路径，非 Cuper windowed/block SpMV。",
+        title="archived: 旧单 control-kernel / xclbin report",
+        description="旧 pcg_control_kernel 路径，包含运行硬件 xclbin 和运行硬件 xclbin + report 入口。",
         runner="xrt",
         requires_kmax=False,
     ),
 ]
 
 
-CODE_VERSIONS = CUPER_CODE_VERSIONS
+CODE_VERSIONS = CUPER_CODE_VERSIONS + [ARCHIVED_CODE_VERSIONS[-1]]
 
 
 def count_words(path: Path) -> int:
@@ -224,6 +227,28 @@ def run_command(command: list[str], env: dict[str, str] | None = None, cwd: Path
     return subprocess.call(command, env=env, cwd=str(cwd) if cwd is not None else None)
 
 
+def run_command_capture(command: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    print()
+    print("$ " + " ".join(shell_quote(part) for part in command), flush=True)
+    print()
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd) if cwd is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    output_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        output_lines.append(line)
+    return process.wait(), "".join(output_lines)
+
+
 def run_shell(shell_cmd: str, cwd: Path) -> int:
     print()
     print("$ " + shell_cmd, flush=True)
@@ -286,6 +311,197 @@ def render_report(root: Path, json_path: Path, html_path: Path, html_static_path
     render = root / "scripts" / "render_report.py"
     subprocess.check_call([sys.executable, str(render), "interactive", str(json_path), str(html_path)], cwd=str(root))
     subprocess.check_call([sys.executable, str(render), "static", str(json_path), str(html_static_path)], cwd=str(root))
+
+
+def parse_report_value(value: str) -> object:
+    if re.fullmatch(r"[+-]?\d+", value):
+        return int(value)
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def parse_report_kv(line: str) -> dict[str, object]:
+    return {
+        key: parse_report_value(value)
+        for key, value in re.findall(r"([A-Za-z0-9_]+)=([^\s]+)", line)
+    }
+
+
+def parse_cuper_tapa_fpga_pcg_output(output: str) -> dict[str, dict[str, object]]:
+    parsed: dict[str, dict[str, object]] = {
+        "done": {},
+        "check": {},
+        "timing_ms": {},
+        "stage_work_ticks": {},
+        "stage_cycles": {},
+        "stage_ms": {},
+    }
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith("[done]"):
+            parsed["done"] = parse_report_kv(line)
+        elif line.startswith("[check]"):
+            parsed["check"] = parse_report_kv(line)
+        elif line.startswith("[timing-ms]"):
+            parsed["timing_ms"] = parse_report_kv(line)
+        elif line.startswith("[stage-work-ticks]"):
+            parsed["stage_work_ticks"] = parse_report_kv(line)
+        elif line.startswith("[stage-cycles]"):
+            parsed["stage_cycles"] = parse_report_kv(line)
+        elif line.startswith("[stage-ms]"):
+            parsed["stage_ms"] = parse_report_kv(line)
+    return parsed
+
+
+def report_table(title: str, values: dict[str, object]) -> str:
+    rows = "\n".join(
+        f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
+        for key, value in values.items()
+    )
+    if not rows:
+        rows = '<tr><td colspan="2">未解析到数据。</td></tr>'
+    return f"<h2>{html.escape(title)}</h2><table>{rows}</table>"
+
+
+def write_cuper_tapa_fpga_pcg_report(root: Path,
+                                     dataset: Dataset,
+                                     bitfile_path: Path,
+                                     command: list[str],
+                                     return_code: int,
+                                     output: str) -> tuple[Path, Path, Path]:
+    reports = root / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", dataset.name).strip("_") or "dataset"
+    stem = f"TAPA_FPGA_PCG_HW_{safe_name}_{timestamp}"
+    json_out = reports / f"{stem}.json"
+    txt_out = reports / f"{stem}.txt"
+    html_out = reports / f"{stem}.html"
+
+    parsed = parse_cuper_tapa_fpga_pcg_output(output)
+    payload = {
+        "kind": "tapa_fpga_pcg_hardware",
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "return_code": return_code,
+        "command": command,
+        "cwd": str(root),
+        "dataset": {
+            "name": dataset.name,
+            "path": str(dataset.path),
+            "n": dataset.n,
+            "nnz": dataset.nnz,
+            "source": dataset.source,
+        },
+        "bitstream": str(bitfile_path),
+        "parsed": parsed,
+    }
+
+    txt_out.write_text(output, encoding="utf-8")
+    json_out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    summary = {
+        "dataset": dataset.name,
+        "n": dataset.n,
+        "nnz": dataset.nnz,
+        "bitstream": bitfile_path,
+        "return_code": return_code,
+    }
+    html_text = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>TAPA FPGA-PCG Hardware Report - {html.escape(dataset.name)}</title>
+  <style>
+    body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 32px; color: #202124; }}
+    h1 {{ margin-bottom: 8px; }}
+    h2 {{ margin-top: 28px; }}
+    table {{ border-collapse: collapse; width: 100%; max-width: 1100px; }}
+    th, td {{ border: 1px solid #d0d7de; padding: 8px 10px; text-align: left; vertical-align: top; }}
+    th {{ width: 260px; background: #f6f8fa; }}
+    code, pre {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    pre {{ background: #f6f8fa; border: 1px solid #d0d7de; padding: 16px; overflow-x: auto; }}
+  </style>
+</head>
+<body>
+  <h1>TAPA FPGA-PCG Hardware Report</h1>
+  <p>生成时间：{html.escape(payload["created_at"])}</p>
+  {report_table("Summary", summary)}
+  {report_table("[done]", parsed["done"])}
+  {report_table("[check]", parsed["check"])}
+  {report_table("[timing-ms]", parsed["timing_ms"])}
+  {report_table("[stage-ms]", parsed["stage_ms"])}
+  {report_table("[stage-cycles]", parsed["stage_cycles"])}
+  {report_table("[stage-work-ticks]", parsed["stage_work_ticks"])}
+  <h2>Command</h2>
+  <pre>{html.escape(" ".join(shell_quote(part) for part in command))}</pre>
+  <h2>Raw Output</h2>
+  <pre>{html.escape(output)}</pre>
+</body>
+</html>
+"""
+    html_out.write_text(html_text, encoding="utf-8")
+    return json_out, txt_out, html_out
+
+
+def ask_cuper_tapa_fpga_pcg_hardware_command(dataset: Dataset, root: Path) -> tuple[Path, list[str]] | None:
+    bitfile = ask_text("输入 TAPA CuperPcg bitstream 路径，直接回车使用 395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin: ")
+    if bitfile is None:
+        return None
+    bitfile_path = Path(bitfile) if bitfile else root / "395bitstream" / "cuper-tapa-pcg-fpga-u55c-20260525.xclbin"
+    default_max_iters = max(4 * dataset.n, 1000)
+    while True:
+        max_iters_text = ask_text(
+            "输入 MAX_ITERS，直接回车使用 1（当前按单迭代近似 SpMV）；"
+            f"输入 0 使用默认全流程 {default_max_iters}: "
+        )
+        if max_iters_text is None:
+            return None
+        if not max_iters_text:
+            max_iters = 1
+            break
+        try:
+            max_iters = int(max_iters_text)
+        except ValueError:
+            print("MAX_ITERS 必须是非负整数。")
+            continue
+        if max_iters < 0:
+            print("MAX_ITERS 必须是非负整数。")
+            continue
+        break
+
+    command = [
+        "make",
+        "run-cuper-pcg-tapa-fpga",
+        f"DATASET={dataset.path}",
+        f"BITFILE={bitfile_path}",
+    ]
+    if max_iters > 0:
+        command.append(f"MAX_ITERS={max_iters}")
+    else:
+        print(f"注意：将使用 host 默认 max_iters={default_max_iters}，大数据可能长时间无输出。")
+    return bitfile_path, command
+
+
+def run_cuper_tapa_fpga_pcg_hardware_report(dataset: Dataset, root: Path) -> int:
+    selection = ask_cuper_tapa_fpga_pcg_hardware_command(dataset, root)
+    if selection is None:
+        return 0
+    bitfile_path, command = selection
+    rc, output = run_command_capture(command, cwd=root)
+    json_out, txt_out, html_out = write_cuper_tapa_fpga_pcg_report(
+        root,
+        dataset,
+        bitfile_path,
+        command,
+        rc,
+        output,
+    )
+    print(f"report json: {json_out}")
+    print(f"report txt : {txt_out}")
+    print(f"report html: {html_out}")
+    return rc
 
 
 def print_datasets(datasets: list[Dataset], root: Path) -> None:
@@ -538,6 +754,7 @@ def print_active_actions(version: CodeVersion) -> None:
         print("  3. run TAPA FPGA-PCG hardware bitstream")
         print("  4. smoke test software simulation")
         print("  5. build TAPA FPGA-PCG HW bitstream in tmux")
+        print("  6. run TAPA FPGA-PCG hardware bitstream + report")
     elif version.runner == "cuper_notapa_fpga_pcg":
         print("  1. build XRT host")
         print("  2. build sw_emu FPGA-PCG xclbin")
@@ -642,16 +859,11 @@ def handle_active_action(version: CodeVersion,
         if answer == "2":
             return run_command(["make", "run-cuper-pcg-tapa-fpga", f"DATASET={dataset.path}"], cwd=root)
         if answer == "3":
-            bitfile = ask_text("输入 TAPA CuperPcg bitstream 路径，直接回车使用 cuper-tapa-fpga-pcg-build/hw/CuperPcg.xclbin: ")
-            if bitfile is None:
+            selection = ask_cuper_tapa_fpga_pcg_hardware_command(dataset, root)
+            if selection is None:
                 return 0
-            bitfile_path = Path(bitfile) if bitfile else root / "cuper-tapa-fpga-pcg-build" / "hw" / "CuperPcg.xclbin"
-            return run_command([
-                "make",
-                "run-cuper-pcg-tapa-fpga",
-                f"DATASET={dataset.path}",
-                f"BITFILE={bitfile_path}",
-            ], cwd=root)
+            _, command = selection
+            return run_command(command, cwd=root)
         if answer == "4":
             return run_command([
                 "make",
@@ -665,6 +877,8 @@ def handle_active_action(version: CodeVersion,
             if not confirm_long_build("TAPA CuperPcg 硬件 bitstream 编译可能持续数小时。"):
                 return 0
             return run_command(["make", "cuper-tapa-pcg-hw-tmux"], cwd=root)
+        if answer == "6":
+            return run_cuper_tapa_fpga_pcg_hardware_report(dataset, root)
 
     if version.runner == "cuper_notapa_fpga_pcg":
         if answer == "1":
@@ -938,6 +1152,8 @@ def action_menu(dataset: Dataset, args: argparse.Namespace, root: Path) -> int:
                 print("请输入 1-6，或 q 返回。")
             elif version.runner == "cuper_notapa_spmv":
                 print("请输入 1-9，或 q 返回。")
+            elif version.runner == "cuper_tapa_fpga_pcg":
+                print("请输入 1-6，或 q 返回。")
             else:
                 print("请输入 1-5，或 q 返回。")
 

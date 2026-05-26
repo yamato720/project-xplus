@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24</title>
+  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24/26</title>
   <style>
     :root {
       color-scheme: light;
@@ -15,6 +15,7 @@
       --tapa: #166f78;
       --notapa: #9a5a18;
       --pcg: #5d579c;
+      --tapa-pcg: #b03a64;
       --ok: #1f7a4d;
       --warn: #9a4c18;
       --bad: #9b2c2c;
@@ -263,9 +264,11 @@
     svg .line-tapa { fill: none; stroke: var(--tapa); stroke-width: 3; }
     svg .line-notapa { fill: none; stroke: var(--notapa); stroke-width: 3; }
     svg .line-pcg { fill: none; stroke: var(--pcg); stroke-width: 3; stroke-dasharray: 8 5; }
+    svg .line-tapa-pcg { fill: none; stroke: var(--tapa-pcg); stroke-width: 3; stroke-dasharray: 5 4; }
     svg .dot-tapa { fill: var(--tapa); }
     svg .dot-notapa { fill: var(--notapa); }
     svg .dot-pcg { fill: var(--pcg); }
+    svg .dot-tapa-pcg { fill: var(--tapa-pcg); }
     footer {
       color: var(--muted);
       padding: 8px 0 32px;
@@ -289,10 +292,12 @@
       <div class="subtitle">
         对比 <code>cuper-tapa-spmv-u55c-20260522.xclbin</code> 与
         <code>cuper-notapa-spmv-u55c-20260524.xclbin</code> 的单次 SpMV 表现，并加入
-        <code>cuper-notapa-pcg-fpga-u55c-20260522.xclbin</code> 的 full-PCG 初始 SpMV 代理结果。
+        <code>cuper-notapa-pcg-fpga-u55c-20260522.xclbin</code> 的 full-PCG 初始 SpMV 代理结果，
+        以及 bugfix 后 <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>
+        的 TAPA full-PCG 一次迭代代理结果。
       </div>
       <div class="meta">
-        <span class="pill">日期 2026-05-24 CST</span>
+        <span class="pill">日期 2026-05-24/26 CST</span>
         <span class="pill">设备 xilinx_u55c_gen3x16_xdma_base_3</span>
         <span class="pill">BDF 0000:01:00.1</span>
         <span class="pill">XRT 2.15.225</span>
@@ -314,25 +319,34 @@
           <span>no-TAPA single SpMV 与 full-PCG 代理跑通的最大 N</span>
         </div>
         <div class="metric">
-          <strong>50.6x</strong>
-          <span>N=65,536 时 TAPA kernel 平均时间优势</span>
+          <strong>262,144</strong>
+          <span>bugfix 后 TAPA full-PCG 一次迭代正常返回的最大 N</span>
         </div>
         <div class="metric">
-          <strong>169.13 ms</strong>
-          <span>full-PCG 初始 SpMV 代理跑完整 thermal2 的 kernel 时间</span>
+          <strong>11.14 ms</strong>
+          <span>新 TAPA full-PCG 在 thermal2_n16 的 kernel_reported 时间</span>
         </div>
       </div>
       <p>
         在已正常返回的数据点上，TAPA Cuper SpMV 明显更快；到 <code>thermal2_n65536</code>，
-        TAPA 平均 <code>0.156 ms</code>，no-TAPA 平均 <code>7.884 ms</code>。
+        TAPA 平均 <code>0.156 ms</code>，新版 no-TAPA 4ch 平均 <code>10.750 ms</code>。
         但 TAPA host 在 <code>thermal2_n131072</code> 和 <code>thermal2_n262144</code> 上出现
         “XRT 显示 CU 已 IDLE，但 host 进程不返回”的等待问题，所以本次没有可靠的 TAPA 百万级结果。
       </p>
       <p>
         no-TAPA 独立 SpMV 路径稳定跑完从 <code>N=16</code> 到完整 <code>thermal2</code>
-        的全部数据点；大数据段 kernel 平均时间随 nnz 近似线性增长，吞吐维持在约 <code>0.11 GFLOP/s</code>。
+        的全部数据点；这次归档文件实际为 <code>cuper_packed_spmv_4ch_kernel</code>，
+        大数据段 kernel 平均时间随 nnz 近似线性增长，吞吐维持在约 <code>0.08 GFLOP/s</code>。
         旧版 full-FPGA-PCG bitstream 也能跑到完整 <code>thermal2</code>，但当前 host 只暴露整段
         <code>cuper_pcg_control_kernel</code> 时间，不能直接读出单独 SpMV 计时。
+      </p>
+      <p>
+        2026-05-26 14:56 重新编译并替换后的 <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>：
+        按 <code>MAX_ITERS=1</code> 跑一次迭代代理。<code>thermal2_n16</code>
+        到 <code>thermal2_n262144</code> 均正常返回，控制寄存器从启动前 <code>0x4</code>
+        到完成后 <code>0xe</code>，不再复现此前 <code>ctrl=0x0</code> 卡死。完整
+        <code>thermal2</code> 本轮未重测。该 bitstream routed timing 未收敛，
+        <code>WNS=-1.916 ns</code>，因此目前只作为功能验证和量级观察数据。
       </p>
     </section>
 
@@ -344,12 +358,13 @@
           <p>两版都使用 <code>--spmv-only</code>，输入向量固定为数据集的 <code>b.txt</code>，CPU <code>Dataset::spmv</code> 作为校验基准。</p>
           <p>除 TAPA <code>N=16</code> 用 1 次受控 smoke 外，其它成功 SpMV 数据点都跑 <code>SPMV_REPEATS=3</code>。</p>
           <p>full-PCG 旧版没有 <code>--spmv-only</code>，使用 <code>TAU=1e100 MAX_ITERS=1</code> 让 kernel 完成初始 <code>A*x0</code> 与 r/z/p 初始化后立刻收敛返回。</p>
+          <p>2026-05-26 TAPA full-PCG bugfix build 使用 <code>MAX_ITERS=1 TAU=1e-8</code>，即初始化 <code>A*x0</code> 后最多执行一次 PCG 迭代；这里近似作为 SpMV 成绩观察，但不是纯 SpMV。</p>
           <pre><code>make run-cuper-tapa-spmv TARGET=hw \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n65536 \
   BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin \
   SPMV_REPEATS=3 DIFF_TOL=1e-1
 
-make run-cuper-notapa-spmv-xrt TARGET=hw \
+make run-cuper-notapa-spmv-4ch-xrt TARGET=hw \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n65536 \
   BITFILE=395bitstream/cuper-notapa-spmv-u55c-20260524.xclbin \
   SPMV_REPEATS=3 DIFF_TOL=1e-1
@@ -357,7 +372,12 @@ make run-cuper-notapa-spmv-xrt TARGET=hw \
 make run-cuper-control-xrt TARGET=hw \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n65536 \
   BITFILE=395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin \
-  TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1</code></pre>
+  TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1
+
+make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n262144 \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin \
+  MAX_ITERS=1 DIFF_TOL=1e-4</code></pre>
         </div>
         <div>
           <h3>计时含义</h3>
@@ -365,8 +385,10 @@ make run-cuper-control-xrt TARGET=hw \
           <p>no-TAPA 的 <code>spmv_avg</code> 来自 host 端包住 <code>run.wait()</code> 的 wall time；<code>xrt_setup</code>、BO setup、H2D/D2H 单独列出。</p>
           <p>TAPA 的 <code>spmv_avg</code> 来自 <code>tapa::invoke</code> 返回的 kernel 时间；TAPA runtime 打印的 load/opencl 日志不直接计入这个值。</p>
           <p>full-PCG 代理的 <code>pcg_proxy_ms</code> 来自 <code>[timing-ms] kernel=...</code>，包含初始 Cuper packed SpMV 和向量初始化，不能和 single-SpMV 的 <code>spmv_avg</code> 当作完全同口径指标。</p>
+          <p>新 TAPA full-PCG 的 <code>tapa_pcg_1iter_ms</code> 来自 <code>[timing-ms] kernel_reported=...</code>；host wall time 另含 xclbin load/runtime 同步开销，不用于总表。该 bugfix build routed timing 未收敛，数据用于功能回归和量级观察。</p>
           <div class="callout">
-            大数据 TAPA 未返回时，板卡动态区显示 <code>Cuper:Cuper_1</code> 为 <code>IDLE</code>，因此报告把它归为 host/TAPA runtime 返回路径问题，而不是计算错误。这个现象发生在 <code>--spmv-only</code>，不是 host 端 PCG 全流程被砍掉后才进入的路径。
+            大数据 TAPA SpMV 未返回时，板卡动态区显示 <code>Cuper:Cuper_1</code> 为 <code>IDLE</code>，因此报告把它归为 host/TAPA runtime 返回路径问题，而不是计算错误。这个现象发生在 <code>--spmv-only</code>，不是 host 端 PCG 全流程被砍掉后才进入的路径。
+            14:56 bugfix 后 TAPA full-PCG 已能返回到 <code>thermal2_n262144</code>；完整 <code>thermal2</code> 本轮未纳入重测。
           </div>
         </div>
       </div>
@@ -400,11 +422,11 @@ make run-cuper-control-xrt TARGET=hw \
             <tr>
               <td><span class="tag notapa">no-TAPA</span></td>
               <td><code>cuper-notapa-spmv-u55c-20260524.xclbin</code></td>
-              <td><code>cuper_packed_spmv_kernel</code></td>
-              <td><code>61f098ef-cb9c-68dd-03d5-4d53b9dcd63d</code></td>
-              <td class="num">108 MHz</td>
-              <td class="num">411 MHz</td>
-              <td><code>c8f2291d1bbe90250675ee3d26c0bece09264d36710a029d61d134953c1dad2f</code></td>
+              <td><code>cuper_packed_spmv_4ch_kernel</code></td>
+              <td><code>f55d7632-a7dd-6b99-8692-dec5b0467a55</code></td>
+              <td class="num">166 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>02bbb30e0d7f4262e4f86d210fbe978b55a772b39e0c47462510868323c8cb98</code></td>
             </tr>
             <tr>
               <td><span class="tag pcg">full-PCG</span></td>
@@ -414,6 +436,15 @@ make run-cuper-control-xrt TARGET=hw \
               <td class="num">215 MHz</td>
               <td class="num">450 MHz</td>
               <td><code>b75529ce602a0eca0adfd8f6a97e6eb57aefef6cc14cfb663b445533c58222d0</code></td>
+            </tr>
+            <tr>
+              <td><span class="tag pcg">TAPA full-PCG</span></td>
+              <td><code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code></td>
+              <td><code>CuperPcg</code></td>
+              <td><code>28bc1f11-e9b1-7b51-029a-756bab01ee47</code></td>
+              <td class="num">190 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>ebcc862f5291c861859aafff56eec935785f5389ecdc4a93a95572c62865b7d0</code></td>
             </tr>
           </tbody>
         </table>
@@ -435,6 +466,7 @@ make run-cuper-control-xrt TARGET=hw \
               <th class="num">TAPA GFLOP/s</th>
               <th class="num">no-TAPA GFLOP/s</th>
               <th class="num">full-PCG proxy ms</th>
+              <th class="num">TAPA full-PCG 1iter ms</th>
               <th>校验/状态</th>
             </tr>
           </thead>
@@ -444,96 +476,104 @@ make run-cuper-control-xrt TARGET=hw \
               <td class="num">16</td>
               <td class="num">16</td>
               <td class="num">0.0898</td>
-              <td class="num">0.1364</td>
-              <td class="num">1.52x</td>
+              <td class="num">0.2587</td>
+              <td class="num">2.88x</td>
               <td class="num">0.0004</td>
-              <td class="num">0.0002</td>
+              <td class="num">0.0001</td>
               <td class="num">0.1305</td>
-              <td><span class="tag oktag">ok</span> max_rel_diff 7.63e-08; proxy iter=0, diff=0</td>
+              <td class="num">11.1368</td>
+              <td><span class="tag oktag">ok</span> no-TAPA max_rel_diff 7.63e-08; proxy iter=0, diff=0; TAPA full-PCG iter=1, ctrl 0x4-&gt;0xe, max_abs_diff=1.09e-08</td>
             </tr>
             <tr>
               <td><code>thermal2_n1024</code></td>
               <td class="num">1,024</td>
               <td class="num">6,362</td>
               <td class="num">0.0738</td>
-              <td class="num">0.2382</td>
-              <td class="num">3.23x</td>
+              <td class="num">0.3736</td>
+              <td class="num">5.06x</td>
               <td class="num">0.1723</td>
-              <td class="num">0.0534</td>
+              <td class="num">0.0341</td>
               <td class="num">0.2501</td>
-              <td><span class="tag oktag">ok</span> max_rel_diff 2.20e-06; proxy iter=0, diff=0</td>
+              <td class="num">12.1308</td>
+              <td><span class="tag oktag">ok</span> no-TAPA max_rel_diff 2.20e-06; proxy iter=0, diff=0; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=9.28e-10</td>
             </tr>
             <tr>
               <td><code>thermal2_n4096</code></td>
               <td class="num">4,096</td>
               <td class="num">26,204</td>
               <td class="num">0.0696</td>
-              <td class="num">0.5901</td>
-              <td class="num">8.48x</td>
+              <td class="num">0.8174</td>
+              <td class="num">11.74x</td>
               <td class="num">0.7534</td>
-              <td class="num">0.0888</td>
+              <td class="num">0.0641</td>
               <td class="num">0.6897</td>
-              <td><span class="tag oktag">ok</span> max_rel_diff 1.02e-04; proxy iter=0, diff=0</td>
+              <td class="num">14.1224</td>
+              <td><span class="tag oktag">ok</span> no-TAPA max_rel_diff 1.02e-04; proxy iter=0, diff=0; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=4.09e-09</td>
             </tr>
             <tr>
               <td><code>thermal2_n16384</code></td>
               <td class="num">16,384</td>
               <td class="num">107,908</td>
               <td class="num">0.0907</td>
-              <td class="num">2.0272</td>
-              <td class="num">22.34x</td>
+              <td class="num">2.7647</td>
+              <td class="num">30.48x</td>
               <td class="num">2.3783</td>
-              <td class="num">0.1065</td>
+              <td class="num">0.0781</td>
               <td class="num">2.3705</td>
-              <td><span class="tag oktag">ok</span> max_rel_diff 1.20e-04; proxy iter=0, diff=0</td>
+              <td class="num">23.2792</td>
+              <td><span class="tag oktag">ok</span> no-TAPA max_rel_diff 1.20e-04; proxy iter=0, diff=0; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=6.76e-11</td>
             </tr>
             <tr>
               <td><code>thermal2_n65536</code></td>
               <td class="num">65,536</td>
               <td class="num">437,000</td>
               <td class="num">0.1557</td>
-              <td class="num">7.8844</td>
-              <td class="num">50.63x</td>
+              <td class="num">10.7500</td>
+              <td class="num">69.04x</td>
               <td class="num">5.6129</td>
-              <td class="num">0.1109</td>
+              <td class="num">0.0813</td>
               <td class="num">9.1294</td>
-              <td><span class="tag oktag">ok</span> max_rel_diff 8.27e-04; proxy iter=0, diff=0</td>
+              <td class="num">56.3060</td>
+              <td><span class="tag oktag">ok</span> no-TAPA max_rel_diff 8.27e-04; proxy iter=0, diff=0; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=7.50e-10</td>
             </tr>
             <tr>
               <td><code>thermal2_n131072</code></td>
               <td class="num">131,072</td>
               <td class="num">866,060</td>
               <td class="num">not returned</td>
-              <td class="num">15.6945</td>
+              <td class="num">21.4467</td>
               <td class="num">-</td>
               <td class="num">-</td>
-              <td class="num">0.1104</td>
+              <td class="num">0.0808</td>
               <td class="num">18.1458</td>
-              <td><span class="tag warntag">TAPA stopped</span> CU IDLE but host waited; no-TAPA ok; proxy ok</td>
+              <td class="num">101.9392</td>
+              <td><span class="tag warntag">single TAPA stopped</span> CU IDLE but host waited; no-TAPA 4ch ok, max_rel_diff 1.32e-03; proxy ok; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=2.33e-10</td>
             </tr>
             <tr>
               <td><code>thermal2_n262144</code></td>
               <td class="num">262,144</td>
               <td class="num">1,748,980</td>
               <td class="num">not returned</td>
-              <td class="num">31.3029</td>
+              <td class="num">42.8404</td>
               <td class="num">-</td>
               <td class="num">-</td>
-              <td class="num">0.1117</td>
+              <td class="num">0.0817</td>
               <td class="num">36.1522</td>
-              <td><span class="tag warntag">TAPA stopped</span> CU IDLE but host waited; no-TAPA ok; proxy ok</td>
+              <td class="num">192.4484</td>
+              <td><span class="tag warntag">single TAPA stopped</span> CU IDLE but host waited; no-TAPA 4ch ok, max_rel_diff 3.15e-03; proxy ok; TAPA full-PCG iter=1 max_iter, ctrl 0x4-&gt;0xe, max_abs_diff=5.40e-10</td>
             </tr>
             <tr>
               <td><code>thermal2</code></td>
               <td class="num">1,228,045</td>
               <td class="num">8,580,313</td>
               <td class="num">not run</td>
-              <td class="num">146.2684</td>
+              <td class="num">200.5932</td>
               <td class="num">-</td>
               <td class="num">-</td>
-              <td class="num">0.1173</td>
+              <td class="num">0.0855</td>
               <td class="num">169.1279</td>
-              <td><span class="tag oktag">no-TAPA/proxy ok</span> TAPA skipped after n=131072/n=262144 wait issue</td>
+              <td class="num">not retested</td>
+              <td><span class="tag warntag">full-size not retested</span> no-TAPA 4ch max_rel_diff 4.49e-05; proxy ok; TAPA full-PCG full thermal2 not included in the 2026-05-26 17:45 smoke run</td>
             </tr>
           </tbody>
         </table>
@@ -542,39 +582,43 @@ make run-cuper-control-xrt TARGET=hw \
 
     <section>
       <h2>趋势图</h2>
-      <p>纵轴是 kernel 时间，采用 log10(ms) 便于把小矩阵和大矩阵放在同一张图里。full-PCG 线是初始 SpMV 代理，不是单独 SpMV。</p>
+      <p>纵轴是 kernel 时间，采用 log10(ms) 便于把小矩阵和大矩阵放在同一张图里。full-PCG proxy 是初始 SpMV 代理，TAPA full-PCG 1iter 是一次迭代代理。</p>
       <div class="legend">
         <span><i style="background: var(--tapa);"></i>TAPA</span>
         <span><i style="background: var(--notapa);"></i>no-TAPA</span>
         <span><i style="background: var(--pcg);"></i>full-PCG proxy</span>
+        <span><i style="background: var(--tapa-pcg);"></i>TAPA full-PCG 1iter</span>
       </div>
       <div class="svg-wrap">
         <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="Average SpMV time trend">
-          <line class="gridline" x1="70" y1="40" x2="930" y2="40"></line>
-          <line class="gridline" x1="70" y1="105" x2="930" y2="105"></line>
-          <line class="gridline" x1="70" y1="170" x2="930" y2="170"></line>
-          <line class="gridline" x1="70" y1="235" x2="930" y2="235"></line>
+          <line class="gridline" x1="70" y1="20" x2="930" y2="20"></line>
+          <line class="gridline" x1="70" y1="76" x2="930" y2="76"></line>
+          <line class="gridline" x1="70" y1="132" x2="930" y2="132"></line>
+          <line class="gridline" x1="70" y1="188" x2="930" y2="188"></line>
+          <line class="gridline" x1="70" y1="244" x2="930" y2="244"></line>
           <line class="gridline" x1="70" y1="300" x2="930" y2="300"></line>
           <line class="axis" x1="70" y1="300" x2="930" y2="300"></line>
-          <line class="axis" x1="70" y1="40" x2="70" y2="300"></line>
-          <text x="20" y="44">100 ms</text>
-          <text x="27" y="109">10 ms</text>
-          <text x="34" y="174">1 ms</text>
-          <text x="28" y="239">0.1 ms</text>
+          <line class="axis" x1="70" y1="20" x2="70" y2="300"></line>
+          <text x="12" y="24">1000 ms</text>
+          <text x="20" y="80">100 ms</text>
+          <text x="27" y="136">10 ms</text>
+          <text x="34" y="192">1 ms</text>
+          <text x="28" y="248">0.1 ms</text>
           <text x="21" y="304">0.01 ms</text>
 
-          <polyline class="line-notapa" points="70,225 193,209 316,184 439,149 562,111 685,92 808,73 930,29"></polyline>
+          <polyline class="line-notapa" points="70,221 193,212 316,193 439,163 562,130 685,113 808,97 930,59"></polyline>
           <polyline class="line-tapa" points="70,247 193,252 316,254 439,247 562,232"></polyline>
-          <polyline class="line-pcg" points="70,227 193,209 316,180 439,146 562,108 685,88 808,69 930,25"></polyline>
+          <polyline class="line-pcg" points="70,238 193,222 316,197 439,167 562,134 685,118 808,101 930,63"></polyline>
+          <polyline class="line-tapa-pcg" points="70,129 193,127 316,124 439,111 562,90 685,76 808,60"></polyline>
 
-          <circle class="dot-notapa" cx="70" cy="225" r="4"></circle>
-          <circle class="dot-notapa" cx="193" cy="209" r="4"></circle>
-          <circle class="dot-notapa" cx="316" cy="184" r="4"></circle>
-          <circle class="dot-notapa" cx="439" cy="149" r="4"></circle>
-          <circle class="dot-notapa" cx="562" cy="111" r="4"></circle>
-          <circle class="dot-notapa" cx="685" cy="92" r="4"></circle>
-          <circle class="dot-notapa" cx="808" cy="73" r="4"></circle>
-          <circle class="dot-notapa" cx="930" cy="29" r="4"></circle>
+          <circle class="dot-notapa" cx="70" cy="221" r="4"></circle>
+          <circle class="dot-notapa" cx="193" cy="212" r="4"></circle>
+          <circle class="dot-notapa" cx="316" cy="193" r="4"></circle>
+          <circle class="dot-notapa" cx="439" cy="163" r="4"></circle>
+          <circle class="dot-notapa" cx="562" cy="130" r="4"></circle>
+          <circle class="dot-notapa" cx="685" cy="113" r="4"></circle>
+          <circle class="dot-notapa" cx="808" cy="97" r="4"></circle>
+          <circle class="dot-notapa" cx="930" cy="59" r="4"></circle>
 
           <circle class="dot-tapa" cx="70" cy="247" r="4"></circle>
           <circle class="dot-tapa" cx="193" cy="252" r="4"></circle>
@@ -582,14 +626,22 @@ make run-cuper-control-xrt TARGET=hw \
           <circle class="dot-tapa" cx="439" cy="247" r="4"></circle>
           <circle class="dot-tapa" cx="562" cy="232" r="4"></circle>
 
-          <circle class="dot-pcg" cx="70" cy="227" r="4"></circle>
-          <circle class="dot-pcg" cx="193" cy="209" r="4"></circle>
-          <circle class="dot-pcg" cx="316" cy="180" r="4"></circle>
-          <circle class="dot-pcg" cx="439" cy="146" r="4"></circle>
-          <circle class="dot-pcg" cx="562" cy="108" r="4"></circle>
-          <circle class="dot-pcg" cx="685" cy="88" r="4"></circle>
-          <circle class="dot-pcg" cx="808" cy="69" r="4"></circle>
-          <circle class="dot-pcg" cx="930" cy="25" r="4"></circle>
+          <circle class="dot-pcg" cx="70" cy="238" r="4"></circle>
+          <circle class="dot-pcg" cx="193" cy="222" r="4"></circle>
+          <circle class="dot-pcg" cx="316" cy="197" r="4"></circle>
+          <circle class="dot-pcg" cx="439" cy="167" r="4"></circle>
+          <circle class="dot-pcg" cx="562" cy="134" r="4"></circle>
+          <circle class="dot-pcg" cx="685" cy="118" r="4"></circle>
+          <circle class="dot-pcg" cx="808" cy="101" r="4"></circle>
+          <circle class="dot-pcg" cx="930" cy="63" r="4"></circle>
+
+          <circle class="dot-tapa-pcg" cx="70" cy="129" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="193" cy="127" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="316" cy="124" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="439" cy="111" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="562" cy="90" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="685" cy="76" r="4"></circle>
+          <circle class="dot-tapa-pcg" cx="808" cy="60" r="4"></circle>
 
           <text x="52" y="325">16</text>
           <text x="169" y="325">1,024</text>
@@ -615,13 +667,16 @@ make run-cuper-control-xrt TARGET=hw \
         <div>
           <h3><span class="tag notapa">no-TAPA</span> cuper-notapa-spmv-u55c-20260524</h3>
           <p>优势：从 <code>N=16</code> 到完整 <code>thermal2</code> 全部稳定返回，校验误差均小于 <code>DIFF_TOL=1e-1</code>。</p>
-          <p>瓶颈：kernel 平均时间随规模增长到完整 thermal2 的 <code>146.27 ms</code>，大数据段吞吐基本维持在约 <code>0.11 GFLOP/s</code>。</p>
+          <p>瓶颈：新版归档 xclbin 实际是 <code>cuper_packed_spmv_4ch_kernel</code>，kernel 平均时间随规模增长到完整 thermal2 的 <code>200.59 ms</code>，大数据段吞吐基本维持在约 <code>0.08 GFLOP/s</code>。</p>
           <p>判断：更适合作为稳定、可拉通百万级数据的当前 no-TAPA baseline。</p>
         </div>
       </div>
       <h3><span class="tag pcg">full-PCG</span> cuper-notapa-pcg-fpga-u55c-20260522</h3>
       <p>这版是上一版全流程 FPGA-PCG：kernel 内部包含初始 Cuper packed SpMV、PCG 控制、dot、向量更新和收敛判断。当前 host 没有 <code>--spmv-only</code>，也没有 kernel 内分段计时寄存器，所以不能单独抽出 SpMV 时间。</p>
       <p>本次用 <code>TAU=1e100 MAX_ITERS=1</code> 跑代理：所有数据点都在 <code>iter=0</code> 返回 <code>converged</code>，完整 <code>thermal2</code> 的 kernel 时间为 <code>169.13 ms</code>。这说明百万级数据本身和 no-TAPA full-PCG bitstream 可以返回，TAPA 百万级不返回更可能在 TAPA host/runtime 返回路径。</p>
+      <h3><span class="tag pcg">TAPA full-PCG</span> cuper-tapa-pcg-fpga-u55c-20260525</h3>
+      <p>这版是 2026-05-26 14:56 重新编译并替换到 <code>395bitstream/</code> 的 TAPA Cuper 全流程 FPGA-PCG，kernel 为 <code>CuperPcg</code>。补丁初始化 TAPA 生成的顶层 control FSM，并加了非法状态回到 idle 的 default 分支。按 <code>MAX_ITERS=1</code> 跑一次迭代代理，<code>thermal2_n16</code> 到 <code>thermal2_n262144</code> 都能正常返回；每次启动前 control register 为 <code>0x4</code>，完成后为 <code>0xe</code>。<code>thermal2_n262144</code> 的 <code>kernel_reported=192.4484 ms</code>，<code>max_abs_diff=5.40e-10</code>。</p>
+      <p>完整 <code>thermal2</code> 本轮没有重测。这个 bugfix build 的 routed timing 仍未收敛，<code>WNS=-1.916 ns</code>、<code>TNS=-36797.375 ns</code>，所以当前数据只用于确认功能路径和量级，不应作为最终稳定性能。</p>
     </section>
 
     <section>
@@ -649,14 +704,25 @@ make run-cuper-control-xrt TARGET=hw \
         当前失败阈值在 <code>N=65,536</code> 与 <code>N=131,072</code> 之间。
       </p>
       <p>
+        新 TAPA full-PCG 路线的收尾同步已经把可返回规模从 <code>N=16</code> 拉到
+        <code>N=262,144</code>；后续优先做 timing closure，并继续查完整
+        <code>thermal2</code> 的 host/runtime 返回路径。
+      </p>
+      <p>
         no-TAPA 路线已能拉通百万级数据，可作为继续比较 PCG 全流程和端到端预处理开销的稳定基线。
-        如果只看单次 SpMV kernel，当前 no-TAPA 大数据吞吐约 <code>0.11 GFLOP/s</code>，和 TAPA 已完成点差距较大。
+        如果只看单次 SpMV kernel，当前 no-TAPA 4ch 大数据吞吐约 <code>0.08 GFLOP/s</code>，和 TAPA 已完成点差距较大。
       </p>
     </section>
   </main>
 
   <footer class="wrap">
-    原始日志位于 <code>reports/bitstream_compare_20260524/</code>。本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
+    2026-05-24 原始日志位于 <code>reports/bitstream_compare_20260524/</code>。
+    2026-05-25 新增日志位于 <code>logs/compare_tapa_fullpcg_1iter_thermal2_n16_20260525_162407.log</code>
+    与 <code>logs/compare_tapa_fullpcg_1iter_shorttimeout_20260525_20260525_162922.summary.tsv</code>。
+    no-TAPA 4ch 重跑日志汇总位于 <code>logs/compare_notapa_spmv_4ch_20260525_20260525_175544.summary.tsv</code>。
+    2026-05-26 bugfix 成品 bitstream 位于 <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>，
+    build 目录位于 <code>cuper-tapa-pcg-fpga-u55c-20260525-build/</code>，编译日志位于 <code>logs/cuper_tapa_pcg_hw_20260526_130035.log</code>。
+    本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
   </footer>
 </body>
 </html>

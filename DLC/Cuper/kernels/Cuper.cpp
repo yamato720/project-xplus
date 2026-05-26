@@ -601,11 +601,29 @@ struct CuperSpmvCommand {
     // 传给 Cuper SpMV 服务流水的一次运行命令。
     // 在 CuperPcg 中每次 PCG 需要 A*x0 或 A*p 时，controller 都发送一次。
     INDEX_TYPE iteration_num;
+    INDEX_TYPE stop;
+};
+
+struct PcgStageEvent {
+    INDEX_TYPE stage;
+    INDEX_TYPE op;
 };
 
 static constexpr INDEX_TYPE kPcgStatusConverged = 0;
 static constexpr INDEX_TYPE kPcgStatusMaxIter = 1;
 static constexpr INDEX_TYPE kPcgStatusBreakdown = 2;
+static constexpr INDEX_TYPE kPcgStopToken = -1;
+static constexpr INDEX_TYPE kPcgStageBegin = 0;
+static constexpr INDEX_TYPE kPcgStageEnd = 1;
+static constexpr INDEX_TYPE kPcgStageStop = 2;
+static constexpr INDEX_TYPE kPcgStageInitSpmv = 0;
+static constexpr INDEX_TYPE kPcgStageInitZp = 1;
+static constexpr INDEX_TYPE kPcgStageIterSpmv = 2;
+static constexpr INDEX_TYPE kPcgStageUpdateXr = 3;
+static constexpr INDEX_TYPE kPcgStageUpdateZ = 4;
+static constexpr INDEX_TYPE kPcgStageUpdateP = 5;
+static constexpr INDEX_TYPE kPcgStageControllerTotal = 6;
+static constexpr INDEX_TYPE kPcgStageCount = 7;
 static constexpr double kPcgBreakdownEps = 1.0e-30;
 
 inline double pcg_abs(const double value) {
@@ -616,6 +634,16 @@ inline double pcg_abs(const double value) {
 inline bool pcg_invalid(const double value) {
 #pragma HLS inline
     return value != value;
+}
+
+inline void pcg_stage_mark(tapa::ostream<PcgStageEvent> &Stage_Event_out,
+                           const INDEX_TYPE stage,
+                           const INDEX_TYPE op) {
+#pragma HLS inline
+    PcgStageEvent event;
+    event.stage = stage;
+    event.op = op;
+    Stage_Event_out.write(event);
 }
 
 // PCG 版的 SpElement ptr loader。
@@ -633,6 +661,10 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvCommand command = Command_in.read();
+        if (command.stop != 0) {
+            PE_Param.write(kPcgStopToken);
+            return;
+        }
         const INDEX_TYPE iteration_time =
             (command.iteration_num == 0) ? 1 : command.iteration_num;
 
@@ -674,6 +706,9 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvCommand command = Command_in.read();
+        if (command.stop != 0) {
+            return;
+        }
         const INDEX_TYPE iteration_time =
             (command.iteration_num == 0) ? 1 : command.iteration_num;
 
@@ -708,6 +743,9 @@ void Pcg_Matrix_Loader(const INDEX_TYPE Matrix_len,
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvCommand command = Command_in.read();
+        if (command.stop != 0) {
+            return;
+        }
         const INDEX_TYPE iteration_time =
             (command.iteration_num == 0) ? 1 : command.iteration_num;
 
@@ -745,6 +783,11 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
     for (;;) {
 #pragma HLS loop_flatten off
         const INDEX_TYPE Batch_num = PE_Param_in.read();
+        if (Batch_num == kPcgStopToken) {
+            PE_Param_out.write(kPcgStopToken);
+            Vector_Y_Param.write(kPcgStopToken);
+            return;
+        }
         const INDEX_TYPE Row_num = PE_Param_in.read();
         const INDEX_TYPE Iteration_num = PE_Param_in.read();
         const INDEX_TYPE Column_num = PE_Param_in.read();
@@ -880,6 +923,9 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
     for (;;) {
 #pragma HLS loop_flatten off
         const INDEX_TYPE Batch_num = Vector_Y_Param.read();
+        if (Batch_num == kPcgStopToken) {
+            return;
+        }
         const INDEX_TYPE Row_num = Vector_Y_Param.read();
         const INDEX_TYPE Iteration_num = Vector_Y_Param.read();
         const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
@@ -977,7 +1023,8 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
 // checker 只保留有效范围内的 float_v2，避免 controller 消费到 padding。
 void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
                         tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
-                        tapa::ostream<float_v2> &Vector_Y_Stream_Aftck) {
+                        tapa::ostream<float_v2> &Vector_Y_Stream_Aftck,
+                        tapa::istream<INDEX_TYPE> &Stop_in) {
     const INDEX_TYPE num_pe_output =
         ((Row_num + HBM_CHANNEL_NUM_MULT_2 - 1) / HBM_CHANNEL_NUM_MULT_2) *
         HBM_CHANNEL_NUM_DIV_8;
@@ -985,10 +1032,20 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
 
     for (;;) {
 #pragma HLS loop_flatten off
+        if (!Stop_in.empty()) {
+            INDEX_TYPE stop;
+            Stop_in.try_read(stop);
+            return;
+        }
     out:
         for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < num_pe_output;) {
 #pragma HLS loop_tripcount min=1 max=1800
 #pragma HLS pipeline II=1
+            if (!Stop_in.empty()) {
+                INDEX_TYPE stop;
+                Stop_in.try_read(stop);
+                return;
+            }
             if (!Vector_Y_Stream[c_idx].empty() && !Vector_Y_Stream_Aftck.full()) {
                 float_v2 tmp;
                 Vector_Y_Stream[c_idx].try_read(tmp);
@@ -1009,6 +1066,82 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
     }
 }
 
+void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
+                        tapa::ostream<float_v16> &Vector_Y_Stream_Ans,
+                        tapa::istream<INDEX_TYPE> &Stop_in) {
+    for (;;) {
+#pragma HLS pipeline II=1
+        if (!Stop_in.empty()) {
+            INDEX_TYPE stop;
+            Stop_in.try_read(stop);
+            return;
+        }
+
+        bool all_ready = true;
+        for (int i = 0; i < 8; ++i) {
+            if (Vector_Y_Stream_Aftck[i].empty()) {
+                all_ready = false;
+                break;
+            }
+        }
+
+        if (all_ready && !Vector_Y_Stream_Ans.full()) {
+            float_v16 tmpv16;
+            for (int i = 0; i < 8; ++i) {
+                float_v2 val;
+                Vector_Y_Stream_Aftck[i].try_read(val);
+
+                tmpv16[(i << 1)]     = val[0];
+                tmpv16[(i << 1) + 1] = val[1];
+            }
+            Vector_Y_Stream_Ans.try_write(tmpv16);
+        }
+    }
+}
+
+void Pcg_Stage_Timer(tapa::istream<PcgStageEvent> &Stage_Event_in,
+                     tapa::ostream<ap_uint<64>> &Stage_Ticks_out) {
+    ap_uint<64> now = 0;
+    ap_uint<64> start[kPcgStageCount];
+    ap_uint<64> elapsed[kPcgStageCount];
+#pragma HLS array_partition variable=start complete
+#pragma HLS array_partition variable=elapsed complete
+
+init_stage_timer_arrays:
+    for (INDEX_TYPE index = 0; index < kPcgStageCount; ++index) {
+#pragma HLS unroll
+        start[index] = 0;
+        elapsed[index] = 0;
+    }
+
+stage_timer_loop:
+    for (;;) {
+#pragma HLS pipeline II=1
+        ++now;
+        if (!Stage_Event_in.empty()) {
+            PcgStageEvent event;
+            Stage_Event_in.try_read(event);
+            if (event.op == kPcgStageStop) {
+                break;
+            }
+            if (event.stage >= 0 && event.stage < kPcgStageCount) {
+                if (event.op == kPcgStageBegin) {
+                    start[event.stage] = now;
+                } else if (event.op == kPcgStageEnd) {
+                    elapsed[event.stage] += now - start[event.stage];
+                }
+            }
+        }
+    }
+
+write_stage_timer_metrics:
+    for (INDEX_TYPE index = 0; index < kPcgStageCount; ++index) {
+#pragma HLS pipeline II=1
+        Stage_Ticks_out.write(elapsed[index]);
+    }
+    Stage_Ticks_out.write(now);
+}
+
 // FPGA 内 PCG 主控。
 //
 // 这是 CuperPcg 和 host-PCG 旧版的核心区别：
@@ -1020,6 +1153,11 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
 // 发送命令、提供 x/p 向量、消费 SpMV 结果和维护 PCG 向量状态。
 void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
+                    tapa::ostreams<INDEX_TYPE, 8> &Checker_Stop_out,
+                    tapa::ostream<INDEX_TYPE> &Sort_Stop_out,
+                    tapa::ostream<INDEX_TYPE> &Vector_Destroy_Stop_out,
+                    tapa::ostream<PcgStageEvent> &Stage_Event_out,
+                    tapa::istream<ap_uint<64>> &Stage_Ticks_in,
                     tapa::ostream<float_v16> &X_to_spmv,
                     tapa::istream<float_v16> &Spmv_in,
                     tapa::mmap<double> B,
@@ -1044,14 +1182,23 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     double rr = 0.0;
     double p_ap = 0.0;
     double alpha = 0.0;
+    unsigned long long init_spmv_ticks = 0;
+    unsigned long long init_zp_ticks = 0;
+    unsigned long long iter_spmv_ticks = 0;
+    unsigned long long update_xr_ticks = 0;
+    unsigned long long update_z_ticks = 0;
+    unsigned long long update_p_ticks = 0;
     CuperSpmvCommand command;
     command.iteration_num = 1;
+    command.stop = 0;
+    pcg_stage_mark(Stage_Event_out, kPcgStageControllerTotal, kPcgStageBegin);
 
     // 非法参数直接报 breakdown，避免后续常驻 SpMV 服务读取无效范围。
     if (Row_num <= 0 || Max_iters < 0 || Tau <= 0.0 || pcg_invalid(Tau)) {
         status_code = kPcgStatusBreakdown;
     } else {
 // 初始化 SpMV：先用当前 X 计算 A*x0。
+        pcg_stage_mark(Stage_Event_out, kPcgStageInitSpmv, kPcgStageBegin);
 send_init_command:
         for (INDEX_TYPE index = 0; index < 2; ++index) {
 #pragma HLS unroll
@@ -1072,6 +1219,7 @@ send_init_matrix_command:
         for (INDEX_TYPE sent_packets = 0, received_packets = 0;
              received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
+            ++init_spmv_ticks;
             if (sent_packets < packet_count && !X_to_spmv.full()) {
                 float_v16 x_packet;
         fill_x0_packet:
@@ -1108,7 +1256,9 @@ send_init_matrix_command:
                 ++received_packets;
             }
         }
+        pcg_stage_mark(Stage_Event_out, kPcgStageInitSpmv, kPcgStageEnd);
 
+        pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageBegin);
 init_zp_reduce:
         // 第二段再读 R/M_inv，初始化 Z/P 并累计 rz/rr。它和 update_z_reduce
         // 形态接近，避免把 residual 初始化和 SpMV 输出消费挤在同一条流水里。
@@ -1123,11 +1273,14 @@ init_zp_reduce:
             rz += r_value * z_value;
             rr += r_value * r_value;
         }
+        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
+        pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageEnd);
 
 pcg_loop:
         for (INDEX_TYPE iter = 0; iter < Max_iters && rr > Tau; ++iter) {
 #pragma HLS loop_tripcount min=1 max=1000
     // 每轮 SpMV：将当前搜索方向 p 送入 Cuper 流水，计算 AP=A*p。
+            pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageBegin);
     send_iter_command:
             for (INDEX_TYPE index = 0; index < 2; ++index) {
 #pragma HLS unroll
@@ -1149,6 +1302,7 @@ pcg_loop:
             for (INDEX_TYPE sent_packets = 0, received_packets = 0;
                  received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
+                ++iter_spmv_ticks;
                 if (sent_packets < packet_count && !X_to_spmv.full()) {
                     float_v16 p_packet;
             fill_p_packet:
@@ -1182,6 +1336,7 @@ pcg_loop:
                     ++received_packets;
                 }
             }
+            pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageEnd);
 
             if (pcg_invalid(p_ap) || pcg_abs(p_ap) <= kPcgBreakdownEps ||
                 pcg_invalid(rz) || pcg_abs(rz) <= kPcgBreakdownEps) {
@@ -1195,6 +1350,7 @@ pcg_loop:
                 break;
             }
 
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateXr, kPcgStageBegin);
     update_xr:
             // 只更新 x/r。上一版把 x/r/z 更新、M_inv 读取、rz/rr 归约
             // 都塞在同一个 update_xrz pipeline 里，route 失败集中在该
@@ -1212,9 +1368,12 @@ pcg_loop:
                 X[index] = x_new;
                 R[index] = r_new;
             }
+            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateXr, kPcgStageEnd);
 
             double rz_new = 0.0;
             double rr_new = 0.0;
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateZ, kPcgStageBegin);
     update_z_reduce:
             // 再更新 z 并累计新残差。该段只读 R/M_inv、写 Z，避免和
             // update_xr 的 X/P/AP 访问以及 alpha 乘法挤在同一条流水里。
@@ -1228,6 +1387,8 @@ pcg_loop:
                 rz_new += r_new * z_new;
                 rr_new += r_new * r_new;
             }
+            update_z_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateZ, kPcgStageEnd);
 
             if (pcg_invalid(rz_new) || pcg_invalid(rr_new)) {
                 status_code = kPcgStatusBreakdown;
@@ -1240,6 +1401,7 @@ pcg_loop:
                 break;
             }
 
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateP, kPcgStageBegin);
     update_p:
             // p = z + beta * p。下一轮 controller 会重新把 P 打包送入 SpMV。
             // 同样放宽 II，避免 beta 更新路径和 update_xrz 争抢同一区域布线。
@@ -1250,6 +1412,8 @@ pcg_loop:
                 const double p_value = P[index];
                 P[index] = z_value + beta * p_value;
             }
+            update_p_ticks += static_cast<unsigned long long>(Row_num) * 2ULL;
+            pcg_stage_mark(Stage_Event_out, kPcgStageUpdateP, kPcgStageEnd);
 
             rz = rz_new;
             rr = rr_new;
@@ -1261,11 +1425,62 @@ pcg_loop:
         }
     }
 
+    CuperSpmvCommand stop_command;
+    stop_command.iteration_num = 0;
+    stop_command.stop = 1;
+send_stop_command:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        Command_out[index].write(stop_command);
+    }
+send_stop_matrix_command:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(stop_command);
+    }
+send_checker_stop:
+    for (INDEX_TYPE index = 0; index < 8; ++index) {
+#pragma HLS unroll
+        Checker_Stop_out[index].write(1);
+    }
+    Sort_Stop_out.write(1);
+    Vector_Destroy_Stop_out.write(1);
+    pcg_stage_mark(Stage_Event_out, kPcgStageControllerTotal, kPcgStageEnd);
+    pcg_stage_mark(Stage_Event_out, 0, kPcgStageStop);
+
+    ap_uint<64> stage_cycles[kPcgStageCount + 1];
+#pragma HLS array_partition variable=stage_cycles complete
+read_stage_timer_metrics:
+    for (INDEX_TYPE index = 0; index < kPcgStageCount + 1; ++index) {
+#pragma HLS pipeline II=1
+        stage_cycles[index] = Stage_Ticks_in.read();
+    }
+
     // Metrics/Status 是 host 侧判断运行结果和调试数值稳定性的最小输出。
     Metrics[0] = rz;
     Metrics[1] = rr;
     Metrics[2] = p_ap;
     Metrics[3] = alpha;
+    Metrics[4] = static_cast<double>(packet_count);
+    Metrics[5] = static_cast<double>(init_spmv_ticks);
+    Metrics[6] = static_cast<double>(init_zp_ticks);
+    Metrics[7] = static_cast<double>(iter_spmv_ticks);
+    Metrics[8] = static_cast<double>(update_xr_ticks);
+    Metrics[9] = static_cast<double>(update_z_ticks);
+    Metrics[10] = static_cast<double>(update_p_ticks);
+    Metrics[11] = static_cast<double>(init_spmv_ticks + init_zp_ticks +
+                                      iter_spmv_ticks + update_xr_ticks +
+                                      update_z_ticks + update_p_ticks);
+    Metrics[12] = static_cast<double>(Row_num);
+    Metrics[13] = static_cast<double>(Max_iters);
+    Metrics[16] = static_cast<double>(stage_cycles[kPcgStageInitSpmv].to_uint64());
+    Metrics[17] = static_cast<double>(stage_cycles[kPcgStageInitZp].to_uint64());
+    Metrics[18] = static_cast<double>(stage_cycles[kPcgStageIterSpmv].to_uint64());
+    Metrics[19] = static_cast<double>(stage_cycles[kPcgStageUpdateXr].to_uint64());
+    Metrics[20] = static_cast<double>(stage_cycles[kPcgStageUpdateZ].to_uint64());
+    Metrics[21] = static_cast<double>(stage_cycles[kPcgStageUpdateP].to_uint64());
+    Metrics[22] = static_cast<double>(stage_cycles[kPcgStageControllerTotal].to_uint64());
+    Metrics[23] = static_cast<double>(stage_cycles[kPcgStageCount].to_uint64());
     Status[0] = status_code;
     Status[1] = iterations;
 }
@@ -1283,6 +1498,32 @@ void Destroy_float_v16(tapa::istream<float_v16> &Vector_X_Stream) {
 #pragma HLS pipeline II=1
         float_v16 tmp; 
         Vector_X_Stream.try_read(tmp);
+    }
+}
+
+void Pcg_Destroy_int(tapa::istream<INDEX_TYPE> &PE_Param) {
+    for (;;) {
+#pragma HLS pipeline II=1
+        const INDEX_TYPE tmp = PE_Param.read();
+        if (tmp == kPcgStopToken) {
+            return;
+        }
+    }
+}
+
+void Pcg_Destroy_float_v16(tapa::istream<float_v16> &Vector_X_Stream,
+                           tapa::istream<INDEX_TYPE> &Stop_in) {
+    for (;;) {
+#pragma HLS pipeline II=1
+        if (!Stop_in.empty()) {
+            INDEX_TYPE stop;
+            Stop_in.try_read(stop);
+            return;
+        }
+        if (!Vector_X_Stream.empty()) {
+            float_v16 tmp;
+            Vector_X_Stream.try_read(tmp);
+        }
     }
 }
 
@@ -1425,7 +1666,7 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // 的深度。下面这些 FIFO 就是各个 task 之间的硬件连线。
     //
     // 2 条命令流：controller 分别通知 ptr loader 和 vector loader
-    // 启动一次 SpMV。CuperSpmvCommand 当前只带 iteration_num。
+    // 启动一次 SpMV，结束时再发 stop 让服务任务退出。
     tapa::streams<CuperSpmvCommand, 2, 4>                   Command_Stream("Command_Stream");
     // 16 条矩阵命令流：controller 给每个 HBM matrix loader 发同一轮
     // SpMV 命令。HBM_CHANNEL_NUM 当前是 16。
@@ -1460,13 +1701,23 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // 该中间层会增加流控不确定性，所以这里保留 128 深度 FIFO 后直接消费。
     // 这里也不再把 y 写回 HBM；CuperPcg 内部直接拿 A*x0/A*p 更新 PCG 状态。
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    tapa::streams<INDEX_TYPE, 8, 2>                          Checker_Stop_Stream("Checker_Stop_Stream");
+    tapa::stream<INDEX_TYPE, 2>                              Sort_Stop_Stream("Sort_Stop_Stream");
+    tapa::stream<INDEX_TYPE, 2>                              Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
+    tapa::stream<PcgStageEvent, 16>                          Stage_Event_Stream("Stage_Event_Stream");
+    tapa::stream<ap_uint<64>, 16>                             Stage_Ticks_Stream("Stage_Ticks_Stream");
 
     tapa::task()
-        // 唯一 join 的任务：PCG controller 完成后整个 kernel 才返回。
-        // 其他 Pcg_* task 都是常驻服务，等待 controller 发下一次 SpMV 命令。
+        // Controller 完成后广播 stop；所有 Pcg_* 服务任务收到 stop 后
+        // 有限退出，避免 host 侧等待 AP_CTRL_HS completion 时卡住。
         .invoke(Pcg_Controller,
                 Command_Stream,
                 Matrix_Command_Stream,
+                Checker_Stop_Stream,
+                Sort_Stop_Stream,
+                Vector_Destroy_Stop_Stream,
+                Stage_Event_Stream,
+                Stage_Ticks_Stream,
                 Pcg_X_Stream,
                 Pcg_Spmv_Stream,
                 B,
@@ -1481,22 +1732,23 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Row_num,
                 Max_iters,
                 Tau)
+        .invoke(Pcg_Stage_Timer, Stage_Event_Stream, Stage_Ticks_Stream)
         // Cuper SpMV 的参数/向量/矩阵输入端。Command_Stream[0] 给 ptr loader，
         // Command_Stream[1] 给 vector loader；Matrix_Command_Stream 分发到
         // 16 个矩阵 HBM channel。
-        .invoke<tapa::detach>(Pcg_SpElement_list_ptr_Loader,
+        .invoke(Pcg_SpElement_list_ptr_Loader,
                 Batch_num,
                 Row_num,
                 Column_num,
                 SpElement_list_ptr,
                 Command_Stream[0],
                 PE_Param[0])
-        .invoke<tapa::detach>(Pcg_Vector_Loader,
+        .invoke(Pcg_Vector_Loader,
                 Column_num,
                 Command_Stream[1],
                 Pcg_X_Stream,
                 Vector_X_Stream[0])
-        .invoke<tapa::detach, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader, Matrix_len, Matrix_data, Matrix_Command_Stream, Matrix_A_Stream)
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader, Matrix_len, Matrix_data, Matrix_Command_Stream, Matrix_A_Stream)
         // 16 级 Cuper Core 链。PE_Param 和 Vector_X_Stream 在各级之间传递，
         // 每级消费一个 Matrix_data[channel]，输出该 channel 对 y 的部分贡献。
         //
@@ -1513,30 +1765,30 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         //
         // [0..15] 表示 16 路 HBM 矩阵通道和 16 个 SpMV core；[16] 只表示
         // 串接链尾，不再对应新的矩阵通道。
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[3], Matrix_A_Stream[3], Vector_X_Stream[3], PE_Param[4], Vector_X_Stream[4], Vector_Y_Param[3], Matrix_Mult_Vector_Stream[3])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[4], Matrix_A_Stream[4], Vector_X_Stream[4], PE_Param[5], Vector_X_Stream[5], Vector_Y_Param[4], Matrix_Mult_Vector_Stream[4])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[5], Matrix_A_Stream[5], Vector_X_Stream[5], PE_Param[6], Vector_X_Stream[6], Vector_Y_Param[5], Matrix_Mult_Vector_Stream[5])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[6], Matrix_A_Stream[6], Vector_X_Stream[6], PE_Param[7], Vector_X_Stream[7], Vector_Y_Param[6], Matrix_Mult_Vector_Stream[6])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[7], Matrix_A_Stream[7], Vector_X_Stream[7], PE_Param[8], Vector_X_Stream[8], Vector_Y_Param[7], Matrix_Mult_Vector_Stream[7])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[8], Matrix_A_Stream[8], Vector_X_Stream[8], PE_Param[9], Vector_X_Stream[9], Vector_Y_Param[8], Matrix_Mult_Vector_Stream[8])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[9], Matrix_A_Stream[9], Vector_X_Stream[9], PE_Param[10], Vector_X_Stream[10], Vector_Y_Param[9], Matrix_Mult_Vector_Stream[9])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[10], Matrix_A_Stream[10], Vector_X_Stream[10], PE_Param[11], Vector_X_Stream[11], Vector_Y_Param[10], Matrix_Mult_Vector_Stream[10])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[11], Matrix_A_Stream[11], Vector_X_Stream[11], PE_Param[12], Vector_X_Stream[12], Vector_Y_Param[11], Matrix_Mult_Vector_Stream[11])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[12], Matrix_A_Stream[12], Vector_X_Stream[12], PE_Param[13], Vector_X_Stream[13], Vector_Y_Param[12], Matrix_Mult_Vector_Stream[12])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
-        .invoke<tapa::detach>(Pcg_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+        .invoke(Pcg_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
+        .invoke(Pcg_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
+        .invoke(Pcg_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
+        .invoke(Pcg_Core, PE_Param[3], Matrix_A_Stream[3], Vector_X_Stream[3], PE_Param[4], Vector_X_Stream[4], Vector_Y_Param[3], Matrix_Mult_Vector_Stream[3])
+        .invoke(Pcg_Core, PE_Param[4], Matrix_A_Stream[4], Vector_X_Stream[4], PE_Param[5], Vector_X_Stream[5], Vector_Y_Param[4], Matrix_Mult_Vector_Stream[4])
+        .invoke(Pcg_Core, PE_Param[5], Matrix_A_Stream[5], Vector_X_Stream[5], PE_Param[6], Vector_X_Stream[6], Vector_Y_Param[5], Matrix_Mult_Vector_Stream[5])
+        .invoke(Pcg_Core, PE_Param[6], Matrix_A_Stream[6], Vector_X_Stream[6], PE_Param[7], Vector_X_Stream[7], Vector_Y_Param[6], Matrix_Mult_Vector_Stream[6])
+        .invoke(Pcg_Core, PE_Param[7], Matrix_A_Stream[7], Vector_X_Stream[7], PE_Param[8], Vector_X_Stream[8], Vector_Y_Param[7], Matrix_Mult_Vector_Stream[7])
+        .invoke(Pcg_Core, PE_Param[8], Matrix_A_Stream[8], Vector_X_Stream[8], PE_Param[9], Vector_X_Stream[9], Vector_Y_Param[8], Matrix_Mult_Vector_Stream[8])
+        .invoke(Pcg_Core, PE_Param[9], Matrix_A_Stream[9], Vector_X_Stream[9], PE_Param[10], Vector_X_Stream[10], Vector_Y_Param[9], Matrix_Mult_Vector_Stream[9])
+        .invoke(Pcg_Core, PE_Param[10], Matrix_A_Stream[10], Vector_X_Stream[10], PE_Param[11], Vector_X_Stream[11], Vector_Y_Param[10], Matrix_Mult_Vector_Stream[10])
+        .invoke(Pcg_Core, PE_Param[11], Matrix_A_Stream[11], Vector_X_Stream[11], PE_Param[12], Vector_X_Stream[12], Vector_Y_Param[11], Matrix_Mult_Vector_Stream[11])
+        .invoke(Pcg_Core, PE_Param[12], Matrix_A_Stream[12], Vector_X_Stream[12], PE_Param[13], Vector_X_Stream[13], Vector_Y_Param[12], Matrix_Mult_Vector_Stream[12])
+        .invoke(Pcg_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
+        .invoke(Pcg_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
+        .invoke(Pcg_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
         // 链尾 PE_Param[16] / Vector_X_Stream[16] 已经没有第 16 个 core 消费。
         // Destroy_* 常驻读取尾流，防止最后一级 core 写满 FIFO 后反压整条链。
-        .invoke<tapa::detach>(Destroy_int, PE_Param[HBM_CHANNEL_NUM])
-        .invoke<tapa::detach>(Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM])
+        .invoke(Pcg_Destroy_int, PE_Param[HBM_CHANNEL_NUM])
+        .invoke(Pcg_Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
         // Cuper 输出端：累加各 PE 部分和，过滤 padding，排序/拼包后直接
         // 回到 PCG controller，而不是像 Cuper(...) 那样写回 Y_out HBM。
-        .invoke<tapa::detach, HBM_CHANNEL_NUM>(Pcg_Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
-        .invoke<tapa::detach, 8>(Pcg_Vector_Checker, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck)
-        .invoke<tapa::detach>(Mult_Sort_Tree, Vector_Y_Stream_Aftck, Pcg_Spmv_Stream)
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
+        .invoke<tapa::join, 8>(Pcg_Vector_Checker, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck, Checker_Stop_Stream)
+        .invoke(Pcg_Mult_Sort_Tree, Vector_Y_Stream_Aftck, Pcg_Spmv_Stream, Sort_Stop_Stream)
     ;
 }

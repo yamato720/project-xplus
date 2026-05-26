@@ -61,7 +61,7 @@ BUILD_DIR ?= $(ROOT_DIR)/build
 CUPER_TAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-build
 CUPER_NOTAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-build
 CUPER_NOTAPA_SPMV_4CH_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-4ch-build
-CUPER_TAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-fpga-pcg-build
+CUPER_TAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-fpga-u55c-20260525-build
 CUPER_NOTAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-fpga-pcg-build
 # Compatibility alias for older commands; new no-TAPA FPGA-PCG builds use the
 # explicit cuper-notapa-fpga-pcg-build directory.
@@ -172,6 +172,7 @@ XRT_LDFLAGS += -Wl,-rpath,$(XILINX_XRT)/lib
 TAPA_CXXFLAGS := $(CXXFLAGS) -Wall -Wextra
 TAPA_CXXFLAGS += -I$(INCLUDE_DIR) -I$(HOST_DIR) -I$(SRC_DIR)
 TAPA_CXXFLAGS += -I$(CUPER_DIR)/include -I$(TAPA_ROOT)/include
+TAPA_CXXFLAGS += -I$(XILINX_XRT)/include
 TAPA_CXXFLAGS += -I$(VITIS_HLS_ROOT)/include -I$(VITIS_HLS_ROOT)/common/technology/autopilot
 TAPA_RUNTIME_LIBS := \
 	$(TAPA_ROOT)/lib/libtapa.so \
@@ -371,7 +372,7 @@ $(CUPER_TAPA_PCG_HOST): $(HOST_DIR)/cuper_tapa_pcg_main.cpp $(HOST_DIR)/cuper_pc
 
 $(CUPER_TAPA_PCG_FPGA_HOST): $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(CUPER_DIR)/kernels/Cuper.cpp | tapa-env
 	mkdir -p "$(@D)"
-	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_FPGA_HOST) $(TAPA_LDFLAGS)
+	$(CXX) $(TAPA_CXXFLAGS) $(HOST_DIR)/cuper_tapa_pcg_fpga_main.cpp $(CUPER_DIR)/kernels/Cuper.cpp -o $(CUPER_TAPA_PCG_FPGA_HOST) $(TAPA_LDFLAGS) $(XRT_LDFLAGS)
 
 $(CUPER_NOTAPA_PCG_XRT_HOST): $(HOST_DIR)/cuper_notapa_pcg_xrt_main.cpp $(HOST_DIR)/cuper_pcg_solver.hpp $(HOST_DIR)/pcg_common.hpp $(HOST_DIR)/cuper_control_matrix.hpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(INCLUDE_DIR)/cg_common.hpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp
 	mkdir -p "$(@D)"
@@ -417,8 +418,9 @@ $(CUPER_SPMV_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_c
 $(CUPER_SPMV_4CH_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/cg_common.hpp | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -c $(VPP_FLAGS) -k cuper_packed_spmv_4ch_kernel -o $@ $<
 
-$(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h | $(TARGET_BUILD_DIR) tapa-env
+$(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py | $(TARGET_BUILD_DIR) tapa-env
 	cd "$(CUPER_DIR)" && source scripts/env_u55c.sh && tapa -w "$(TARGET_BUILD_DIR)/tapa_CuperPcg" compile -f kernels/Cuper.cpp -t CuperPcg -p "$(DEVICE)" --clock-period "$(CUPER_TAPA_PCG_CLOCK_PERIOD)" -j "$${JOBS:-$$(nproc)}" --enable-synth-util -c "-I$(CUPER_DIR)/include" -o "$(CUPER_TAPA_PCG_XO)"
+	$(PYTHON) "$(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py" "$(CUPER_TAPA_PCG_XO)" --work-dir "$(TARGET_BUILD_DIR)/tapa_CuperPcg"
 
 $(XCLBIN): $(XOS) $(ARCHIVED_CFG_DIR)/connectivity_u55c.cfg | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) $(VPP_LDFLAGS) -o $@ $(XOS)

@@ -1,4 +1,5 @@
 build/
+*-build/
 build_control_probe/
 cuper-pcg-notapa/
 cuper-tapa-spmv-build/
