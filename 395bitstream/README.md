@@ -13,7 +13,7 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | 文件 | 主线 | PCG 主循环 | SpMV 实现 | 状态 |
 | --- | --- | --- | --- | --- |
 | `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
-| `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-25 22:45 deadlock-fix 版，全流程 FPGA PCG |
+| `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 
@@ -24,9 +24,13 @@ cuper-tapa-pcg-fpga-u55c-20260525.xclbin
 ```
 
 这版是 `CuperPcg`，即保留 TAPA Cuper SpMV task graph，同时把 PCG 初始化、
-迭代、`alpha/beta`、向量更新和收敛判断放进 FPGA kernel。构建时钟目标
-300 MHz，当前归档版最终 xclbin info 中 DATA clock 为 212.4 MHz，KERNEL
-clock 为 500 MHz，HBM clock 为 450 MHz。
+迭代、`alpha/beta`、向量更新和收敛判断放进 FPGA kernel。当前归档版为
+2026-05-26 20:31 生成的 timed-debug build，stage counter 可读。xclbin
+UUID 为 `51132100-b217-df93-f4dd-05bfc169f820`，SHA256 为
+`8733b618312d1d17bee8123e512eec14f0ca831b6eca1372b3c22e6be11ae301`。
+最终 xclbin info 中 DATA clock 为 213 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 437 MHz。替换前版本已归档到
+`bitstream_archive/2026-05-26-tapa-pcg-pre-timed-debug/`。
 
 ## 运行入口
 
