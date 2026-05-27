@@ -49,22 +49,36 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
 5. `395bitstream/` 只保留一个当前 demo 候选槽。新 demo 可以直接覆盖旧 demo
    文件和 `.xclbin.info`，但不能覆盖四条主线标准文件。
-6. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
-   默认复用当前 HTML 和 `docs/bitstream_summaries/` 的记录，除非用户要求、
-   标准 bitstream/host 变化、或 demo 结果与旧记录矛盾。
+6. demo 上板测试默认只跑新 demo 本身；同主线当前标准 bitstream 和其它三条标准
+   bitstream 默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志，不要
+   自动重跑四大标准版本。只有用户要求、标准 bitstream/host 变化、demo 结果与旧记录
+   矛盾，或旧记录缺少同口径失败边界时，才重跑标准/旧基线。
 7. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
    归档，并把 demo 晋级为稳定标准文件名。
 8. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
    `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
 9. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
    `logs/` 目录。
+   HTML 视图口径按 `docs/codex/workflows/reports.md` 执行。
+   对 TAPA full-PCG demo，HTML 的当前诊断段落（例如 `TAPA PCG 分段时间`、
+   `Init 与 1iter 差值`）必须随本轮 demo-only 实测刷新；标准/上一 demo/本 demo
+   的历史对比应放在独立对比块里。
+   其中 SpMV 对比组的标准基准是 standalone TAPA Cuper SpMV 标准曲线
+   `cuper-tapa-spmv-u55c-20260522.xclbin`；一次迭代对比组才使用 TAPA full-PCG
+   标准版的 `1iter kernel_reported`。
+   对从 `CuperPcg` 抠出来的 `cuper-tapa-spmv` 单 SpMV demo，按
+   `cuper-tapa-spmv` 主线 demo 同步；HTML 中标成 PCG SpMV 抽出版，并只进入
+   SpMV 对比组，不进入一次迭代对比组。PCG 诊断和一次迭代区域保留旧数据，但必须
+   标注“本轮未跑 PCG，无 init/1iter 过程/无一次迭代新数据”。
 10. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
    留一份 Markdown 详细总结，并包含：
    - `README.md`：版本摘要和是否建议晋级；
    - `changes.md`：说明“这一版改了什么”；
    - `testing.md`：测试命令、关键输出和失败边界；
    - `code_reading_guide.md`：版本相关代码阅读指南，复杂版本或用户要求时补；
-   - `source.diff`：这一版源码/脚本改动的可逆补丁。
+   - `source.diff`：只在 demo-only 测试确认性能提升，或用户明确要求保留某个
+     功能边界修复补丁后更新。测试失败或性能退步时，不覆盖上一份已验证有效的
+     `source.diff`。
 
 ## 3. 替换后至少记录
 
@@ -89,7 +103,8 @@ SHA256
 
 1. 确认新构建成功，日志里应有 `impl Complete` 或等价成功信息。
 2. 先以 `-demo.xclbin` 形式放入 `395bitstream/`，同步 `.xclbin.info`。
-3. 按 `docs/codex/testing.md` 与同主线当前标准 bitstream 做动态对比。
+3. 按 `docs/codex/testing.md` 先做 demo-only 上板测试，并用已有标准/基线记录做
+   静态对照；不要自动重跑四大标准版本。
 4. 用户明确确认 demo 结果满意后，才进入标准替换流程。
 5. 对新 `.xclbin` 生成或复制 `.xclbin.info`。
 6. 计算新旧文件 `sha256sum`，必要时记录 UUID。

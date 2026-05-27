@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24/27</title>
+  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24/28</title>
   <style>
     :root {
       color-scheme: light;
@@ -276,12 +276,18 @@
     svg .line-tapa-pcg { fill: none; stroke: var(--tapa-pcg); stroke-width: 3; stroke-dasharray: 5 4; }
     svg .line-tapa-pcg-demo { fill: none; stroke: var(--tapa-pcg-demo); stroke-width: 3; }
     svg .line-tapa-init { fill: none; stroke: var(--tapa-init); stroke-width: 3; stroke-dasharray: 2 4; }
+    svg .line-standard { fill: none; stroke: var(--tapa-pcg); stroke-width: 3; stroke-dasharray: 5 4; }
+    svg .line-prev-demo { fill: none; stroke: var(--tapa-pcg-demo); stroke-width: 3; stroke-dasharray: 7 4; }
+    svg .line-current-demo { fill: none; stroke: var(--ok); stroke-width: 3; }
     svg .dot-tapa { fill: var(--tapa); }
     svg .dot-notapa { fill: var(--notapa); }
     svg .dot-pcg { fill: var(--pcg); }
     svg .dot-tapa-pcg { fill: var(--tapa-pcg); }
     svg .dot-tapa-pcg-demo { fill: var(--tapa-pcg-demo); }
     svg .dot-tapa-init { fill: var(--tapa-init); }
+    svg .dot-standard { fill: var(--tapa-pcg); }
+    svg .dot-prev-demo { fill: var(--tapa-pcg-demo); }
+    svg .dot-current-demo { fill: var(--ok); }
     footer {
       color: var(--muted);
       padding: 8px 0 32px;
@@ -307,15 +313,15 @@
         <code>cuper-notapa-spmv-u55c-20260524.xclbin</code> 的单次 SpMV 表现，并加入
         <code>cuper-notapa-pcg-fpga-u55c-20260522.xclbin</code> 的 full-PCG 初始 SpMV 代理结果，
         以及 timed-debug 版 <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>
-        的 TAPA full-PCG 初始收敛代理、一次迭代代理和分段计时结果；2026-05-27 新增
-        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code> 候选版动态对比。
+        的 TAPA full-PCG 初始收敛代理、一次迭代代理和分段计时结果；2026-05-28 补充
+        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code> 当前候选版 demo-only 上板测试。
       </div>
       <div class="meta">
-        <span class="pill">日期 2026-05-24/27 CST</span>
+        <span class="pill">日期 2026-05-24/28 CST</span>
         <span class="pill">设备 xilinx_u55c_gen3x16_xdma_base_3</span>
         <span class="pill">BDF 0000:01:00.1</span>
         <span class="pill">XRT 2.15.225</span>
-        <span class="pill">repo main / 57c7e68 demo test</span>
+        <span class="pill">repo main / a1dcd85 demo-only test</span>
       </div>
     </div>
   </header>
@@ -333,12 +339,12 @@
           <span>no-TAPA single SpMV 与 full-PCG 代理跑通的最大 N</span>
         </div>
         <div class="metric">
-          <strong>262,144</strong>
-          <span>bugfix 后 TAPA full-PCG 一次迭代正常返回的最大 N</span>
+          <strong>1,228,045</strong>
+          <span>当前 demo TAPA full-PCG 一次迭代正常返回的最大 N</span>
         </div>
         <div class="metric">
-          <strong>35.43 / 32.96 ms</strong>
-          <span>TAPA PCG n262144 内部 init SpMV / iter SpMV 分段时间</span>
+          <strong>124.46 / 2.77 ms</strong>
+          <span>当前 demo 完整 thermal2 内部 init SpMV / iter recv 分段时间</span>
         </div>
       </div>
       <p>
@@ -374,14 +380,15 @@
         真实差值为 <code>119.85 ms</code>。
       </p>
       <p>
-        2026-05-27 demo 候选版 <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>
-        已按同数据集、同阈值和同 timeout 动态对比当前标准版。demo 仍只能跑到
-        <code>thermal2_n262144</code>，完整 <code>thermal2</code> 与标准版一样失败在
-        direct-register 运行后的 <code>ctrl=0x0</code>，因此它是性能优化候选，不是百万级规模修复。
-        性能上，<code>thermal2_n262144</code> 的 1iter <code>kernel_reported</code>
-        从 <code>188.709 ms</code> 降到 <code>182.564 ms</code>，其中
-        <code>iter_spmv</code> 从 <code>32.958 ms</code> 降到 <code>27.130 ms</code>；
-        SpMV 接收路径优化有效，但端到端 1iter 只快约 <code>3.3%</code>。
+        当前 2026-05-27 demo 候选版 <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>
+        已按用户要求只跑新上传 demo。<code>thermal2_n16</code>、<code>thermal2_n65536</code>、
+        <code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整
+        <code>thermal2</code> 的 init-only / 1iter 全部返回，完整规模也从启动前
+        <code>ctrl=0x4</code> 到完成后 <code>ctrl=0xe</code>。这是功能边界上的正向变化；
+        但性能上，<code>thermal2_n262144</code> 的 1iter <code>kernel_reported=416.649 ms</code>，
+        完整 <code>thermal2</code> 为 <code>1887.448 ms</code>，主要开销在
+        <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>，
+        暂不建议作为当前 SpMV 性能目标的标准替换版。
       </p>
     </section>
 
@@ -426,7 +433,7 @@ make run-cuper-pcg-tapa-fpga \
           <p>no-TAPA 的 <code>spmv_avg</code> 来自 host 端包住 <code>run.wait()</code> 的 wall time；<code>xrt_setup</code>、BO setup、H2D/D2H 单独列出。</p>
           <p>TAPA 的 <code>spmv_avg</code> 来自 <code>tapa::invoke</code> 返回的 kernel 时间；TAPA runtime 打印的 load/opencl 日志不直接计入这个值。</p>
           <p>full-PCG 代理的 <code>pcg_proxy_ms</code> 来自 <code>[timing-ms] kernel=...</code>，包含初始 Cuper packed SpMV 和向量初始化，不能和 single-SpMV 的 <code>spmv_avg</code> 当作完全同口径指标。</p>
-          <p>新 TAPA full-PCG 的 <code>tapa_pcg_init_ms</code> 和 <code>tapa_pcg_1iter_ms</code> 均来自 <code>[timing-ms] kernel_reported=...</code>；分段时间来自 <code>[stage-ms]</code>，可以拆出 controller 内部 init SpMV、iter SpMV 和总控制时间。host wall time 另含 xclbin load/runtime 同步开销，不用于总表。</p>
+          <p>新 TAPA full-PCG 的 <code>tapa_pcg_init_ms</code> 和 <code>tapa_pcg_1iter_ms</code> 均来自 <code>[timing-ms] kernel_reported=...</code>；分段时间来自 <code>[stage-ms]</code>，本 demo 需要把 <code>iter recv</code> 和 <code>dot_p_ap</code> 合看为 <code>AP path</code>。host wall time 另含 xclbin load/runtime 同步开销，不用于总表。</p>
           <div class="callout">
             大数据 TAPA SpMV 未返回发生在 <code>--spmv-only</code> 路径，不是 host 端 PCG 全流程被砍掉后才进入的路径；本轮表现为 <code>thermal2_n262144</code> 和完整 <code>thermal2</code> 180s 超时。
             timed-debug 版 TAPA full-PCG 已能返回到 <code>thermal2_n262144</code>，且 stage counter 有效；完整 <code>thermal2</code> 两种 PCG 口径重测时控制寄存器都保持 <code>0x0</code> 未完成。
@@ -491,10 +498,10 @@ make run-cuper-pcg-tapa-fpga \
               <td><span class="tag tapa-pcg-demo">TAPA full-PCG demo</span></td>
               <td><code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code></td>
               <td><code>CuperPcg</code></td>
-              <td><code>9474ef8e-571b-ae13-f898-890e3af8ae5e</code></td>
+              <td><code>cc61e044-06f7-4726-8f18-773ac52ab1b2</code></td>
               <td class="num">216 MHz</td>
               <td class="num">450 MHz</td>
-              <td><code>440d6969ff869d47aae5b12ab6d86d51b80794c07445799599ae13594a9166c5</code></td>
+              <td><code>add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb</code></td>
             </tr>
           </tbody>
         </table>
@@ -632,7 +639,7 @@ make run-cuper-pcg-tapa-fpga \
               <td class="num">169.1891</td>
               <td class="num">failed</td>
               <td class="num">failed</td>
-              <td><span class="tag warntag">full-size failed</span> TAPA SpMV 180s timeout; no-TAPA 4ch max_rel_diff 4.49e-05; proxy ok; TAPA init and 1iter both ctrl stayed 0x0 after start</td>
+              <td><span class="tag warntag">standard full-size failed</span> TAPA SpMV 180s timeout; no-TAPA 4ch max_rel_diff 4.49e-05; proxy ok; 标准 TAPA init/1iter 均为 ctrl=0x0；当前 demo 见下方 demo-only 表</td>
             </tr>
           </tbody>
         </table>
@@ -640,12 +647,13 @@ make run-cuper-pcg-tapa-fpga \
     </section>
 
     <section>
-      <h2>2026-05-27 Demo 动态对比</h2>
+      <h2>2026-05-28 Demo-Only 测试</h2>
       <p>
-        按 <code>docs/codex/testing.md</code>，demo 版先与同主线当前标准版动态对比。
-        本节使用日志 <code>logs/codex_bitstream_test_20260527_165723/</code>。
-        标准版为 <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>，demo 版为
-        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>。
+        本节只记录当前新上传 demo 的实测结果，日志位于
+        <code>logs/codex_demo_only_test_20260528_005152/</code>。测试对象为
+        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>，UUID
+        <code>cc61e044-06f7-4726-8f18-773ac52ab1b2</code>。
+        本轮开始时曾误跑部分标准版，相关日志不作为本节结论。
       </p>
       <div class="table-wrap">
         <table>
@@ -653,53 +661,48 @@ make run-cuper-pcg-tapa-fpga \
             <tr>
               <th>Dataset</th>
               <th>Mode</th>
-              <th class="num">standard kernel</th>
               <th class="num">demo kernel</th>
-              <th class="num">kernel delta</th>
-              <th class="num">ctrl delta</th>
-              <th class="num">init SpMV delta</th>
-              <th class="num">iter SpMV delta</th>
+              <th class="num">controller</th>
+              <th class="num">init SpMV</th>
+              <th class="num">iter recv</th>
+              <th class="num">dot_p_ap</th>
+              <th class="num">update_xr</th>
+              <th class="num">update_p</th>
               <th>状态</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td>init</td><td class="num">15.2796</td><td class="num">14.9482</td><td class="num">-0.3314</td><td class="num">+0.0001</td><td class="num">+0.0003</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n16</code></td><td>1iter</td><td class="num">15.1253</td><td class="num">14.9260</td><td class="num">-0.1994</td><td class="num">+0.0006</td><td class="num">+0.0002</td><td class="num">-0.0007</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n1024</code></td><td>init</td><td class="num">15.2612</td><td class="num">11.4590</td><td class="num">-3.8022</td><td class="num">-0.0006</td><td class="num">-0.0009</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n1024</code></td><td>1iter</td><td class="num">11.5733</td><td class="num">11.4336</td><td class="num">-0.1397</td><td class="num">-0.0064</td><td class="num">-0.0004</td><td class="num">-0.0264</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n4096</code></td><td>init</td><td class="num">11.5939</td><td class="num">11.5385</td><td class="num">-0.0554</td><td class="num">-0.0043</td><td class="num">-0.0045</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n4096</code></td><td>1iter</td><td class="num">13.8296</td><td class="num">14.2865</td><td class="num">+0.4569</td><td class="num">-0.0186</td><td class="num">-0.0044</td><td class="num">-0.0927</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n16384</code></td><td>init</td><td class="num">14.5889</td><td class="num">14.3227</td><td class="num">-0.2662</td><td class="num">-0.0176</td><td class="num">-0.0175</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n16384</code></td><td>1iter</td><td class="num">22.1985</td><td class="num">22.1463</td><td class="num">-0.0521</td><td class="num">-0.0735</td><td class="num">-0.0180</td><td class="num">-0.3660</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td>init</td><td class="num">25.1722</td><td class="num">25.4454</td><td class="num">+0.2732</td><td class="num">-0.0733</td><td class="num">-0.0731</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td>1iter</td><td class="num">55.8179</td><td class="num">54.4713</td><td class="num">-1.3466</td><td class="num">-0.2927</td><td class="num">-0.0717</td><td class="num">-1.4586</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td>init</td><td class="num">40.0852</td><td class="num">38.9005</td><td class="num">-1.1847</td><td class="num">-0.1468</td><td class="num">-0.1471</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td>1iter</td><td class="num">99.7943</td><td class="num">96.5312</td><td class="num">-3.2631</td><td class="num">-0.5832</td><td class="num">-0.1460</td><td class="num">-2.9160</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td>init</td><td class="num">68.8579</td><td class="num">66.3774</td><td class="num">-2.4805</td><td class="num">-0.2950</td><td class="num">-0.2953</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td>1iter</td><td class="num">188.7094</td><td class="num">182.5644</td><td class="num">-6.1449</td><td class="num">-1.1781</td><td class="num">-0.2915</td><td class="num">-5.8276</td><td><span class="tag oktag">ok</span></td></tr>
-            <tr><td><code>thermal2</code></td><td>init</td><td class="num">failed</td><td class="num">failed</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td><span class="tag warntag">ctrl=0x0</span></td></tr>
-            <tr><td><code>thermal2</code></td><td>1iter</td><td class="num">failed</td><td class="num">failed</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td><span class="tag warntag">ctrl=0x0</span></td></tr>
+            <tr><td><code>thermal2_n16</code></td><td>init</td><td class="num">14.7369</td><td class="num">0.0044</td><td class="num">0.0020</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td>1iter</td><td class="num">11.1677</td><td class="num">0.0192</td><td class="num">0.0020</td><td class="num">0.0007</td><td class="num">0.0017</td><td class="num">0.0062</td><td class="num">0.0051</td><td><span class="tag oktag">ok</span> max_abs_diff 1.09e-08</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td>init</td><td class="num">32.3798</td><td class="num">15.1425</td><td class="num">6.6416</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td>1iter</td><td class="num">112.3167</td><td class="num">71.9071</td><td class="num">6.6408</td><td class="num">0.1465</td><td class="num">6.8470</td><td class="num">27.2012</td><td class="num">21.4884</td><td><span class="tag oktag">ok</span> max_abs_diff 7.50e-10</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td>init</td><td class="num">53.5494</td><td class="num">30.2821</td><td class="num">13.2807</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td>1iter</td><td class="num">213.5826</td><td class="num">143.8117</td><td class="num">13.2827</td><td class="num">0.2924</td><td class="num">13.6951</td><td class="num">54.4024</td><td class="num">42.9742</td><td><span class="tag oktag">ok</span> max_abs_diff 2.33e-10</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td>init</td><td class="num">97.0455</td><td class="num">60.5679</td><td class="num">26.5658</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td>1iter</td><td class="num">416.6492</td><td class="num">287.6244</td><td class="num">26.5681</td><td class="num">0.5862</td><td class="num">27.3892</td><td class="num">108.8046</td><td class="num">85.9482</td><td><span class="tag oktag">ok</span> max_abs_diff 5.40e-10</td></tr>
+            <tr><td><code>thermal2</code></td><td>init</td><td class="num">414.5353</td><td class="num">283.7481</td><td class="num">124.4632</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
+            <tr><td><code>thermal2</code></td><td>1iter</td><td class="num">1887.4481</td><td class="num">1329.0066</td><td class="num">124.4663</td><td class="num">2.7665</td><td class="num">132.7367</td><td class="num">486.8336</td><td class="num">402.6350</td><td><span class="tag oktag">ok</span> max_abs_diff 1.17e-09</td></tr>
           </tbody>
         </table>
       </div>
       <p>
-        结论：demo 的收益集中在第二轮 <code>A*p</code> 的 SpMV 接收路径，规模越大越明显；
-        <code>thermal2_n262144</code> 的 <code>iter_spmv</code> 快约 <code>5.83 ms</code>。
-        但完整 1iter 只快 <code>6.14 ms</code>，说明非 SpMV 的 controller/service 路径仍占主要增量。
-        demo 没有改变完整 <code>thermal2</code> 的失败边界，所以不能直接晋级替换标准版，除非只按性能候选接受。
+        结论：当前 demo 改变了完整 <code>thermal2</code> 的返回边界，init-only 和 1iter
+        均能完成并通过数值校验；但它不是性能胜出版本。大规模下主要耗时在
+        <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>。
+        表中的 <code>iter recv</code> 是 packed AP 接收/缓存段，不等同于完整 SpMV。
       </p>
     </section>
 
     <section>
       <h2>趋势图</h2>
       <p>纵轴是 kernel 时间，采用 log10(ms) 便于把小矩阵和大矩阵放在同一张图里。full-PCG proxy 和 TAPA init-proxy 是初始 SpMV 代理，TAPA full-PCG 1iter 是一次迭代代理。</p>
+      <p>注意：这张趋势图画的是 2026-05-24 到 2026-05-26 已归档的标准/基线数据，不包含 2026-05-28 当前 demo-only 新测数据；当前 demo 结果以上方 Demo-Only 表为准。</p>
       <div class="legend">
         <span><i style="background: var(--tapa);"></i>TAPA</span>
         <span><i style="background: var(--notapa);"></i>no-TAPA</span>
         <span><i style="background: var(--pcg);"></i>full-PCG proxy</span>
         <span><i style="background: var(--tapa-init);"></i>TAPA init-proxy</span>
         <span><i style="background: var(--tapa-pcg);"></i>TAPA full-PCG 1iter</span>
-        <span><i style="background: var(--tapa-pcg-demo);"></i>TAPA full-PCG demo 1iter</span>
       </div>
       <div class="svg-wrap">
         <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="Average SpMV time trend">
@@ -723,7 +726,6 @@ make run-cuper-pcg-tapa-fpga \
           <polyline class="line-pcg" points="70,241 193,220 316,197 439,167 562,134 685,117 808,101 930,63"></polyline>
           <polyline class="line-tapa-init" points="70,122 193,128 316,129 439,123 562,109 685,98 808,85"></polyline>
           <polyline class="line-tapa-pcg" points="70,122 193,128 316,124 439,113 562,91 685,76 808,61"></polyline>
-          <polyline class="line-tapa-pcg-demo" points="70,122 193,129 316,123 439,113 562,91 685,77 808,61"></polyline>
 
           <circle class="dot-notapa" cx="70" cy="221" r="4"></circle>
           <circle class="dot-notapa" cx="193" cy="212" r="4"></circle>
@@ -766,14 +768,6 @@ make run-cuper-pcg-tapa-fpga \
           <circle class="dot-tapa-pcg" cx="685" cy="76" r="4"></circle>
           <circle class="dot-tapa-pcg" cx="808" cy="61" r="4"></circle>
 
-          <circle class="dot-tapa-pcg-demo" cx="70" cy="122" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="193" cy="129" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="316" cy="123" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="439" cy="113" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="562" cy="91" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="685" cy="77" r="3"></circle>
-          <circle class="dot-tapa-pcg-demo" cx="808" cy="61" r="3"></circle>
-
           <text x="52" y="325">16</text>
           <text x="169" y="325">1,024</text>
           <text x="292" y="325">4,096</text>
@@ -789,7 +783,8 @@ make run-cuper-pcg-tapa-fpga \
     <section>
       <h2>TAPA PCG 分段时间</h2>
       <p>
-        下表来自 timed-debug 版 <code>[stage-ms]</code>。<code>kernel_reported</code>
+        下表来自当前 demo-only 测试的 timed-debug <code>[stage-ms]</code>，数据源为
+        <code>logs/codex_demo_only_test_20260528_005152/</code>。<code>kernel_reported</code>
         是 host 侧 direct-register 计到的 kernel 时间；<code>controller_total</code>
         是 FPGA controller 内部计时。两者差值主要来自 TAPA task graph service、启动/停止同步、
         流水 drain 和当前计数覆盖不到的外围路径。
@@ -804,28 +799,35 @@ make run-cuper-pcg-tapa-fpga \
               <th class="num">init ctrl</th>
               <th class="num">1iter ctrl</th>
               <th class="num">init SpMV</th>
-              <th class="num">iter SpMV</th>
+              <th class="num">iter recv</th>
+              <th class="num">dot_p_ap</th>
+              <th class="num">AP path</th>
+              <th class="num">update_xr</th>
+              <th class="num">update_p</th>
               <th class="num">ctrl delta</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">14.9964</td><td class="num">14.9905</td><td class="num">0.0035</td><td class="num">0.0096</td><td class="num">0.0025</td><td class="num">0.0020</td><td class="num">0.0061</td></tr>
-            <tr><td><code>thermal2_n1024</code></td><td class="num">11.5716</td><td class="num">11.7261</td><td class="num">0.1571</td><td class="num">0.4806</td><td class="num">0.1392</td><td class="num">0.1280</td><td class="num">0.3235</td></tr>
-            <tr><td><code>thermal2_n4096</code></td><td class="num">11.3828</td><td class="num">13.8168</td><td class="num">0.6228</td><td class="num">1.9149</td><td class="num">0.5546</td><td class="num">0.5123</td><td class="num">1.2921</td></tr>
-            <tr><td><code>thermal2_n16384</code></td><td class="num">14.5852</td><td class="num">22.2673</td><td class="num">2.4874</td><td class="num">7.6622</td><td class="num">2.2159</td><td class="num">2.0582</td><td class="num">5.1749</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">25.3854</td><td class="num">54.5996</td><td class="num">9.9404</td><td class="num">30.6452</td><td class="num">8.8584</td><td class="num">8.2380</td><td class="num">20.7047</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">39.8743</td><td class="num">99.8461</td><td class="num">19.8779</td><td class="num">61.2868</td><td class="num">17.7141</td><td class="num">16.4798</td><td class="num">41.4088</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">68.9655</td><td class="num">188.8202</td><td class="num">39.7527</td><td class="num">122.5640</td><td class="num">35.4265</td><td class="num">32.9573</td><td class="num">82.8113</td></tr>
-            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">failed</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">14.7369</td><td class="num">11.1677</td><td class="num">0.0044</td><td class="num">0.0192</td><td class="num">0.0020</td><td class="num">0.0007</td><td class="num">0.0017</td><td class="num">0.0024</td><td class="num">0.0062</td><td class="num">0.0051</td><td class="num">0.0148</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">32.3798</td><td class="num">112.3167</td><td class="num">15.1425</td><td class="num">71.9071</td><td class="num">6.6416</td><td class="num">0.1465</td><td class="num">6.8470</td><td class="num">6.9935</td><td class="num">27.2012</td><td class="num">21.4884</td><td class="num">56.7646</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">53.5494</td><td class="num">213.5826</td><td class="num">30.2821</td><td class="num">143.8117</td><td class="num">13.2807</td><td class="num">0.2924</td><td class="num">13.6951</td><td class="num">13.9875</td><td class="num">54.4024</td><td class="num">42.9742</td><td class="num">113.5296</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">97.0455</td><td class="num">416.6492</td><td class="num">60.5679</td><td class="num">287.6244</td><td class="num">26.5658</td><td class="num">0.5862</td><td class="num">27.3892</td><td class="num">27.9754</td><td class="num">108.8046</td><td class="num">85.9482</td><td class="num">227.0565</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">414.5353</td><td class="num">1887.4481</td><td class="num">283.7481</td><td class="num">1329.0066</td><td class="num">124.4632</td><td class="num">2.7665</td><td class="num">132.7367</td><td class="num">135.5032</td><td class="num">486.8336</td><td class="num">402.6350</td><td class="num">1045.2585</td></tr>
           </tbody>
         </table>
       </div>
+      <p>
+        注意：本 demo 改了分段边界，<code>iter recv</code> 只覆盖 packed
+        <code>AP</code> 接收/缓存，不等于旧标准版里的完整第二轮 SpMV 相关代价。
+        同口径看第二轮 <code>A*p</code> 路径时，应至少把 <code>iter recv + dot_p_ap</code>
+        合在一起看作 <code>AP path</code>。
+      </p>
     </section>
 
     <section>
       <h2>Init 与 1iter 差值</h2>
       <p>
-        差值用同一 timed-debug bitstream 的 <code>1iter kernel_reported - init-only kernel_reported</code>
+        差值用当前 demo 的 <code>1iter kernel_reported - init-only kernel_reported</code>
         计算。这个差值不是纯 SpMV，它包含第二次 <code>A*p</code>、<code>p^T A p</code>
         累加、<code>AP</code> 写回、<code>x/r/z/p</code> 更新、<code>rz/rr</code>
         归约和 controller 运行开销；但可作为一次迭代额外代价的真实上界。
@@ -839,29 +841,198 @@ make run-cuper-pcg-tapa-fpga \
               <th class="num">1iter ms</th>
               <th class="num">kernel delta</th>
               <th class="num">controller delta</th>
-              <th class="num">iter SpMV</th>
+              <th class="num">iter recv</th>
               <th class="num">1iter / init</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">14.9964</td><td class="num">14.9905</td><td class="num">-0.0059</td><td class="num">0.0061</td><td class="num">0.0020</td><td class="num">1.00x</td></tr>
-            <tr><td><code>thermal2_n1024</code></td><td class="num">11.5716</td><td class="num">11.7261</td><td class="num">0.1544</td><td class="num">0.3235</td><td class="num">0.1280</td><td class="num">1.01x</td></tr>
-            <tr><td><code>thermal2_n4096</code></td><td class="num">11.3828</td><td class="num">13.8168</td><td class="num">2.4340</td><td class="num">1.2921</td><td class="num">0.5123</td><td class="num">1.21x</td></tr>
-            <tr><td><code>thermal2_n16384</code></td><td class="num">14.5852</td><td class="num">22.2673</td><td class="num">7.6821</td><td class="num">5.1749</td><td class="num">2.0582</td><td class="num">1.53x</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">25.3854</td><td class="num">54.5996</td><td class="num">29.2141</td><td class="num">20.7047</td><td class="num">8.2380</td><td class="num">2.15x</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">39.8743</td><td class="num">99.8461</td><td class="num">59.9718</td><td class="num">41.4088</td><td class="num">16.4798</td><td class="num">2.50x</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">68.9655</td><td class="num">188.8202</td><td class="num">119.8547</td><td class="num">82.8113</td><td class="num">32.9573</td><td class="num">2.74x</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">14.7369</td><td class="num">11.1677</td><td class="num">-3.5692</td><td class="num">0.0148</td><td class="num">0.0007</td><td class="num">0.76x</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">32.3798</td><td class="num">112.3167</td><td class="num">79.9369</td><td class="num">56.7646</td><td class="num">0.1465</td><td class="num">3.47x</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">53.5494</td><td class="num">213.5826</td><td class="num">160.0332</td><td class="num">113.5296</td><td class="num">0.2924</td><td class="num">3.99x</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">97.0455</td><td class="num">416.6492</td><td class="num">319.6037</td><td class="num">227.0565</td><td class="num">0.5862</td><td class="num">4.29x</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">414.5353</td><td class="num">1887.4481</td><td class="num">1472.9128</td><td class="num">1045.2585</td><td class="num">2.7665</td><td class="num">4.55x</td></tr>
           </tbody>
         </table>
       </div>
       <p>
-        评价：在 <code>N=262,144</code> 上，controller 内部 init SpMV 为
-        <code>35.43 ms</code>，iter SpMV 为 <code>32.96 ms</code>，二者接近；
-        1iter 相比 init-only 的 controller 增量是 <code>82.81 ms</code>，
-        说明额外一轮 PCG 的主要代价不只是第二次 SpMV，还包括 AP 消费/写回、
-        FP64 归约和向量更新等 controller 周边开销。相比 standalone TAPA SpMV 的
-        <code>sub-ms</code> 级别，full-PCG 内嵌 SpMV 的服务化路径仍是主要优化目标。
+        评价：raw <code>iter_spmv</code> 在本 demo 里只是 packed <code>AP</code>
+        接收/缓存段，不能单独拿来和标准版完整 <code>iter SpMV</code> 横比。
+        完整 <code>thermal2</code> 上同口径 <code>AP path</code> 为
+        <code>2.77 + 132.74 = 135.50 ms</code>；同时 controller 增量为
+        <code>1045.26 ms</code>，说明一次迭代倒挂主要来自 <code>update_xr</code>、
+        <code>update_p</code> 以及其他 controller/service 收尾开销。
       </p>
+    </section>
+
+    <section>
+      <h2>标准 / 上一 demo / 本 demo 对比</h2>
+      <p>
+        本块把标准、上一 demo、本 demo 放在一起。SpMV 组的“标准”按当前性能目标使用
+        standalone <code>cuper-tapa-spmv-u55c-20260522.xclbin</code>，也就是四条标准曲线里
+        最低的 TAPA Cuper SpMV 曲线；一次迭代组的“标准”仍使用
+        <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code> 的 full-PCG 1iter 记录。
+        上一 demo 是 receive-path demo <code>9474ef8e-571b-ae13-f898-890e3af8ae5e</code>；
+        本 demo 是 2026-05-28 demo-only 新测的 packed feed/AP 记录。折线图为 log10(ms)。
+      </p>
+
+      <h3>SpMV / AP 路径对比</h3>
+      <p>
+        图中标准曲线是 standalone TAPA Cuper SpMV <code>spmv_avg</code>。上一 demo 使用
+        full-PCG 内嵌 <code>iter SpMV</code> 分段；本 demo 因分段边界改变，使用
+        <code>iter recv + dot_p_ap</code> 作为 <code>AP path</code>。raw
+        <code>iter recv</code> 仍在表中保留，但不能单独当作 SpMV 性能结论。
+      </p>
+      <div class="legend">
+        <span><i style="background: var(--tapa);"></i>TAPA Cuper SpMV 标准</span>
+        <span><i style="background: var(--tapa-pcg-demo);"></i>上一 demo</span>
+        <span><i style="background: var(--ok);"></i>本 demo</span>
+      </div>
+      <div class="svg-wrap">
+        <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="TAPA PCG AP path comparison">
+          <line class="gridline" x1="70" y1="20" x2="930" y2="20"></line>
+          <line class="gridline" x1="70" y1="67" x2="930" y2="67"></line>
+          <line class="gridline" x1="70" y1="113" x2="930" y2="113"></line>
+          <line class="gridline" x1="70" y1="160" x2="930" y2="160"></line>
+          <line class="gridline" x1="70" y1="207" x2="930" y2="207"></line>
+          <line class="gridline" x1="70" y1="253" x2="930" y2="253"></line>
+          <line class="gridline" x1="70" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="70" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="70" y1="20" x2="70" y2="300"></line>
+          <text x="13" y="24">1000 ms</text>
+          <text x="20" y="71">100 ms</text>
+          <text x="28" y="117">10 ms</text>
+          <text x="35" y="164">1 ms</text>
+          <text x="29" y="211">0.1 ms</text>
+          <text x="22" y="257">0.01 ms</text>
+          <text x="15" y="304">0.001 ms</text>
+
+          <polyline class="line-tapa" points="70,215 285,200 500,191"></polyline>
+          <polyline class="line-prev-demo" points="70,295 285,121 500,107 715,93"></polyline>
+          <polyline class="line-current-demo" points="70,282 285,121 500,107 715,93 930,61"></polyline>
+
+          <circle class="dot-tapa" cx="70" cy="215" r="4"></circle>
+          <circle class="dot-tapa" cx="285" cy="200" r="4"></circle>
+          <circle class="dot-tapa" cx="500" cy="191" r="4"></circle>
+
+          <circle class="dot-prev-demo" cx="70" cy="295" r="4"></circle>
+          <circle class="dot-prev-demo" cx="285" cy="121" r="4"></circle>
+          <circle class="dot-prev-demo" cx="500" cy="107" r="4"></circle>
+          <circle class="dot-prev-demo" cx="715" cy="93" r="4"></circle>
+
+          <circle class="dot-current-demo" cx="70" cy="282" r="4"></circle>
+          <circle class="dot-current-demo" cx="285" cy="121" r="4"></circle>
+          <circle class="dot-current-demo" cx="500" cy="107" r="4"></circle>
+          <circle class="dot-current-demo" cx="715" cy="93" r="4"></circle>
+          <circle class="dot-current-demo" cx="930" cy="61" r="4"></circle>
+
+          <text x="52" y="325">16</text>
+          <text x="257" y="325">65,536</text>
+          <text x="468" y="325">131,072</text>
+          <text x="683" y="325">262,144</text>
+          <text x="902" y="325">1,228,045</text>
+        </svg>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th class="num">TAPA Cuper SpMV 标准</th>
+              <th class="num">上一 demo init SpMV</th>
+              <th class="num">上一 demo iter SpMV</th>
+              <th class="num">本 demo init SpMV</th>
+              <th class="num">本 demo iter recv</th>
+              <th class="num">本 demo dot_p_ap</th>
+              <th class="num">本 demo AP path</th>
+              <th class="num">AP path / TAPA 标准</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16</code></td><td class="num">0.0670</td><td class="num">0.0028</td><td class="num">0.0013</td><td class="num">0.0020</td><td class="num">0.0007</td><td class="num">0.0017</td><td class="num">0.0024</td><td class="num">0.04x</td><td>小规模固定开销口径不稳定</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">0.1379</td><td class="num">8.7853</td><td class="num">6.7794</td><td class="num">6.6416</td><td class="num">0.1465</td><td class="num">6.8470</td><td class="num">6.9935</td><td class="num">50.71x</td><td>本 demo AP path 仍远慢于 standalone TAPA SpMV</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">0.2197</td><td class="num">17.5670</td><td class="num">13.5638</td><td class="num">13.2807</td><td class="num">0.2924</td><td class="num">13.6951</td><td class="num">13.9875</td><td class="num">63.67x</td><td>这是当前 SpMV 性能目标的主要差距</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">timeout</td><td class="num">35.1312</td><td class="num">27.1297</td><td class="num">26.5658</td><td class="num">0.5862</td><td class="num">27.3892</td><td class="num">27.9754</td><td class="num">-</td><td>TAPA Cuper SpMV 标准 180s 未返回</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">timeout</td><td class="num">failed</td><td class="num">failed</td><td class="num">124.4632</td><td class="num">2.7665</td><td class="num">132.7367</td><td class="num">135.5032</td><td class="num">-</td><td>只有本 demo 完整规模返回</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>一次迭代对比</h3>
+      <p>
+        本组比较 <code>MAX_ITERS=1</code> 的 <code>kernel_reported</code>。它是端到端一次迭代
+        代理，包含 SpMV、AP 写回、dot、向量更新和 controller/service 开销。
+      </p>
+      <div class="legend">
+        <span><i style="background: var(--tapa-pcg);"></i>标准版</span>
+        <span><i style="background: var(--tapa-pcg-demo);"></i>上一 demo</span>
+        <span><i style="background: var(--ok);"></i>本 demo</span>
+      </div>
+      <div class="svg-wrap">
+        <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="TAPA PCG 1iter comparison">
+          <line class="gridline" x1="70" y1="20" x2="930" y2="20"></line>
+          <line class="gridline" x1="70" y1="74" x2="930" y2="74"></line>
+          <line class="gridline" x1="70" y1="133" x2="930" y2="133"></line>
+          <line class="gridline" x1="70" y1="187" x2="930" y2="187"></line>
+          <line class="gridline" x1="70" y1="246" x2="930" y2="246"></line>
+          <line class="gridline" x1="70" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="70" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="70" y1="20" x2="70" y2="300"></line>
+          <text x="13" y="24">3000 ms</text>
+          <text x="13" y="78">1000 ms</text>
+          <text x="20" y="137">300 ms</text>
+          <text x="20" y="191">100 ms</text>
+          <text x="28" y="250">30 ms</text>
+          <text x="28" y="304">10 ms</text>
+
+          <polyline class="line-standard" points="70,280 285,217 500,187 715,156"></polyline>
+          <polyline class="line-prev-demo" points="70,280 285,217 500,189 715,157"></polyline>
+          <polyline class="line-current-demo" points="70,295 285,181 500,150 715,117 930,43"></polyline>
+
+          <circle class="dot-standard" cx="70" cy="280" r="4"></circle>
+          <circle class="dot-standard" cx="285" cy="217" r="4"></circle>
+          <circle class="dot-standard" cx="500" cy="187" r="4"></circle>
+          <circle class="dot-standard" cx="715" cy="156" r="4"></circle>
+
+          <circle class="dot-prev-demo" cx="70" cy="280" r="4"></circle>
+          <circle class="dot-prev-demo" cx="285" cy="217" r="4"></circle>
+          <circle class="dot-prev-demo" cx="500" cy="189" r="4"></circle>
+          <circle class="dot-prev-demo" cx="715" cy="157" r="4"></circle>
+
+          <circle class="dot-current-demo" cx="70" cy="295" r="4"></circle>
+          <circle class="dot-current-demo" cx="285" cy="181" r="4"></circle>
+          <circle class="dot-current-demo" cx="500" cy="150" r="4"></circle>
+          <circle class="dot-current-demo" cx="715" cy="117" r="4"></circle>
+          <circle class="dot-current-demo" cx="930" cy="43" r="4"></circle>
+
+          <text x="52" y="325">16</text>
+          <text x="257" y="325">65,536</text>
+          <text x="468" y="325">131,072</text>
+          <text x="683" y="325">262,144</text>
+          <text x="902" y="325">1,228,045</text>
+        </svg>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th class="num">标准 1iter</th>
+              <th class="num">上一 demo 1iter</th>
+              <th class="num">本 demo 1iter</th>
+              <th class="num">本 demo / 标准</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16</code></td><td class="num">14.9905</td><td class="num">14.9260</td><td class="num">11.1677</td><td class="num">0.75x</td><td>小规模启动抖动占比高</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">54.5996</td><td class="num">54.4713</td><td class="num">112.3167</td><td class="num">2.06x</td><td>本 demo 总迭代变慢</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">99.8461</td><td class="num">96.5312</td><td class="num">213.5826</td><td class="num">2.14x</td><td>update/dot 开销放大</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">188.8202</td><td class="num">182.5644</td><td class="num">416.6492</td><td class="num">2.21x</td><td>上一 demo 较标准略快，本 demo 明显变慢</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">failed</td><td class="num">1887.4481</td><td class="num">-</td><td>本 demo 改善完整规模返回边界</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section>
@@ -888,9 +1059,9 @@ make run-cuper-pcg-tapa-fpga \
       <p><code>TAU=1e100 MAX_ITERS=1</code> init-only 监测也能跑到 <code>thermal2_n262144</code>，所有成功点均为 <code>iter=0</code> 且校验 diff 为 0；<code>thermal2_n262144</code> 的 <code>kernel_reported=68.9655 ms</code>。这条曲线更接近 no-TAPA full-PCG proxy 的测试口径。</p>
       <p>完整 <code>thermal2</code> 本轮 init-only 和 1iter 都失败：direct register 启动后 <code>ctrl</code> 一直为 <code>0x0</code>，55s 后 host 报 <code>direct register run did not complete</code>。timed-debug build 的 routed timing 仍未完全收敛，最差 slack 约 <code>-1.357 ns</code>；但 <code>[stage-work-ticks]</code>、<code>[stage-cycles]</code> 和 <code>[stage-ms]</code> 已能读出有效分段计时，可以用于定位内部瓶颈。</p>
       <h3><span class="tag tapa-pcg-demo">TAPA full-PCG demo</span> cuper-tapa-pcg-fpga-u55c-20260527-demo</h3>
-      <p>这版是 2026-05-27 新编译的性能候选版，作为 demo 放在 <code>395bitstream/</code>，尚未替换当前标准版。它的 UUID 为 <code>9474ef8e-571b-ae13-f898-890e3af8ae5e</code>，DATA/HBM 频率为 <code>216/450 MHz</code>。</p>
-      <p>功能边界与标准版一致：<code>thermal2_n16</code> 到 <code>thermal2_n262144</code> 的 init-only 和 1iter 都能返回，完整 <code>thermal2</code> 两种模式都失败在 direct-register 运行后的 <code>ctrl=0x0</code>。</p>
-      <p>性能结论：<code>thermal2_n262144</code> 1iter 的 <code>kernel_reported</code> 从标准版 <code>188.7094 ms</code> 降到 <code>182.5644 ms</code>；内部 <code>iter_spmv</code> 从 <code>32.9576 ms</code> 降到 <code>27.1300 ms</code>。这证明接收路径优化有效，但总时间降幅只有约 <code>3.3%</code>，剩余瓶颈仍在 controller/service 周边路径和未完全拆开的非 SpMV 开销。</p>
+      <p>这版是 2026-05-27 新编译的 packed feed/AP 候选版，作为 demo 放在 <code>395bitstream/</code>，尚未替换当前标准版。它的 UUID 为 <code>cc61e044-06f7-4726-8f18-773ac52ab1b2</code>，DATA/HBM 频率为 <code>216/450 MHz</code>。</p>
+      <p>2026-05-28 demo-only 测试显示：<code>thermal2_n16</code>、<code>thermal2_n65536</code>、<code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整 <code>thermal2</code> 的 init-only 与 1iter 都能返回，完整规模也是 <code>ctrl 0x4-&gt;0xe</code>。</p>
+      <p>性能结论：这版更像 full-size 功能边界修复候选，不是当前 SpMV 性能目标的标准替换候选。<code>thermal2_n262144</code> 1iter 的 <code>kernel_reported=416.6492 ms</code>，完整 <code>thermal2</code> 为 <code>1887.4481 ms</code>；主要瓶颈在 <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>。</p>
     </section>
 
     <section>
@@ -918,13 +1089,12 @@ make run-cuper-pcg-tapa-fpga \
         当前失败阈值在 <code>N=131,072</code> 与 <code>N=262,144</code> 之间。
       </p>
       <p>
-        新 TAPA full-PCG 路线的收尾同步已经把可返回规模从 <code>N=16</code> 拉到
-        <code>N=262,144</code>；timed-debug 数据显示 full-PCG 内部 init/iter SpMV
-        本身已经是几十毫秒量级。2026-05-27 demo 已把 <code>N=262,144</code>
-        的 <code>iter_spmv</code> 从约 <code>32.96 ms</code> 降到 <code>27.13 ms</code>，
-        但总 1iter 只快约 <code>6.14 ms</code>，下一步优先优化 controller 和 service 化
-        SpMV 周边路径，同时继续查完整 <code>thermal2</code> 的 direct-register
-        <code>ctrl=0x0</code> 卡住问题。
+        新 TAPA full-PCG 路线的当前 demo 已把可返回规模拉到完整
+        <code>thermal2</code>；timed-debug 数据显示 full-PCG 内部 AP path
+        不是唯一瓶颈。2026-05-28 demo-only 测试中，完整 <code>thermal2</code>
+        1iter 的 <code>update_xr=486.83 ms</code>、<code>update_p=402.64 ms</code>、
+        <code>dot_p_ap=132.74 ms</code>，下一步优先查 packed AP/P 后续消费路径和
+        FP64 controller 更新路径。
       </p>
       <p>
         no-TAPA 路线已能拉通百万级数据，可作为继续比较 PCG 全流程和端到端预处理开销的稳定基线。
@@ -944,7 +1114,7 @@ make run-cuper-pcg-tapa-fpga \
     2026-05-26 21:04 TAPA full-PCG init-only 监测日志位于 <code>logs/tapa_pcg_init_proxy_20260526_210421/</code>。
     2026-05-26 22:57 timed-debug TAPA full-PCG 重跑日志位于 <code>logs/tapa_pcg_timed_debug_20260526_225713/</code>，
     旧 TAPA full-PCG bitstream 归档于 <code>bitstream_archive/2026-05-26-tapa-pcg-pre-timed-debug/</code>。
-    2026-05-27 demo 动态对比日志位于 <code>logs/codex_bitstream_test_20260527_165723/</code>，
+    2026-05-28 当前 demo-only 测试日志位于 <code>logs/codex_demo_only_test_20260528_005152/</code>，
     demo bitstream 为 <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>。
     本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
   </footer>

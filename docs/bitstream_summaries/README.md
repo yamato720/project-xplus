@@ -21,15 +21,19 @@ YYYY-MM-DD-<主线>-<简短说明>/
 
 - `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：当前持续目标目录。
   目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
-  Cuper SpMV。后续围绕这个目标的源码改动、demo bitstream、测试结论和
-  `source.diff` 都继续写入该目录，不再为每个小 demo 新建目录。
+  Cuper SpMV。当前 demo 策略是先把 `CuperPcg` 里的 PCG 服务化 SpMV 抠出来，
+  做成 `cuper-tapa-spmv` 单 SpMV demo 单独测试；确认有效后再回填 full-PCG。
+  后续围绕这个目标的源码改动说明、demo bitstream 和测试结论都继续写入该目录，
+  不再为每个小 demo 新建目录；正式 `source.diff` 只有在测试确认性能提升，或用户
+  明确要求保留功能边界修复补丁后才更新。
 
 该目标目录内同时保留历史阶段：
 
 - `receive_path_demo.md` / `receive_path_changes.md` / `receive_path_source.diff`：
   旧 receive-path demo 的历史记录；
-- `README.md` / `changes.md` / `testing.md` / `source.diff`：
-  当前最新候选状态。
+- `README.md` / `changes.md` / `testing.md`：
+  当前最新 demo/尝试状态；
+- `source.diff`：最新经过测试确认有效的候选补丁，不是每轮 demo 的自动快照。
 
 每个版本目录至少包含：
 
@@ -38,12 +42,18 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `testing.md`：测试命令、数据集、关键输出、失败边界、待补项目。
 - `code_reading_guide.md`：版本相关代码阅读指南。只在该版源码较复杂或用户
   要求研究代码时补充，避免把版本特有解释散落到全局设计文档。
-- `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
-  用于以后复现或回退源码改动，避免在 Markdown 里粘贴大段源码。
+- `source.diff`：测试确认性能提升后才提供/更新的可逆补丁，用于以后复现或回退
+  已验证有效的源码改动，避免在 Markdown 里粘贴大段源码。若只是测试失败、
+  性能退步或未确认收益的探索版，只记录 Markdown/HTML 结论，不覆盖现有
+  `source.diff`。
 
 ## diff 文件规则
 
-`source.diff` 只记录源码和脚本改动，不记录 `.xclbin`、build 产物、日志等大文件。
+先测试，后写 diff。`source.diff` 只记录源码和脚本改动，不记录 `.xclbin`、
+build 产物、日志等大文件。生成或覆盖正式 `source.diff` 前，必须已经在板上完成
+对应 demo-only 测试，并确认核心性能指标比标准/上一 demo 的同口径记录更好；仅仅
+“能跑更大规模”不等价于性能提升。
+
 生成方式示例：
 
 ```bash

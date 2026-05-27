@@ -11,6 +11,18 @@
 这会让 full-PCG 内嵌 SpMV 明显慢于 standalone `cuper-tapa-spmv`，也是当前优化
 目标优先处理的周边路径。
 
+当前后续方向已经调整：不要继续直接把每个 SpMV 改动塞进 full-PCG demo 里测。
+先把 `CuperPcg` 内部的 PCG 服务化 SpMV 路径抠出来，做成 `cuper-tapa-spmv`
+单 SpMV demo 单独测试。这样可以把 SpMV 本体、vector feed、AP 回收和
+controller/dot/update 开销拆开看。
+
+代码里要明确区分两套 SpMV：
+
+| 形态 | 入口/文件 | 作用 |
+| --- | --- | --- |
+| 满血 Cuper SpMV | `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` | 当前 standalone TAPA Cuper SpMV 标准基准 |
+| PCG 服务化 SpMV | `CuperPcg(...)` / `detail/pcg_spmv_service.hpp` | 为 PCG 重复触发、stop token、stage 计时和 TAPA 编译约束调整过的路径，当前要抽出来做单 SpMV demo |
+
 ## 代码改动
 
 ### packed 输入向量
@@ -83,8 +95,15 @@
 1. tmux 中 `hw` 构建成功结束。
 2. xclbin 已以 `-demo` 后缀放入 `395bitstream/`，覆盖当前 demo 槽位。
 3. `.xclbin.info`、UUID、SHA256、DATA/HBM clock 已记录到 `testing.md`。
+4. 2026-05-28 按用户要求完成 demo-only 上板测试，并更新
+   `testing.md` 与 `395bitstream/cuper_spmv_u55c_compare_20260524.html`。
 
 仍需完成：
 
-1. 按 `testing.md` 对比当前标准版并更新本目录 `testing.md`。
-2. 同步更新 `395bitstream/cuper_spmv_u55c_compare_20260524.html` 或新的 HTML 报告。
+1. 先做 PCG 抽出版 `cuper-tapa-spmv` 单 SpMV demo，跑 single SpMV 数据集，
+   和满血 `cuper-tapa-spmv-u55c-20260522.xclbin` 的 `spmv_avg`、timeout 边界和
+   diff 对比。
+2. 若单 SpMV demo 确认接近或优于满血 Cuper，再把这条路径回填 `CuperPcg`，
+   重新跑 full-PCG init/1iter。
+3. 回填后再分析 `dot_p_ap`、`update_xr`、`update_p` 的大规模退化；不要用这些
+   controller 阶段开销掩盖 SpMV 本体结论。

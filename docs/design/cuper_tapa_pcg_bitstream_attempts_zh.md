@@ -602,9 +602,11 @@ routing 走到后段
 
 ## 当前结论
 
-`cuper-tapa-spmv-u55c-20260522.xclbin` 的性能优势来自原 TAPA Cuper SpMV 数据流。现在要做的
-不是继续优化已经可用的 host-PCG 对照版，而是把 FPGA 内 PCG 做到不破坏
-TAPA Cuper 的布线和吞吐。
+`cuper-tapa-spmv-u55c-20260522.xclbin` 的性能优势来自原 TAPA Cuper SpMV 数据流。
+当前要做的不是继续优化已经可用的 host-PCG 对照版，也不是每次都先做 full-PCG
+bitstream；而是先把 `CuperPcg` 内为了重复触发和编译约束调整过的 SpMV 服务路径
+抽成 `cuper-tapa-spmv` 单 SpMV demo，单独确认它是否接近满血 Cuper，再回填到
+FPGA 内 PCG，避免 PCG controller/dot/update 开销掩盖 SpMV 本体问题。
 
 截至本文记录，TAPA CuperPcg 全 FPGA 版已经在 U55C 上生成 bitstream：
 
@@ -613,4 +615,5 @@ TAPA Cuper 的布线和吞吐。
 ```
 
 这版功能上软件仿真通过，硬件实现 route/timing 也通过。后续重点从“能否
-route”切换为服务器实测性能和 `consume_ap` / FPGA 内 PCG 向量阶段优化。
+route”切换为 PCG 抽出版 single SpMV demo 的服务器实测性能；只有该 SpMV 路径
+确认有效后，才继续看 `consume_ap` / FPGA 内 PCG 向量阶段优化。

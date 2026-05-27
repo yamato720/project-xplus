@@ -16,8 +16,9 @@
 
 - 这里测的是 Cuper 路线，不是默认 CSR/control-kernel 路线。
 - 有些 timeout / failed 是当前已知边界，不一定是新问题。
-- 旧基线数据默认复用当前 HTML 和 `docs/bitstream_summaries/` 已记录结果，
-  不要每次新 demo 都重跑全部历史 bitstream。
+- 测试新 demo 时，默认只跑新 demo 本身。四条标准 bitstream 和旧基线数据默认
+  复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志；不要每次新 demo
+  都重跑四大标准版本。
 - demo 的测试数据和结论必须写回 `395bitstream/` 下的 HTML 报告；不能只留在
   `logs/` 目录里。
 - `Project-XS/data/README.md` 当前只说明 generated 数据目录；真正用于本轮对比的
@@ -57,13 +58,16 @@ rg -n "UUID|Frequency|Achieved Freq|Kernel:" 395bitstream/*.xclbin.info
 ## 1.1 demo bitstream 对比规则
 
 新生成的 bitstream 不能直接成为标准版。它必须先作为 demo 版放在
-`395bitstream/`，用 `-demo` 后缀命名，并与当前标准版动态对比。
+`395bitstream/`，用 `-demo` 后缀命名。测试时默认采用 demo-only 上板实测，
+再用已有标准/基线记录做静态对照；不要自动重跑四大标准版本。
 
 命名规则：
 
 ```text
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
+395bitstream/cuper-tapa-spmv-u55c-20260527-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260527-demo.xclbin.info
 ```
 
 四条基础版本仍然是唯一分类。任何 demo 都必须属于其中之一：
@@ -77,38 +81,65 @@ cuper-notapa-spmv
 
 对比规则：
 
-1. demo 版先和同主线当前标准 bitstream 对比。例如新的
-   `cuper-tapa-pcg-...-demo.xclbin` 必须先对比当前标准
-   `395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。
-2. 如果 demo 号称修复某个跨主线问题，还要加入相关基础版本作动态对照；
-   例如 TAPA full-PCG demo 要同时参考 no-TAPA full-PCG 和 TAPA single SpMV。
-3. 旧基线默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志里的数据，
-   不再每次重跑。只有下面情况才重跑旧基线：
+1. 默认只跑新 demo：例如新的 `cuper-tapa-pcg-...-demo.xclbin` 只对该 demo
+   跑本节规定的数据集和模式。
+2. 同主线当前标准 bitstream、其它三条标准 bitstream、以及旧跨主线基线默认
+   复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志里的数据，只做静态对照，
+   不做自动重跑。
+3. 只有下面情况才重跑标准/旧基线：
    - 用户明确要求重跑；
    - 当前标准 bitstream 或 host 代码发生变化；
    - demo 结果和旧基线预期矛盾，需要排除板卡/XRT/数据集状态问题；
    - 要判断失败边界是否移动，且旧基线没有同口径记录。
-4. demo 的最低动态实测范围是同主线当前标准版加 demo 版；对 TAPA full-PCG
-   候选，至少跑 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
-   `thermal2_n262144`、完整 `thermal2` 的 init-only 与 1iter。若数据异常，
-   再补中间规模。
-5. demo 的测试报告必须写清楚：
+4. 当前 SpMV 优化阶段优先做 `cuper-tapa-spmv` demo：把 `CuperPcg` 里的 PCG
+   服务化 SpMV 路径抠出来，以单 SpMV kernel 形式测试。它属于
+   `cuper-tapa-spmv` 主线 demo，默认只跑该 demo 的 single SpMV 数据集；标准基准
+   复用满血 standalone TAPA Cuper SpMV 记录
+   `395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`。
+5. demo 的最低动态实测范围只针对 demo 本身；对 PCG 抽出版 `cuper-tapa-spmv`
+   demo，至少跑 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+   `thermal2_n262144` 和完整 `thermal2` 的 single SpMV，记录 `spmv_avg`、
+   diff、rc、timeout 边界。对 TAPA full-PCG 候选，至少跑
+   `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`、
+   完整 `thermal2` 的 init-only 与 1iter。若数据异常，再补中间规模。
+6. demo 的测试报告必须写清楚：
    - demo 路径、UUID、SHA256
-   - 对应标准版路径、UUID、SHA256
-   - 相同数据集、相同阈值、相同 timeout 下的结果差异
-   - 哪些指标更好，哪些指标退化，哪些失败边界变化
-6. demo 数据必须写入 `395bitstream/cuper_spmv_u55c_compare_20260524.html`
-   或当前对应 HTML 报告。至少包含：
+   - 本轮是否 demo-only；如果复用旧标准数据，要写明旧标准日志/HTML来源
+   - 相同数据集、相同阈值、相同 timeout 下 demo 本身的退出状态
+   - 相对既有标准/基线记录，哪些指标看起来更好，哪些退化，哪些失败边界变化
+7. demo 数据必须写入 `395bitstream/cuper_spmv_u55c_compare_20260524.html`
+   或当前对应 HTML 报告；HTML 视图细则见
+   `docs/codex/workflows/reports.md` 的 “HTML 视图口径”。至少包含：
    - demo bitstream 信息；
-   - 标准版 vs demo 的退出边界；
-   - init / 1iter 关键时间和差值；
+   - demo-only 的退出边界；
+   - 运行类型。single SpMV demo 写 `spmv_avg`、diff、rc、timeout；full-PCG demo
+     写 init / 1iter 关键时间。
    - 简短结论；
-   - 折线图或表格中的 demo 数据点。
-7. demo 的详细 Markdown 总结放入 `docs/bitstream_summaries/<版本目录>/`，
-   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。目录内必须包含
-   `README.md`、`changes.md`、`testing.md` 和 `source.diff`；其中
-   `testing.md` 记录测试命令、关键输出、失败边界和待补项目。
-8. 只有用户明确表示结果满意，demo 才能按 `docs/codex/coding.md` 的归档流程
+   - 表格中的 demo 数据点。若趋势图仍使用历史标准/基线数据，必须在图注中明确
+     写明“不包含当前 demo-only 新数据”。
+   - 对 TAPA full-PCG demo，HTML 里的 `TAPA PCG 分段时间` 和
+     `Init 与 1iter 差值` 必须优先展示本轮 demo-only 实测数据；标准/上一 demo/本 demo
+     的对比另起一块展示，不要把这两个当前 demo 诊断表继续填成旧标准数据。
+   - 对 TAPA full-PCG demo 的 HTML 三方对比，SpMV 组里的“标准”必须使用
+     standalone TAPA Cuper SpMV 标准曲线
+     `395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`，不是
+     TAPA full-PCG 标准版里的内嵌 `iter_spmv` 分段；一次迭代组才使用
+     TAPA full-PCG 标准版的 `1iter kernel_reported`。
+   - 对 PCG 抽出版 `cuper-tapa-spmv` demo，HTML 里应把它标成“PCG SpMV 抽出版”
+     或等价名称，直接和满血 standalone TAPA Cuper SpMV 的 `spmv_avg` 曲线/表格
+     对比；不要把它写成 full-PCG 1iter demo。PCG 相关区域保留原数据但必须标明
+     “本轮未跑 PCG，无 init/1iter 过程/无一次迭代新数据”；不要删除或用 single
+     SpMV 数据覆盖 PCG 分段、Init 与 1iter 差值、一次迭代表格。
+   - 如果 demo 改了分段语义，不能沿用旧表头。比如 raw `iter_spmv` 只覆盖
+     packed AP 接收/缓存时，HTML 应标成 `iter recv`，并显式写出
+     `AP path = iter recv + dot_p_ap` 后再拿去做 SpMV/AP 路径对比。
+8. demo 的详细 Markdown 总结放入 `docs/bitstream_summaries/<版本目录>/`，
+   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。目录内必须维护
+   `README.md`、`changes.md` 和 `testing.md`；其中 `testing.md` 记录测试命令、
+   关键输出、失败边界和待补项目。正式 `source.diff` 只在测试确认性能提升，
+   或用户明确要求保留功能边界修复补丁后更新；性能退步或失败的 demo 不覆盖上一份
+   已验证有效的 `source.diff`。
+9. 只有用户明确表示结果满意，demo 才能按 `docs/codex/coding.md` 的归档流程
    晋级并替换标准版。否则 demo 保持 demo 后缀，不能覆盖标准文件。
 
 ## 2. 数据集准备
@@ -231,6 +262,8 @@ mkdir -p "$logdir"
 - CPU `Dataset::spmv` 校验
 - `SPMV_REPEATS=3`
 - 大数据失败点外层用 180s timeout
+- 对 PCG 抽出版 `cuper-tapa-spmv` demo，把 `BITFILE` 换成 demo xclbin；
+  不需要重跑满血标准版，除非用户要求或旧记录不足。
 
 命令模板：
 

@@ -26,6 +26,19 @@
 | `P_spmv` | `float_v16*` | 每轮 `A*p` 的 packed SpMV 输入 |
 | `AP_spmv` | `float_v16*` | 每轮 `A*p` 的 packed SpMV 输出缓存 |
 
+当前后续优化方向已经改成先做单 SpMV demo：把 `CuperPcg` 里的
+`pcg_spmv_service.hpp` 路径抽成 `cuper-tapa-spmv` 形态单独测试，再回填
+full-PCG。因此读代码时还要分清两套 SpMV 实现：
+
+| 形态 | 文件 | 当前角色 |
+| --- | --- | --- |
+| 满血 Cuper SpMV | `detail/cuper_spmv_tasks.hpp` | `Cuper(...)` 标准基准，当前最快的 standalone TAPA Cuper SpMV |
+| PCG 服务化 SpMV | `detail/pcg_spmv_service.hpp` | 为 `CuperPcg(...)` 重复触发和编译约束调整过的路径，当前应抽出来做单 SpMV demo |
+
+这个单 SpMV demo 的结论看 `spmv_avg`、timeout 边界和 diff；只有回填到
+`CuperPcg` 后，才继续用 `init_spmv`、`iter_spmv`、`controller_total` 和
+`kernel_reported` 做 full-PCG 结论。
+
 ## 推荐阅读顺序
 
 ### 1. 顶层 ABI

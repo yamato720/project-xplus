@@ -19,7 +19,7 @@ direct-register 运行后进入 `ctrl=0x0`。
   `dot_p_ap`、`update_xr`、`update_z`、`update_p` 等 stage 字段。
 - 不改变四条主线命名；新 bitstream 先作为 `-demo` 放入 `395bitstream/`。
 
-对应源码补丁见本目录 `source.diff`。该补丁来自提交
+对应源码补丁见本目录 `receive_path_source.diff`。该补丁来自提交
 `debb634 Optimize TAPA PCG SpMV receive path`，需要回退源码时可以运行：
 
 ```bash

@@ -44,16 +44,35 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 ## Workflow Rules
 
 - Follow `docs/codex/coding.md` as the entry point. It links to detailed workflow docs under `docs/codex/workflows/`.
-- Follow `docs/codex/testing.md` for demo-vs-standard dynamic comparison and required datasets.
+- Follow `docs/codex/testing.md` for demo testing and required datasets. New demo testing is
+  demo-only by default; do not rerun the four standard bitstreams unless the user explicitly
+  asks, standard bitstream/host changed, or old records are insufficient to interpret a mismatch.
+- When updating the HTML report for a TAPA full-PCG demo, keep current diagnostic sections such
+  as `TAPA PCG 分段时间` and `Init 与 1iter 差值` on the latest demo-only measurements.
+  Put standard/previous-demo/current-demo comparisons in a separate comparison block.
+  In that comparison block, use standalone TAPA Cuper SpMV as the SpMV standard baseline;
+  use TAPA full-PCG standard only for the 1iter comparison.
+  If a demo changes stage semantics, label raw counters by their real meaning, e.g. `iter recv`,
+  and compare derived metrics such as `AP path = iter recv + dot_p_ap` only when the formula is
+  written in the HTML. See `docs/codex/workflows/reports.md` before editing HTML views.
+- For a single-SpMV demo, record new data only in the SpMV/demo-only sections. Leave PCG
+  diagnostic and 1iter data unchanged, but label those sections as not run in this round
+  (`本轮未跑 PCG，无 init/1iter 过程`).
 - For bitstream/build/TAPA/report/version-record work, read the matching `docs/codex/workflows/*.md` file before editing.
 - Keep version records in `docs/bitstream_summaries/<version>/`.
-- For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, `source.diff`, and, when useful, `code_reading_guide.md`.
+- For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, and, when useful, `code_reading_guide.md`. Update official `source.diff` only after demo-only board testing confirms a performance improvement, or when the user explicitly asks to preserve a functional-boundary fix; do not overwrite the last effective `source.diff` for failed or slower demos.
 - Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
 
 ## Current Goal
 
-- Current optimization target: make `CuperPcg` embedded SpMV approach standalone/native TAPA Cuper SpMV performance.
+- Current optimization target: make `CuperPcg` embedded SpMV approach standalone/native
+  TAPA Cuper SpMV performance. The current demo path should be a `cuper-tapa-spmv`
+  single-SpMV bitstream extracted from the `CuperPcg` SpMV service path, so it can be
+  tested in isolation and then reused/replaced inside full-PCG after it improves.
+- Keep two SpMV forms distinct: full standalone `Cuper(...)` in `cuper_spmv_tasks.hpp`
+  is the baseline; the PCG-adjusted service path in `pcg_spmv_service.hpp` is the
+  optimization/demo target.
 - For this target, keep ongoing notes and source diffs in:
 
 ```text

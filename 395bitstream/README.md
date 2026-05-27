@@ -18,7 +18,7 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | --- | --- | --- | --- | --- |
 | `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
 | `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
-| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 当前 demo 槽：packed feed/AP 候选版，未替换当前标准 |
+| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 当前 demo 槽：packed feed/AP 候选版，demo-only 已跑完整 thermal2，未替换当前标准 |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 
@@ -57,8 +57,20 @@ HBM clock 为 450 MHz。构建日志为
 `9474ef8e-571b-ae13-f898-890e3af8ae5e`。该旧 demo 的测试结论仍保存在
 `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`
 的历史记录和 HTML 报告中，
-但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 尚未上板完成
-standard-vs-demo 动态对比，因此尚未晋级为标准版。
+但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 已在
+2026-05-28 按用户要求完成 demo-only 上板测试；日志位于
+`logs/codex_demo_only_test_20260528_005152/`。结果是
+`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
+和完整 `thermal2` 的 init-only / 1iter 全部返回，完整 `thermal2` 为
+`ctrl 0x4 -> 0xe`。但大规模 1iter 性能明显慢于当前标准既有记录，因此尚未晋级
+为标准版。
+
+当前 SpMV 优化的下一步 demo 不应继续直接做 full-PCG bitstream。应先生成
+`cuper-tapa-spmv` 单 SpMV demo：把 `CuperPcg` 中
+`DLC/Cuper/kernels/detail/pcg_spmv_service.hpp` 的 PCG 服务化 SpMV 路径抠出来
+单测，和满血 `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` 对应的
+`cuper-tapa-spmv-u55c-20260522.xclbin` 标准曲线比较 `spmv_avg`、timeout 边界和
+diff。该单 SpMV demo 确认有效后，再回填到 full-PCG。
 
 ## 运行入口
 

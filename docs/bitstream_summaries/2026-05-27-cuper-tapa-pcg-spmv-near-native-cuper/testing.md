@@ -135,37 +135,103 @@ build finished with exit code: 0
 | HBM clock | 450 MHz |
 | kernel signature | 新 ABI，含 `AP_spmv` / `X_spmv` / `P_spmv` |
 
-下一次更新本文件时，需要补充板上 demo vs 标准版动态对比表和是否建议晋级。
+2026-05-28 已按用户要求补跑 demo-only 上板测试；本轮不再补跑四个标准版。
 
-## 板上测试计划
+## 板上 demo-only 测试
 
-bitstream 成功后先作为 demo 跑：
+测试时间：2026-05-28 00:51 CST
+
+日志目录：
+
+```text
+logs/codex_demo_only_test_20260528_005152/
+```
+
+测试对象：
 
 ```text
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 ```
 
-对照标准版：
+环境：
 
 ```text
-395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin
+git: a1dcd85 Set CuperPcg SpMV optimization goal
+XRT: 2.15.225
+BDF: 0000:01:00.1
+UUID: cc61e044-06f7-4726-8f18-773ac52ab1b2
+SHA256: add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb
+DATA/KERNEL/HBM: 216/500/450 MHz
 ```
 
-最小动态对比：
+说明：本轮开始时曾按文档误跑了部分标准版用例，日志在
+`logs/codex_bitstream_test_20260528_004547/` 和
+`logs/codex_bitstream_test_20260528_004939_isolated/`。按用户后续要求，这些
+标准版日志不作为本轮结论，只保留为旁路记录。
 
-| 数据集 | 模式 |
-| --- | --- |
-| `thermal2_n16` | init-only / 1iter |
-| `thermal2_n65536` | init-only / 1iter |
-| `thermal2_n131072` | init-only / 1iter |
-| `thermal2_n262144` | init-only / 1iter |
-| `thermal2` | init-only / 1iter |
+### 运行命令口径
 
-重点记录：
+init-only：
 
-- `init_spmv`
-- `iter_spmv`
-- `controller_total`
-- `kernel_reported`
-- direct-register `ctrl` 状态
-- timeout 或 `ctrl=0x0` 边界是否变化
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin \
+  TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+1iter：
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin \
+  MAX_ITERS=1 DIFF_TOL=1e-4
+```
+
+完整 `thermal2` 前执行了 `xbutil reset --device 0000:01:00.1 --force --batch`，
+避免旧失败状态污染后续 case。
+
+### 退出状态
+
+| 模式 | 数据集 | rc | direct ctrl | status | max_abs_diff | max_rel_diff |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| init | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n65536` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n131072` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n262144` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| 1iter | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 1.0868e-08 | 9.2864e-09 |
+| 1iter | `thermal2_n65536` | 0 | `0x4 -> 0xe` | max_iter | 7.5004e-10 | 7.2993e-10 |
+| 1iter | `thermal2_n131072` | 0 | `0x4 -> 0xe` | max_iter | 2.3337e-10 | 1.8330e-10 |
+| 1iter | `thermal2_n262144` | 0 | `0x4 -> 0xe` | max_iter | 5.3981e-10 | 4.0347e-10 |
+| 1iter | `thermal2` | 0 | `0x4 -> 0xe` | max_iter | 1.1717e-09 | 1.0914e-09 |
+
+### 关键计时
+
+单位：ms。
+
+| 数据集 | init kernel | init ctrl | init SpMV | 1iter kernel | 1iter ctrl | iter SpMV | dot_p_ap | update_xr | update_p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n16` | 14.7369 | 0.0044 | 0.0020 | 11.1677 | 0.0192 | 0.0007 | 0.0017 | 0.0062 | 0.0051 |
+| `thermal2_n65536` | 32.3798 | 15.1425 | 6.6416 | 112.3167 | 71.9071 | 0.1465 | 6.8470 | 27.2012 | 21.4884 |
+| `thermal2_n131072` | 53.5494 | 30.2821 | 13.2807 | 213.5826 | 143.8117 | 0.2924 | 13.6951 | 54.4024 | 42.9742 |
+| `thermal2_n262144` | 97.0455 | 60.5679 | 26.5658 | 416.6492 | 287.6244 | 0.5862 | 27.3892 | 108.8046 | 85.9482 |
+| `thermal2` | 414.5353 | 283.7481 | 124.4632 | 1887.4481 | 1329.0066 | 2.7665 | 132.7367 | 486.8336 | 402.6350 |
+
+### 本轮结论
+
+- 当前 demo 能跑完整 `thermal2` 的 init-only 和 1iter，旧记录中的
+  `ctrl=0x0` 边界在本轮 demo-only 测试中没有复现。
+- 数值校验通过；1iter 的最大误差远低于 `DIFF_TOL=1e-4`。
+- 性能不满足当前“内嵌 SpMV 接近 standalone TAPA Cuper”的目标：
+  `thermal2_n262144` 的 1iter `kernel_reported=416.6492 ms`，完整
+  `thermal2` 为 `1887.4481 ms`，主要开销在 `update_xr`、`update_p` 和
+  `dot_p_ap`，不是 `iter_spmv` 本身。
+- 暂不建议按性能目标晋级为标准版；可以把它作为 full-size 功能边界修复候选记录。
+- 下一步测试目标改为 PCG 抽出版 `cuper-tapa-spmv` 单 SpMV demo：只跑该 demo 的
+  single SpMV 数据集，和满血 TAPA Cuper SpMV 标准记录静态对比 `spmv_avg`、
+  timeout 边界和 diff；确认有效后再回填 full-PCG。
+- 下一次更新 HTML 时，single SpMV 结果只进入 SpMV/demo-only 区域；PCG 分段、
+  `Init 与 1iter 差值` 和一次迭代区域保留本轮 full-PCG 数据，并标注“本轮未跑
+  PCG，无 init/1iter 过程/无一次迭代新数据”。

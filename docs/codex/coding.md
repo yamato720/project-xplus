@@ -21,7 +21,7 @@
 | TAPA/Cuper 源码组织、stream/HBM 注释、SpMV 优化目标 | `docs/codex/workflows/tapa_sources.md` |
 | HTML、analysis、XO/Vitis 报告和报告口径 | `docs/codex/workflows/reports.md` |
 | `docs/bitstream_summaries/<版本>/`、`source.diff`、阅读指南 | `docs/codex/workflows/version_records.md` |
-| demo-vs-standard 动态测试、数据集、失败边界 | `docs/codex/testing.md` |
+| demo-only 动态测试、数据集、失败边界、标准基线复用 | `docs/codex/testing.md` |
 | 四条实现线的长期说明 | `docs/design/implementation_versions_zh.md` |
 
 涉及 bitstream、构建、运行脚本时，也要查：
@@ -63,13 +63,25 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
 5. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
-6. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
-   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
-   `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
+6. TAPA SpMV 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
+   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；当前 demo 应优先做
+   `cuper-tapa-spmv` 单 SpMV 形态，即把 `CuperPcg` 里的 PCG 服务化 SpMV 抠出来
+   单独测试，确认有效后再替换回 full-PCG。代码里要分清两套 SpMV：
+   `Cuper(...)` + `cuper_spmv_tasks.hpp` 是满血 Cuper SpMV 标准基准；
+   `CuperPcg(...)` + `pcg_spmv_service.hpp` 是为了 PCG 重复触发/编译约束调整过的
+   SpMV 服务路径。full-PCG demo 阶段再看 `init_spmv`、`iter_spmv`、
+   `controller_total` 和 `kernel_reported`，且不要跨 demo 盲比同名 stage。
+   若新 demo 改了分段语义，HTML 和结论必须按真实含义改名或合成同口径指标，例如
+   `AP path = iter recv + dot_p_ap`。
 7. 这个 SpMV 优化目标的连续改动统一维护在
    `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`；
    除非用户明确要求新建独立版本目录，否则不要每做一版 demo 就新增目录。
-8. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
+8. 迭代优化时先测试、后写正式 `source.diff`。每轮 demo 必须更新
+   `README.md`、`changes.md`、`testing.md` 和 HTML 结论；但只有 demo-only
+   上板测试确认核心性能提升，或用户明确要求保留功能边界修复补丁时，才更新版本目录
+   的正式 `source.diff`。性能退步、测试失败或只是跑通更大规模时，不覆盖上一份
+   已验证有效的 `source.diff`。
+9. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
 
 ## 4. 常用验证
 
@@ -87,7 +99,8 @@ git diff --check
 git status --short
 ```
 
-硬件测试和 demo 对比按 `docs/codex/testing.md` 执行，不要只说“理论上可以”。
+硬件测试和 demo 对比按 `docs/codex/testing.md` 执行。新 demo 默认只跑 demo
+本身，四大标准版本默认复用既有记录；不要只说“理论上可以”。
 
 ## 5. 提交与推送纪律
 

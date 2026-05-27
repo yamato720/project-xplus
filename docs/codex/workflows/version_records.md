@@ -12,17 +12,22 @@
 docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 ```
 
-当前正在推进的 `cuper-tapa-pcg` SpMV 性能目标例外：后续连续改动统一写入
-下面这个目标目录，避免每次 demo 都开一个新目录导致记录分散：
+当前正在推进的 SpMV 性能目标例外：虽然最终服务于 `cuper-tapa-pcg`，但当前 demo
+可能是从 `CuperPcg` 里抠出的 `cuper-tapa-spmv` 单 SpMV 形态。后续连续改动统一
+写入下面这个目标目录，避免每次 demo 都开一个新目录导致记录分散：
 
 ```text
 docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
 ```
 
 这个目标的定义是：把 `CuperPcg` 内嵌 SpMV 性能逐步优化到接近
-standalone/native TAPA Cuper SpMV。该目录内可以保留多个阶段的历史记录文件，
-但 `README.md`、`changes.md`、`testing.md`、`source.diff` 始终代表当前最新
-候选状态。
+standalone/native TAPA Cuper SpMV。当前实现策略是先把 `CuperPcg` 的 PCG
+服务化 SpMV 抠出来做 `cuper-tapa-spmv` 单 SpMV demo，单独测 `spmv_avg`、
+失败边界和数值误差；确认有效后再替换回 full-PCG。该目录内可以保留多个阶段的
+历史记录文件。
+`README.md`、`changes.md`、`testing.md` 记录当前最新 demo/尝试状态；但
+`source.diff` 不是“每次尝试的草稿补丁”，只代表经过板上测试后确认有性能提升、
+值得继续保留或晋级的最新有效补丁。
 
 目录内至少维护：
 
@@ -30,8 +35,11 @@ standalone/native TAPA Cuper SpMV。该目录内可以保留多个阶段的历�
 README.md
 changes.md
 testing.md
-source.diff
 ```
+
+`source.diff` 只有在满足本文件第 3 节条件时才更新。若最新 demo 只是功能边界修复、
+测试失败、或性能退步，保留测试记录和 HTML 结论即可，不要覆盖上一份有效
+`source.diff`。
 
 复杂代码改动、用户明确要研究代码、或接口/数据流容易混淆时，再加：
 
@@ -49,12 +57,39 @@ code_reading_guide.md
 - `testing.md`：已经跑过的命令、关键输出、日志路径、失败边界、下一步测试计划。
 - `code_reading_guide.md`：按文件顺序解释怎么读这版代码，重点写 ABI、HBM 映射、
   task graph、controller 阶段、metrics 口径。
-- `source.diff`：这一版源码/脚本/纪律文档的可逆补丁。
+- `source.diff`：测试确认有性能提升后才写入/更新的可逆补丁；它是“有效候选补丁”，
+  不是每轮探索的自动快照。
 
 不要把大段源码复制进 Markdown；解释写在 Markdown，真实改动以 `source.diff`
-为准。
+为准。若最新 demo 没有更新 `source.diff`，必须在 `testing.md` 或 `changes.md`
+中写明原因，例如“性能退步，source.diff 未更新”。
 
 ## 3. source.diff 生成纪律
+
+先测试，后写 diff。对于迭代优化版本，禁止在未完成板上测试前因为“做了一版 demo”
+就刷新正式 `source.diff`。
+
+允许生成/更新 `source.diff` 的条件：
+
+1. 已完成对应 demo-only 上板测试，并把结果写入 HTML 和 `testing.md`。
+2. 对当前优化目标的核心性能指标有提升：
+   - 当前单 SpMV demo 阶段，对比 PCG 抽出版 `cuper-tapa-spmv` demo 的
+     `spmv_avg`、成功/timeout 边界和数值误差，标准基准使用
+     `docs/codex/workflows/reports.md` 定义的 standalone TAPA Cuper SpMV；
+   - 回填 full-PCG 后，1iter 对比使用 TAPA full-PCG 标准版和上一 demo 的同口径
+     记录；
+   - 不能只因为“能跑更大规模”就更新性能优化 `source.diff`。
+3. 没有引入不可接受的功能退化、数值错误或新的失败边界。
+4. 用户明确要求保留某个功能修复补丁时，可以例外更新，但必须在 `changes.md`
+   里写清楚这是“功能边界修复补丁”，不是性能提升补丁。
+
+不满足上述条件时：
+
+- 不更新正式 `source.diff`；
+- 在 `testing.md` 写清楚测试结果、日志路径、退步或失败原因；
+- 在 HTML 里把它标成失败/退步/功能边界候选；
+- 若需要临时保存工作树改动，用普通 git 工作流或单独命名的临时文件，不要覆盖
+  目标目录的正式 `source.diff`。
 
 生成 `source.diff` 时只包含本版相关源码、host、cfg、Makefile 和纪律文档。不要把
 build 产物、日志、`.xclbin` 或版本目录自身递归塞进去。
@@ -104,5 +139,5 @@ git diff --check
 ## 5. 构建并行状态
 
 如果 tmux 里已经有硬件构建进入 `vpl` / `impl` / routing，后续源码注释、
-阅读指南和 `source.diff` 更新不会影响那一次构建。回复里必须说明“这些改动只影响
-下一次构建”，并记录当前日志阶段。
+阅读指南和按本文件纪律允许的 `source.diff` 更新不会影响那一次构建。回复里必须说明
+“这些改动只影响下一次构建”，并记录当前日志阶段。

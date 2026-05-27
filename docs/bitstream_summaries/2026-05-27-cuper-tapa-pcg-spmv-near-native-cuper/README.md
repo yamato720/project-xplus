@@ -6,8 +6,14 @@
 - 状态：demo bitstream 已生成并放入 `395bitstream/`，尚未替换当前标准版
 - 持续目标：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
   TAPA Cuper SpMV
+- 当前 demo 方向：先做 `cuper-tapa-spmv` 单 SpMV demo，把 `CuperPcg` 里的 PCG
+  服务化 SpMV 抠出来单独测试；它确认有效后再回填 full-PCG。代码里同时保留两套
+  SpMV：满血 `Cuper(...)` / `cuper_spmv_tasks.hpp` 作为标准基准，和
+  `CuperPcg(...)` / `pcg_spmv_service.hpp` 中为了 PCG 重复触发与 TAPA 编译约束
+  调整过的服务化 SpMV。
 - 记录策略：该目录是当前目标的唯一持续记录目录；后续围绕此目标的源码改动、
-  demo bitstream、测试结论和 `source.diff` 继续更新这里，不再每版新建目录
+  demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
+  只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
 - demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
 - demo UUID：`cc61e044-06f7-4726-8f18-773ac52ab1b2`
@@ -65,24 +71,40 @@
 - `hw_emu` 目标的 TAPA/HLS/XO 生成通过；
 - `hw` bitstream 生成成功，`v++` 总耗时 4h39m35s；
 - 新 xclbin 和 `.xclbin.info` 已覆盖 `395bitstream/` 当前 demo 槽位；
-- `source.diff` 已记录本版源码和脚本改动。
+- 本轮 demo-only 测试显示性能退步；按当前版本管理纪律，不应因为这轮 demo
+  自动刷新“性能有效补丁”的正式 `source.diff`。若保留相关源码 diff，只能标为
+  功能边界修复候选，不能标为性能提升补丁。
 - `code_reading_guide.md` 已记录本版代码阅读顺序和关键数据流。
+- 2026-05-28 已按用户要求完成 demo-only 上板测试：
+  `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+  `thermal2_n262144`、完整 `thermal2` 的 init-only 和 1iter 全部返回。
+- 完整 `thermal2` 边界已变化：init-only 和 1iter 都从启动前 `ctrl=0x4`
+  运行到完成后 `ctrl=0xe`，不再复现旧标准记录里的 `ctrl=0x0` 未完成。
 
 尚未完成：
 
-- 尚未上板做 demo vs 当前标准版动态对比；
-- 尚未更新 `395bitstream/` HTML 报告。
+- 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
 
 ## 是否建议晋级
 
-目前不能晋级。原因是还没有板上 standard-vs-demo 动态对比数据。
+暂不建议直接晋级为标准版。
 
-下一步按 `docs/codex/testing.md` 对比当前标准版：
+理由：
 
-- `thermal2_n16`
-- `thermal2_n65536`
-- `thermal2_n131072`
-- `thermal2_n262144`
-- 完整 `thermal2`
+- 正面：完整 `thermal2` init-only / 1iter 都能完成，说明这版改变了旧标准的
+  full-size 失败边界。
+- 风险：性能目标是让 `CuperPcg` 内嵌 SpMV 靠近 standalone TAPA Cuper，但本版
+  在大规模 1iter 上 controller/update 代价很高；`thermal2_n262144` 的
+  `kernel_reported=416.649 ms`，明显慢于既有标准记录中的约 `188.820 ms`。
+- 结论：它更像“full-size 功能边界修复候选”，还不是当前 SpMV 性能优化目标的
+  标准替换候选。
 
-重点看 `init_spmv`、`iter_spmv`、`controller_total`、`kernel_reported`。
+下一步不要继续直接做 full-PCG 性能 demo；应先把当前 PCG 服务化 SpMV 路径抽成
+`cuper-tapa-spmv` 单 SpMV demo，和满血 TAPA Cuper SpMV 标准曲线对比
+`spmv_avg`、成功/timeout 边界和数值误差。只有单 SpMV 路径确认有效后，再回填
+full-PCG 并重新看 `init_spmv`、`iter_spmv`、`controller_total` 和
+`kernel_reported`。
+
+更新 HTML 时，single SpMV demo 的新增数据只写入 SpMV/demo-only 区域；PCG 分段、
+`Init 与 1iter 差值` 和一次迭代区域保留当前 full-PCG 数据，但必须标注“本轮未跑
+PCG，无 init/1iter 过程/无一次迭代新数据”。

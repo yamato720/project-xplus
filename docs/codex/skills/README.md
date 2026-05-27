@@ -57,7 +57,11 @@ Project-XPlus/395bitstream/README.md
 ```
 
 当前 skill 目标是：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
-TAPA Cuper SpMV。围绕该目标的连续修改记录统一维护在：
+TAPA Cuper SpMV。当前 demo 路线应优先做 `cuper-tapa-spmv` 单 SpMV 形态：
+从 `CuperPcg` 的 PCG 服务化 SpMV 路径抠出来单测，确认有效后再回填 full-PCG。
+注意区分满血 `Cuper(...)` / `cuper_spmv_tasks.hpp` 标准基准，以及
+`CuperPcg(...)` / `pcg_spmv_service.hpp` 里的编译适配版 SpMV。围绕该目标的连续
+修改记录统一维护在：
 
 ```text
 Project-XPlus/docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
