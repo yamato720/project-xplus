@@ -1,0 +1,1155 @@
+diff --git a/DLC/Cuper/include/Cuper.h b/DLC/Cuper/include/Cuper.h
+index a46f2cd..0055b3f 100644
+--- a/DLC/Cuper/include/Cuper.h
++++ b/DLC/Cuper/include/Cuper.h
+@@ -75,0 +76,6 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++//
++// 参数分组：
++//   - SpElement_list_ptr / Matrix_data[0..15]：原 Cuper 矩阵格式；
++//   - B/M_inv/X/R/Z/P：FP64 Jacobi-PCG 状态；
++//   - AP_spmv/X_spmv/P_spmv：FP32 float_v16 packed SpMV 辅助缓冲；
++//   - Metrics/Status：host 读取的调试计时和收敛状态。
+@@ -84 +90,3 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-              tapa::mmap<double> AP,
++              tapa::mmap<float_v16> AP_spmv,
++              tapa::mmap<float_v16> X_spmv,
++              tapa::mmap<float_v16> P_spmv,
+diff --git a/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp b/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
+index aea4bdb..8de97cf 100644
+--- a/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
++++ b/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
+@@ -81 +81,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-              tapa::mmap<double> AP,
++              // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
++              // Cuper SpMV 新增的 packed float_v16 缓冲：
++              //   X_spmv: host 预打包 x0，初始化 A*x0 时读取
++              //   P_spmv: controller 维护 p 的 packed 副本，每轮 A*p 时读取
++              //   AP_spmv: controller 缓存 A*p 的 packed 输出，供 dot/update 复用
++              tapa::mmap<float_v16> AP_spmv,
++              tapa::mmap<float_v16> X_spmv,
++              tapa::mmap<float_v16> P_spmv,
+@@ -96 +102,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-    //       -> 将 x0 或 p 打包成 float_v16 送入 Pcg_X_Stream
+@@ -98,0 +105,3 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++    //   Pcg_Vector_Loader
++    //       -> 从 X_spmv/P_spmv packed HBM 读 float_v16 向量输入
++    //
+@@ -155,3 +163,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-    // controller 输出的 x0/p 向量流。float_v16 是 16 个 float 一包，
+-    // 先进入 Pcg_Vector_Loader，再被广播到 16 个 core。
+-    tapa::stream<float_v16, 128>                            Pcg_X_Stream("Pcg_X_Stream");
+@@ -184,0 +191,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++    // checker/sort/vector-destroy 都是常驻服务，需要单独 stop 流退出。
++    // 这些 stream 深度很小，只承载停止令牌，不承载矩阵/向量数据。
+@@ -187,0 +196,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++    // Stage_Event_Stream 是 controller -> timer 的事件流；Stage_Ticks_Stream
++    // 是 timer -> controller 的最终 cycle 数组。
+@@ -202 +211,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-                Pcg_X_Stream,
+@@ -210 +219,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-                AP,
++                AP_spmv,
++                P_spmv,
+@@ -228,0 +239,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++                X_spmv,
++                P_spmv,
+@@ -230 +241,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-                Pcg_X_Stream,
+diff --git a/DLC/Cuper/kernels/detail/pcg_common.hpp b/DLC/Cuper/kernels/detail/pcg_common.hpp
+index a00fcd0..2fe11e8 100644
+--- a/DLC/Cuper/kernels/detail/pcg_common.hpp
++++ b/DLC/Cuper/kernels/detail/pcg_common.hpp
+@@ -13,0 +14,3 @@ struct CuperSpmvCommand {
++    // iteration_num 目前通常为 1：表示本次命令只跑一轮 SpMV。
++    // stop 非 0 表示退出常驻服务任务；各 loader/core/checker 收到后要有限返回。
++    // vector_source 决定向量 loader 本轮从 X_spmv 还是 P_spmv 读 packed 输入。
+@@ -15,0 +19 @@ struct CuperSpmvCommand {
++    INDEX_TYPE vector_source;
+@@ -18,0 +23,2 @@ struct PcgStageEvent {
++    // stage/op 是 controller 发给 Pcg_Stage_Timer 的轻量事件。
++    // stage 使用 kPcgStage* 编号；op 为 begin/end/stop。
+@@ -22,0 +29,2 @@ struct PcgStageEvent {
++// Status[0] 的编码。host 只把 converged/max_iter 当作正常返回；
++// breakdown 表示 p_ap、rz、tau 等数值异常或非法输入。
+@@ -25,0 +34,2 @@ static constexpr INDEX_TYPE kPcgStatusBreakdown = 2;
++// 常驻 task 链的停止令牌。它走 PE_Param/Vector_Y_Param 这类普通 stream，
++// 避免另开一套复杂控制口。
+@@ -29,0 +40,2 @@ static constexpr INDEX_TYPE kPcgStageStop = 2;
++// Metrics[16..24] 的 cycle 统计对应这些 stage。work-tick 统计在
++// Metrics[5..14]，两者都用于定位 full-PCG 版到底慢在 SpMV 还是 PCG 周边。
+@@ -38,0 +51,4 @@ static constexpr INDEX_TYPE kPcgStageCount = 8;
++// packed 向量输入来源。X 只用于初始化 A*x0，P 用于每轮 A*p。
++static constexpr INDEX_TYPE kPcgVectorSourceX = 0;
++static constexpr INDEX_TYPE kPcgVectorSourceP = 1;
++// PCG 分母过小直接判 breakdown，避免 alpha/beta 生成 inf/NaN 后污染全向量。
+@@ -47,0 +64 @@ inline bool pcg_invalid(const double value) {
++    // HLS 里避免依赖 std::isnan；NaN 唯一不等于自身。
+diff --git a/DLC/Cuper/kernels/detail/pcg_controller.hpp b/DLC/Cuper/kernels/detail/pcg_controller.hpp
+index 214df2f..9b99c95 100644
+--- a/DLC/Cuper/kernels/detail/pcg_controller.hpp
++++ b/DLC/Cuper/kernels/detail/pcg_controller.hpp
+@@ -19 +19,3 @@
+-// 发送命令、提供 x/p 向量、消费 SpMV 结果和维护 PCG 向量状态。
++// 发送命令、消费 SpMV 结果和维护 PCG 向量状态。x0/p 的 SpMV 输入
++// 由 packed float_v16 HBM 副本喂给 vector loader，避免 controller
++// 在 SpMV 热路径里逐元素打包。
+@@ -27 +28,0 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+-                    tapa::ostream<float_v16> &X_to_spmv,
+@@ -35 +36,2 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+-                    tapa::mmap<double> AP,
++                    tapa::mmap<float_v16> AP_spmv,
++                    tapa::mmap<float_v16> P_spmv,
+@@ -40,0 +43,5 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
++    // B/M_inv/X/R/Z/P 是 FP64 PCG 状态；AP_spmv/P_spmv 是为了贴近 Cuper
++    // SpMV 的 packed FP32 辅助副本。最终解仍写在 X 里。
++    //
++    // AP_spmv 只缓存最近一次 A*p 的 SpMV 输出；P_spmv 缓存当前搜索方向 p。
++    // X_spmv 不传入 controller，由 Pcg_Vector_Loader 在 init SpMV 时直接读。
+@@ -60,0 +68,2 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
++    command.vector_source = kPcgVectorSourceX;
++    // controller_total 覆盖从参数检查到 stop 广播、metrics 写回前的主体时间。
+@@ -67 +76 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+-// 初始化 SpMV：先用当前 X 计算 A*x0。
++        // 初始化 SpMV：先用当前 X_spmv 计算 A*x0。
+@@ -71,0 +81 @@ send_init_command:
++        // Command_out[0] 给 ptr loader，Command_out[1] 给 vector loader。
+@@ -76,0 +87 @@ send_init_matrix_command:
++        // 每个 matrix loader 独立一条命令流，保证 16 路 HBM loader 同步启动。
+@@ -81,7 +92,4 @@ send_init_matrix_command:
+-        // 边发送 x0 边消费 A*x0，避免 SpMV 输出 FIFO 填满后反压整条
+-        // Cuper 数据流，而 controller 仍阻塞在继续写输入向量。
+-        // 这个循环故意使用 full/empty + try_write/try_read 做非阻塞握手：
+-        // 大矩阵时输入向量和输出结果会同时在流水里移动，不能拆成
+-        // “先全部写完，再全部读完”的两段。
+-        for (INDEX_TYPE sent_packets = 0, received_packets = 0;
+-             received_packets < packet_count;) {
++        // x0 已由 host 预打包到 X_spmv，Pcg_Vector_Loader 会按 float_v16
++        // packed HBM 顺序读入。controller 只负责消费 A*x0，避免在 SpMV
++        // 计时段内逐元素读取 double X 并临时打包。
++        for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
+@@ -90,15 +97,0 @@ send_init_matrix_command:
+-            if (sent_packets < packet_count && !X_to_spmv.full()) {
+-                float_v16 x_packet;
+-        fill_x0_packet:
+-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+-                    const INDEX_TYPE index = (sent_packets << 4) + lane;
+-                    double value = 0.0;
+-                    if (index < Row_num) {
+-                        value = X[index];
+-                    }
+-                    x_packet[lane] = static_cast<VALUE_TYPE>(value);
+-                }
+-                X_to_spmv.try_write(x_packet);
+-                ++sent_packets;
+-            }
+-
+@@ -130,4 +123,8 @@ init_zp_reduce:
+-        // 第二段再读 R/M_inv，初始化 Z/P 并累计 rz/rr。它和 update_z_reduce
+-        // 形态接近，避免把 residual 初始化和 SpMV 输出消费挤在同一条流水里。
+-        for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+-#pragma HLS loop_tripcount min=1 max=8000000
++        // 第二段再读 R/M_inv，初始化 Z/P 并累计 rz/rr。这里同时维护
++        // P_spmv 的 float_v16 packed 副本，下一轮 A*p 可直接走 Cuper
++        // 风格向量 loader，不再由 controller 从 double P 标量打包。
++        for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
++#pragma HLS loop_tripcount min=1 max=500000
++            float_v16 p_packet;
++    init_zp_lanes:
++            for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+@@ -135,7 +132,14 @@ init_zp_reduce:
+-            const double r_value = R[index];
+-            const double minv_value = M_inv[index];
+-            const double z_value = minv_value * r_value;
+-            Z[index] = z_value;
+-            P[index] = z_value;
+-            rz += r_value * z_value;
+-            rr += r_value * r_value;
++                const INDEX_TYPE index = (packet << 4) + lane;
++                double z_value = 0.0;
++                if (index < Row_num) {
++                    const double r_value = R[index];
++                    const double minv_value = M_inv[index];
++                    z_value = minv_value * r_value;
++                    Z[index] = z_value;
++                    P[index] = z_value;
++                    rz += r_value * z_value;
++                    rr += r_value * r_value;
++                }
++                p_packet[lane] = static_cast<VALUE_TYPE>(z_value);
++            }
++            P_spmv[packet] = p_packet;
+@@ -143 +147,2 @@ init_zp_reduce:
+-        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
++        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
++                          static_cast<unsigned long long>(packet_count);
+@@ -150,0 +156 @@ pcg_loop:
++            command.vector_source = kPcgVectorSourceP;
+@@ -164,7 +170,3 @@ pcg_loop:
+-            // 每轮同样边发送 p 边消费 A*p。否则大矩阵时 controller 可能在
+-            // X_to_spmv.write() 等下游腾空间，而下游又在等 controller 读取
+-            // 已经算出的 SpMV 输出，形成硬件死锁。
+-            // sent_packets 和 received_packets 独立推进，允许 Cuper SpMV
+-            // 先产出部分 AP，也允许 controller 继续补发后续 p packet。
+-            for (INDEX_TYPE sent_packets = 0, received_packets = 0;
+-                 received_packets < packet_count;) {
++            // p 已经在 init_zp/update_p 阶段维护为 P_spmv packed 副本。
++            // 这里不再从 double P 逐元素读和打包，controller 只消费 A*p。
++            for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
+@@ -173,15 +174,0 @@ pcg_loop:
+-                if (sent_packets < packet_count && !X_to_spmv.full()) {
+-                    float_v16 p_packet;
+-            fill_p_packet:
+-                    for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+-                        const INDEX_TYPE index = (sent_packets << 4) + lane;
+-                        double value = 0.0;
+-                        if (index < Row_num) {
+-                            value = P[index];
+-                        }
+-                        p_packet[lane] = static_cast<VALUE_TYPE>(value);
+-                    }
+-                    X_to_spmv.try_write(p_packet);
+-                    ++sent_packets;
+-                }
+-
+@@ -192,10 +179,4 @@ pcg_loop:
+-            ap_lanes:
+-                    // 只消费 AP 并写回 HBM。p^T AP 放到后面的独立流水里做，
+-                    // 避免 SpMV 回收路径同时承担 P 读取和 FP64 归约。
+-                    for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+-                        const INDEX_TYPE index = (packet << 4) + lane;
+-                        if (index < Row_num) {
+-                            const double ap_value = static_cast<double>(ap_packet[lane]);
+-                            AP[index] = ap_value;
+-                        }
+-                    }
++                    // 只按 Cuper 原生 packed 形态回收 AP。旧版这里把一包
++                    // float_v16 拆成 16 个 double 写入 AP HBM，会在 SpMV
++                    // 输出侧重新形成 controller 标量瓶颈。
++                    AP_spmv[packet] = ap_packet;
+@@ -209,2 +190,7 @@ pcg_loop:
+-            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+-#pragma HLS loop_tripcount min=1 max=8000000
++            for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
++#pragma HLS loop_tripcount min=1 max=500000
++                // AP 已按 Cuper 输出粒度缓存为 float_v16；P 仍保留 FP64，
++                // 因此这里做 FP32->FP64 转换后参与 p^T AP。
++                const float_v16 ap_packet = AP_spmv[packet];
++        dot_p_ap_lanes:
++                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+@@ -212 +198,5 @@ pcg_loop:
+-                p_ap += P[index] * AP[index];
++                    const INDEX_TYPE index = (packet << 4) + lane;
++                    if (index < Row_num) {
++                        p_ap += P[index] * static_cast<double>(ap_packet[lane]);
++                    }
++                }
+@@ -214 +204,2 @@ pcg_loop:
+-            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
++            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
++                              static_cast<unsigned long long>(packet_count);
+@@ -235,2 +226,5 @@ pcg_loop:
+-            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+-#pragma HLS loop_tripcount min=1 max=8000000
++            for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
++#pragma HLS loop_tripcount min=1 max=500000
++                const float_v16 ap_packet = AP_spmv[packet];
++        update_xr_lanes:
++                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+@@ -238,8 +232,12 @@ pcg_loop:
+-                const double x_value = X[index];
+-                const double p_value = P[index];
+-                const double r_value = R[index];
+-                const double ap_value = AP[index];
+-                const double x_new = x_value + alpha * p_value;
+-                const double r_new = r_value - alpha * ap_value;
+-                X[index] = x_new;
+-                R[index] = r_new;
++                    const INDEX_TYPE index = (packet << 4) + lane;
++                    if (index < Row_num) {
++                        const double x_value = X[index];
++                        const double p_value = P[index];
++                        const double r_value = R[index];
++                        const double ap_value = static_cast<double>(ap_packet[lane]);
++                        const double x_new = x_value + alpha * p_value;
++                        const double r_new = r_value - alpha * ap_value;
++                        X[index] = x_new;
++                        R[index] = r_new;
++                    }
++                }
+@@ -247 +245,2 @@ pcg_loop:
+-            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
++            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
++                               static_cast<unsigned long long>(packet_count);
+@@ -255 +254 @@ pcg_loop:
+-            // update_xr 的 X/P/AP 访问以及 alpha 乘法挤在同一条流水里。
++            // update_xr 的 X/P/AP_spmv 访问以及 alpha 乘法挤在同一条流水里。
+@@ -282,4 +281,8 @@ pcg_loop:
+-            // p = z + beta * p。下一轮 controller 会重新把 P 打包送入 SpMV。
+-            // 同样放宽 II，避免 beta 更新路径和 update_xrz 争抢同一区域布线。
+-            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+-#pragma HLS loop_tripcount min=1 max=8000000
++            // p = z + beta * p。
++            // 这里同步更新 P_spmv packed 副本，把下一轮 SpMV 的向量输入
++            // 准备成 single Cuper 相同的 float_v16 HBM 形态。
++            for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
++#pragma HLS loop_tripcount min=1 max=500000
++                float_v16 p_packet;
++        update_p_lanes:
++                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+@@ -287,3 +290,11 @@ pcg_loop:
+-                const double z_value = Z[index];
+-                const double p_value = P[index];
+-                P[index] = z_value + beta * p_value;
++                    const INDEX_TYPE index = (packet << 4) + lane;
++                    double p_new = 0.0;
++                    if (index < Row_num) {
++                        const double z_value = Z[index];
++                        const double p_value = P[index];
++                        p_new = z_value + beta * p_value;
++                        P[index] = p_new;
++                    }
++                    p_packet[lane] = static_cast<VALUE_TYPE>(p_new);
++                }
++                P_spmv[packet] = p_packet;
+@@ -291 +302,2 @@ pcg_loop:
+-            update_p_ticks += static_cast<unsigned long long>(Row_num) * 2ULL;
++            update_p_ticks += static_cast<unsigned long long>(Row_num) * 2ULL +
++                              static_cast<unsigned long long>(packet_count);
+@@ -306,0 +319 @@ pcg_loop:
++    stop_command.vector_source = kPcgVectorSourceX;
+@@ -323,0 +337,2 @@ send_checker_stop:
++    // 先让所有服务任务收到 stop，再通知 timer 停止；否则 host 可能等不到
++    // AP_CTRL_HS done，或 timer 还没把 stage_cycles 写完。
+@@ -335,0 +351,5 @@ read_stage_timer_metrics:
++    // Metrics 布局：
++    //   [0..3]  数值状态：rz, rr, p_ap, alpha
++    //   [4..14] work-tick 估算：packet_count 和各阶段手工计数
++    //   [16..24] stage timer 实测 cycle：init/iter SpMV、PCG 更新、总时间
++    // Status[0] 是 kPcgStatus*，Status[1] 是实际完成的 PCG 迭代数。
+diff --git a/DLC/Cuper/kernels/detail/pcg_spmv_service.hpp b/DLC/Cuper/kernels/detail/pcg_spmv_service.hpp
+index d43a86e..39b1159 100644
+--- a/DLC/Cuper/kernels/detail/pcg_spmv_service.hpp
++++ b/DLC/Cuper/kernels/detail/pcg_spmv_service.hpp
+@@ -13,0 +14,10 @@
++// 本文件把原始一次性 Cuper SpMV task 改造成 CuperPcg 可反复调用的
++// “常驻服务”。共同约定：
++//
++//   1. controller 每需要一次 A*x0 或 A*p，就向 ptr/vector/matrix loader
++//      广播一条 CuperSpmvCommand。
++//   2. loader/core/accumulator/checker/sort tree 保持原 Cuper 的数据粒度：
++//      矩阵 512-bit beat、向量/结果 float_v16、内部部分和 float_v2。
++//   3. controller 结束时广播 stop token，所有常驻 task 有限退出，host
++//      才能看到 AP_CTRL_HS done。
++
+@@ -27,0 +38,2 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
++        // read() 是阻塞的：没有 controller 命令时，ptr loader 处于等待状态，
++        // 不会提前读取 SpElement_list_ptr。
+@@ -49,0 +62,2 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
++                // Async_Read 用 request/response 两个计数器隐藏 HBM 读延迟；
++                // 输出顺序仍保持 SpElement_list_ptr[0..Batch_num]。
+@@ -62,3 +76,4 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
+-// X_in 不是 HBM mmap，而是 controller 写入的流。这样 controller 可以在
+-// 同一个 kernel 内把当前 x0 或每轮 p 打包成 float_v16，直接喂给 Cuper
+-// SpMV 流水，避免 host 每轮重新 launch Cuper。
++// standalone TAPA Cuper 的向量输入是 float_v16 packed HBM；早期 CuperPcg
++// 让 controller 从 double X/P 逐元素读 16 次再打包，等于把原本的向量
++// loader 退化成单 controller 标量读。这里重新让 SpMV 服务从 packed
++// X_spmv/P_spmv 读入，目标是让内嵌 SpMV 的 feed 路径接近 single SpMV。
+@@ -65,0 +81,2 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
++                       tapa::async_mmap<float_v16> &X_spmv,
++                       tapa::async_mmap<float_v16> &P_spmv,
+@@ -67 +83,0 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
+-                       tapa::istream<float_v16> &X_in,
+@@ -68,0 +85,3 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
++    // 向量以 16 个 float 一包，和 standalone Cuper 的 X HBM 布局一致。
++    // Column_num 通常等于 Row_num；这里按 Column_num 是因为 SpMV 语义上
++    // 输入向量长度由矩阵列数决定。
+@@ -85 +104 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
+-            for (INDEX_TYPE i = 0; i < batch_num_x;) {
++            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
+@@ -88,5 +107,14 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
+-                if (!X_in.empty() && !Vector_X_Stream.full()) {
+-                    float_v16 x;
+-                    X_in.try_read(x);
+-                    Vector_X_Stream.try_write(x);
+-                    ++i;
++                // 初始化 A*x0 读 X_spmv；迭代 A*p 读 P_spmv。这样 SpMV 输入
++                // 不再经过 controller 的逐元素 double->float_v16 打包路径。
++                if (command.vector_source == kPcgVectorSourceP) {
++                    Async_Read(P_spmv,
++                               Vector_X_Stream,
++                               batch_num_x,
++                               i_request,
++                               i_response);
++                } else {
++                    Async_Read(X_spmv,
++                               Vector_X_Stream,
++                               batch_num_x,
++                               i_request,
++                               i_response);
+@@ -124,0 +153,3 @@ void Pcg_Matrix_Loader(const INDEX_TYPE Matrix_len,
++                // 每个 Matrix_Loader 只读自己的 Matrix_data[channel]。
++                // 16 个实例并行读 16 个 HBM bank，Matrix_len 是每个 channel
++                // 的 512-bit word 数。
+@@ -149,0 +181,2 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
++        // PE_Param_in 的第一项是 Batch_num 或停止令牌。停止令牌沿 core 链
++        // 继续传到 PE_Param_out，让链尾 Destroy_int 也能退出。
+@@ -187,0 +221,2 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
++                // 每个 batch 对应一个 slice window。core 先把本 batch 需要的
++                // x[col] 范围载入本地 BRAM，再解码本 channel 的矩阵元素。
+@@ -199,0 +235,2 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
++                        // 向量包在 core 链上逐级转发；每个 core 都看到同一份
++                        // packed X/P，但只消费自己矩阵分片需要的列值。
+@@ -228,0 +266,3 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
++                            // 一个 512-bit beat 打包 8 个 SpElement，每个元素：
++                            //   col[13:0], row[17:0], value_bits[31:0]
++                            // row 是 Cuper 内部重排编码，不是原始全局行号。
+@@ -237,0 +278,2 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
++                                // FLEX_REUSE 是原 Cuper 的小优化：连续元素可能复用
++                                // 上一个 value，减少 bit_cast/寄存器切换。
+@@ -309,0 +352,2 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
++                // 每次 SpMV 前清空本 accumulator 的局部部分和。num_v_init
++                // 按 16 HBM * 16 float 对齐，而不是简单 Row_num/16。
+@@ -375,0 +420,2 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
++                // c_idx 在 8 个 lane/PE accumulator bank 间轮转，配合后面的
++                // checker/sort tree 重新组装成 float_v16。
+@@ -416,0 +463,2 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
++                // 只保留真实 Row_num 对应的输出包。padding 仍要从上游读掉，
++                // 否则 accumulator 会被反压。
+@@ -433,0 +482,2 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
++// 把 8 路 float_v2 合并成 1 路 float_v16，恢复 controller 期望的
++// “连续 16 行一包”的 SpMV 输出格式。
+@@ -458,0 +509,2 @@ void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
++                // lane 0/1 来自第 0 路 float_v2，lane 2/3 来自第 1 路，
++                // 依次拼成 controller 读取的 A*x0/A*p packet。
+diff --git a/Makefile b/Makefile
+index 4d85c29..310b7ad 100644
+--- a/Makefile
++++ b/Makefile
+@@ -596 +596 @@ run-cuper-pcg-tapa-fpga: $(CUPER_TAPA_PCG_FPGA_HOST)
+-	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
++	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL)) $(if $(LEGACY_ABI),--legacy-abi)
+diff --git a/cfg/connectivity_cuper_tapa_pcg_u55c.cfg b/cfg/connectivity_cuper_tapa_pcg_u55c.cfg
+index 9ce1f85..313aeb1 100644
+--- a/cfg/connectivity_cuper_tapa_pcg_u55c.cfg
++++ b/cfg/connectivity_cuper_tapa_pcg_u55c.cfg
+@@ -27,3 +27,5 @@ sp=CuperPcg_1.P:HBM[21]
+-sp=CuperPcg_1.AP:HBM[22]
+-sp=CuperPcg_1.Metrics:HBM[23]
+-sp=CuperPcg_1.Status:HBM[23]
++sp=CuperPcg_1.AP_spmv:HBM[22]
++sp=CuperPcg_1.X_spmv:HBM[24]
++sp=CuperPcg_1.P_spmv:HBM[25]
++sp=CuperPcg_1.Metrics:HBM[26]
++sp=CuperPcg_1.Status:HBM[26]
+diff --git a/docs/bitstream_summaries/README.md b/docs/bitstream_summaries/README.md
+index 27a8295..337a10c 100644
+--- a/docs/bitstream_summaries/README.md
++++ b/docs/bitstream_summaries/README.md
+@@ -19,0 +20,7 @@ YYYY-MM-DD-<主线>-<简短说明>/
++## 已有版本记录
++
++- `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
++  receive-path demo 对比。
++- `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
++  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 构建中。
++
+@@ -24 +31,4 @@ YYYY-MM-DD-<主线>-<简短说明>/
+-- `source.diff`：可选但推荐。记录这一版相对上一标准源码的可逆补丁，
++- `testing.md`：测试命令、数据集、关键输出、失败边界、待补项目。
++- `code_reading_guide.md`：版本相关代码阅读指南。只在该版源码较复杂或用户
++  要求研究代码时补充，避免把版本特有解释散落到全局设计文档。
++- `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
+@@ -66 +76,2 @@ demo 的结果必须同时写入：
+-- 本目录对应版本子文件夹的 Markdown 总结。
++- 本目录对应版本子文件夹的 Markdown 总结，详细测试过程写入该目录
++  `testing.md`，不要只在最终回复或日志里保留。
+diff --git a/docs/codex/coding.md b/docs/codex/coding.md
+index dba6786..a11d4e4 100644
+--- a/docs/codex/coding.md
++++ b/docs/codex/coding.md
+@@ -3,2 +3,2 @@
+-这份文件给新对话里的 Codex 先读。目标是避免把 Project-XPlus 的几条
+-Cuper / PCG 路线、bitstream、build 目录和报告搞混。
++这份文件是新对话里的入口页。它只保留高优先级纪律和文档导航；具体流程拆到
++`docs/codex/workflows/`，避免所有规则挤在一个 Markdown 里。
+@@ -10,7 +10,4 @@ Cuper / PCG 路线、bitstream、build 目录和报告搞混。
+-3. 涉及 bitstream、构建、运行脚本时，再查：
+-   - `Makefile`
+-   - `scripts/launcher.py`
+-   - `395bitstream/README.md`
+-   - `bitstream_archive/README.md`
+-4. 如果有 tmux 正在跑硬件构建，先确认阶段。源码改动不会影响已经进入
+-   Vitis/Vivado link/impl 的那次构建，但会影响下一次构建。必须在回复里说明。
++3. 再跑 `tmux ls 2>/dev/null || true`。如果硬件构建已经进入 `vpl` / `impl` /
++   routing，源码改动只影响下一次构建，回复里必须说明。
++4. 只读型窄问题可以只读相关章节；涉及代码、构建、bitstream、报告或版本记录时，
++   必须按下面文档地图补读对应 workflow。
+@@ -18 +15,22 @@ Cuper / PCG 路线、bitstream、build 目录和报告搞混。
+-## 1. 四条主线
++## 1. 文档地图
++
++| 任务 | 先读 |
++| --- | --- |
++| bitstream 同步、demo 晋级、旧版归档 | `docs/codex/workflows/bitstreams.md` |
++| build 目录、tmux、Vitis/Vivado 构建 | `docs/codex/workflows/builds.md` |
++| TAPA/Cuper 源码组织、stream/HBM 注释、SpMV 优化目标 | `docs/codex/workflows/tapa_sources.md` |
++| HTML、analysis、XO/Vitis 报告和报告口径 | `docs/codex/workflows/reports.md` |
++| `docs/bitstream_summaries/<版本>/`、`source.diff`、阅读指南 | `docs/codex/workflows/version_records.md` |
++| demo-vs-standard 动态测试、数据集、失败边界 | `docs/codex/testing.md` |
++| 四条实现线的长期说明 | `docs/design/implementation_versions_zh.md` |
++
++涉及 bitstream、构建、运行脚本时，也要查：
++
++```text
++Makefile
++scripts/launcher.py
++395bitstream/README.md
++bitstream_archive/README.md
++```
++
++## 2. 四条主线
+@@ -36,94 +54 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路
+-## 2. bitstream 同步目录
+-
+-`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。
+-
+-要求：
+-
+-1. 四条主线各自保留一个当前首选 `.xclbin`。
+-2. 文件名保持稳定、简洁，不往文件名里塞 `debug`、`fix`、频率、UUID 等额外信息。
+-3. 版本差异写进 `395bitstream/README.md` 和 `.xclbin.info`，不要靠改文件名表达。
+-4. 对比报告 HTML 也放在 `395bitstream/`，文件名要能看出测试对象和日期。
+-5. 替换 `.xclbin` 时必须同步替换对应 `.xclbin.info`。
+-
+-### demo bitstream 规则
+-
+-新生成的 bitstream 在用户明确认可前，一律只是候选版，不允许直接替换四条主线
+-的标准文件。
+-
+-1. 候选 bitstream 必须仍归入四条基础版本之一：
+-   - `cuper-tapa-pcg`
+-   - `cuper-tapa-spmv`
+-   - `cuper-notapa-pcg`
+-   - `cuper-notapa-spmv`
+-2. 候选 bitstream 放进 `395bitstream/` 时，文件名必须在 `.xclbin` 前加入
+-   `-demo` 后缀，例如：
+-
+-```text
+-cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+-cuper-notapa-spmv-u55c-20260527-demo.xclbin
+-```
+-
+-3. 候选版必须同时放入对应 `.xclbin.info`：
+-
+-```text
+-cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
+-```
+-
+-4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
+-   `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
+-5. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
+-   默认复用当前 HTML 和 `docs/bitstream_summaries/` 的记录，除非用户要求、
+-   标准 bitstream/host 变化、或 demo 结果与旧记录矛盾。
+-6. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
+-   归档，并把 demo 晋级为稳定标准文件名。
+-7. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
+-   `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
+-8. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
+-   `logs/` 目录。
+-9. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
+-   留一份 Markdown 详细总结，并包含一个说明“这一版改了什么”的文档。
+-
+-替换后至少记录：
+-
+-```text
+-生成日期/时间
+-主线
+-构建目的或关键改动
+-DATA/KERNEL/HBM clock
+-UUID
+-SHA256
+-已知测试状态
+-旧版归档路径
+-```
+-
+-## 3. bitstream 替换与归档流程
+-
+-替换 `395bitstream/` 里的任何标准 `.xclbin` 前，必须先归档旧版。demo 版
+-只能在用户确认满意后晋级为标准版；测试未完成或用户未确认时，不能覆盖标准
+-文件。
+-
+-标准流程：
+-
+-1. 确认新构建成功，日志里应有 `impl Complete` 或等价成功信息。
+-2. 先以 `-demo.xclbin` 形式放入 `395bitstream/`，同步 `.xclbin.info`。
+-3. 按 `docs/codex/testing.md` 与同主线当前标准 bitstream 做动态对比。
+-4. 用户明确确认 demo 结果满意后，才进入标准替换流程。
+-5. 对新 `.xclbin` 生成或复制 `.xclbin.info`。
+-6. 计算新旧文件 `sha256sum`，必要时记录 UUID。
+-7. 在 `bitstream_archive/` 下新建目录：
+-
+-```text
+-bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-```
+-
+-8. 把即将被替换的旧 `.xclbin` 和 `.xclbin.info` 放入该归档目录。
+-9. 在归档目录写中文 `README.md`，说明：
+-   - 归档对象
+-   - 被什么版本替换
+-   - 旧版频率/UUID/SHA256
+-   - 旧版已知表现或失败原因
+-   - 相关日志/报告路径
+-10. 再覆盖 `395bitstream/` 里的当前标准文件。
+-11. 更新 `395bitstream/README.md`。
+-
+-如果 `.gitignore` 导致 `bitstream_archive/*.xclbin` 被忽略，不能悄悄漏掉：
++## 3. 高优先级规则
+@@ -131,2 +56,12 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-- 若用户要求同步归档二进制，用 `git add -f` 加入归档 `.xclbin`。
+-- 若决定只本地保留二进制，必须在 README 和回复里明确说明。
++1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
++2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
++   `workflows/bitstreams.md` 归档旧版。
++3. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
++   `-build` 后缀。
++4. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
++5. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
++   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
++   `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
++6. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
++   `docs/bitstream_summaries/<版本>/`。
++7. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
+@@ -134 +69 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-## 4. 构建目录纪律
++## 4. 常用验证
+@@ -136,57 +71 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-硬件构建不要使用裸 `build/` 混放。
+-
+-规则：
+-
+-1. 构建目录必须使用当前主线或当前 bitstream 名加 `-build` 后缀。
+-2. 典型形式：
+-
+-```text
+-cuper-tapa-spmv-build/
+-cuper-notapa-spmv-build/
+-cuper-notapa-fpga-pcg-build/
+-cuper-tapa-pcg-fpga-u55c-YYYYMMDD-build/
+-```
+-
+-3. 所有 build 目录必须被 `.gitignore` 忽略。
+-4. 如果新增 build 目录，要确认 `*-build/` 或显式条目已经覆盖。
+-5. 不要把临时 build 产物、`.xo`、`.link_summary`、`.compile_summary`、Vivado 中间目录提交进仓库。
+-6. 只把需要同步的 `.xclbin` 放到 `395bitstream/`，只把需要归档的文件放到 `bitstream_archive/`。
+-
+-## 5. 构建与 tmux 纪律
+-
+-1. 长时间硬件构建用 tmux，不在普通前台会话里跑。
+-2. tmux 命名要能看出主线，例如：
+-
+-```text
+-project-xplus-cuper-tapa-pcg-hw
+-project-xplus-cuper-notapa-spmv-hw
+-```
+-
+-3. tmux 命令结束后保留 shell，不要自动退出，方便回看日志。
+-4. 构建日志写入 `logs/`，文件名包含主线和时间戳。
+-5. 不要随意杀正在跑的实现。需要停止时先确认阶段、日志和是否有并行构建。
+-6. 如果构建进入 `vpl` / `impl` / routing，后续源码注释或重构不会影响这次结果；新源码只影响下一次构建。
+-
+-## 6. TAPA 源码组织纪律
+-
+-1. `DLC/Cuper/kernels/Cuper.cpp` 里有两个 TAPA top：
+-   - `Cuper(...)`：TAPA single SpMV
+-   - `CuperPcg(...)`：TAPA Cuper + FPGA 内 PCG
+-2. `CuperPcg` 是 `tapa compile -t CuperPcg` 的顶层。
+-3. 若拆文件，优先拆成被 `Cuper.cpp` include 的 `.hpp` / `.inc` 片段，让 TAPA 仍看到一个 translation unit。
+-4. 不要直接拆成多个 `.cpp`，除非同步修改 Makefile/TAPA compile 命令并验证。
+-5. TAPA task graph 里的 stream、core 链、HBM channel 映射要加中文注释；尤其是：
+-   - `PE_Param[0..16]`
+-   - `Vector_X_Stream[0..16]`
+-   - `Matrix_A_Stream[0..15]`
+-   - `Matrix_Mult_Vector_Stream[0..15]`
+-   - `Destroy_*` 链尾消费
+-6. 对 Cuper 内部 row 编码必须说明它不是原始全局 row，避免误判 `65535` 边界。
+-
+-## 7. 测试纪律
+-
+-代码改动后按风险选择测试，不要只说“理论上可以”。
+-
+-建议顺序：
+-
+-1. 纯软件/本地小数据 smoke：
++Host smoke：
+@@ -195,27 +74,2 @@ project-xplus-cuper-notapa-spmv-hw
+-make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
+-```
+-
+-2. `thermal2_n1024` 低迭代检查数值和返回路径。
+-3. 新 bitstream 上板后先跑 `MAX_ITERS=0` 或 `MAX_ITERS=1`，区分 init SpMV、迭代 SpMV、PCG 更新阶段问题。
+-4. 大矩阵问题按规模递增：
+-
+-```text
+-thermal2_n65536
+-thermal2_n131072
+-thermal2_n262144
+-完整 thermal2
+-```
+-
+-5. 每次硬件实测至少记录：
+-
+-```text
+-dataset
+-n / nnz
+-tau
+-max_iters
+-iterations
+-status
+-residual_abs / residual_rel
+-kernel time
+-host wall time
+-bitstream path / SHA256 / UUID
++make cuper-tapa-pcg-fpga-host
++make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
+@@ -224,28 +78 @@ bitstream path / SHA256 / UUID
+-## 8. 报告纪律
+-
+-1. 面向同步/对比的 HTML 报告放 `395bitstream/`。
+-2. bitstream 版本级详细总结放 `docs/bitstream_summaries/<版本目录>/`。
+-   一个版本一个子文件夹，至少包含：
+-   - `README.md`：测试摘要、关键结论、日志路径、是否建议晋级；
+-   - `changes.md`：这一版相对上一标准版改了什么、预期收益、实际结果。
+-   - `source.diff`：推荐放。记录这一版相对上一标准源码的可逆补丁，
+-     不要把大段源码直接贴进 Markdown。
+-3. demo 的数据必须同时写进 HTML 报告和对应 Markdown 总结。HTML 给同步查看，
+-   Markdown 给详细追踪。
+-4. 设计解释、失败分析、实现版本说明放 `docs/design/`。
+-5. 旧版构建尝试、失败原因、routing 信息要写清楚日志路径，不要只贴最后一屏错误。
+-6. 频率、资源、时序结论要注明来自哪个报告：
+-   - `.xclbin.info`
+-   - timing summary
+-   - implementation report
+-   - TAPA HLS report
+-   - Vitis system estimate
+-7. `sw_emu` / HLS 资源估算不能当作 routed bitstream 的最终资源。
+-8. 如果版本总结目录里有 `source.diff`，回退说明使用
+-   `git apply --unidiff-zero -R docs/bitstream_summaries/<版本目录>/source.diff`；
+-   复现说明使用
+-   `git apply --unidiff-zero docs/bitstream_summaries/<版本目录>/source.diff`。
+-
+-## 9. 提交与推送纪律
+-
+-1. 提交前跑：
++提交或结束代码/文档改动前：
+@@ -254 +80,0 @@ bitstream path / SHA256 / UUID
+-git status --short
+@@ -255,0 +82 @@ git diff --check
++git status --short
+@@ -258,2 +85,6 @@ git diff --check
+-2. 只提交本次任务相关文件，不顺手提交无关脏改动。
+-3. 替换 bitstream 的提交必须包含：
++硬件测试和 demo 对比按 `docs/codex/testing.md` 执行，不要只说“理论上可以”。
++
++## 5. 提交与推送纪律
++
++1. 只提交本次任务相关文件，不顺手提交无关脏改动。
++2. 替换 bitstream 的提交必须包含：
+@@ -264,2 +95,2 @@ git diff --check
+-4. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
+-5. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
++3. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
++4. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
+@@ -267 +98 @@ git diff --check
+-## 10. 回复纪律
++## 6. 回复纪律
+@@ -270,6 +101,3 @@ git diff --check
+-2. 用户问“能不能过某规模”，必须区分：
+-   - 编码/位宽硬边界
+-   - stream/死锁问题
+-   - host/runtime 返回问题
+-   - routing/timing 问题
+-3. 用户问“这是不是顶层/并行/流水”，用 CuperPcg 的 task graph 解释，不要泛泛讲 FPGA。
++2. 用户问“能不能过某规模”，必须区分编码/位宽硬边界、stream/死锁、host/runtime
++   返回问题、routing/timing 问题。
++3. 用户问“这是不是顶层/并行/流水”，用 `CuperPcg` 的 task graph 解释，不要泛泛讲 FPGA。
+@@ -277 +104,0 @@ git diff --check
+-5. 对中文源码和文档，优先写中文注释；英文只用于代码符号、命令和固定术语。
+diff --git a/docs/codex/testing.md b/docs/codex/testing.md
+index 2a33eaa..2e24df8 100644
+--- a/docs/codex/testing.md
++++ b/docs/codex/testing.md
+@@ -108 +108,3 @@ cuper-notapa-spmv
+-   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。
++   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。目录内必须包含
++   `README.md`、`changes.md`、`testing.md` 和 `source.diff`；其中
++   `testing.md` 记录测试命令、关键输出、失败边界和待补项目。
+diff --git a/host/cuper_tapa_pcg_fpga_main.cpp b/host/cuper_tapa_pcg_fpga_main.cpp
+index 35e4d90..d93e931 100644
+--- a/host/cuper_tapa_pcg_fpga_main.cpp
++++ b/host/cuper_tapa_pcg_fpga_main.cpp
+@@ -53,0 +54,4 @@ struct CliOptions {
++    // 旧标准 bitstream 只有 26 个 memory args，且 AP 是 double*。
++    // 新 packed feed/AP demo 有 28 个 memory args。legacy_abi 让同一个
++    // host 可以继续对比旧标准版。
++    bool legacy_abi = false;
+@@ -59 +63 @@ void usage(const char* argv0) {
+-              << " [--diff-tol value]\n";
++              << " [--diff-tol value] [--legacy-abi]\n";
+@@ -98,0 +103,2 @@ CliOptions parse_args(int argc, char** argv) {
++        } else if (arg == "--legacy-abi") {
++            options.legacy_abi = true;
+@@ -144,0 +151,2 @@ constexpr std::array<PcgStageReport, 7> kPcgStageReports = {{
++    // work_metric_index 对应 Metrics[5..14] 的手工 tick；
++    // cycle_metric_index 对应 Metrics[16..24] 的 Pcg_Stage_Timer cycle。
+@@ -158 +166,36 @@ double cycles_to_ms(const double cycles) {
+-constexpr std::array<int, 26> kCuperPcgMemoryGroups = {
++constexpr std::array<int, 28> kCuperPcgMemoryGroups = {
++    // 这个数组必须和 CuperPcg 顶层参数顺序一致，不是随便的 HBM 列表。
++    // host 创建 BO 时按 arg_index 查 HBM bank；connectivity cfg 也必须同步。
++    0,   // SpElement_list_ptr: HBM[0]
++    0,   // Matrix_data_0: HBM[0]
++    1,   // Matrix_data_1: HBM[1]
++    2,   // Matrix_data_2: HBM[2]
++    3,   // Matrix_data_3: HBM[3]
++    4,   // Matrix_data_4: HBM[4]
++    5,   // Matrix_data_5: HBM[5]
++    6,   // Matrix_data_6: HBM[6]
++    7,   // Matrix_data_7: HBM[7]
++    8,   // Matrix_data_8: HBM[8]
++    9,   // Matrix_data_9: HBM[9]
++    10,  // Matrix_data_10: HBM[10]
++    11,  // Matrix_data_11: HBM[11]
++    12,  // Matrix_data_12: HBM[12]
++    13,  // Matrix_data_13: HBM[13]
++    14,  // Matrix_data_14: HBM[14]
++    15,  // Matrix_data_15: HBM[15]
++    16,  // B: HBM[16]
++    17,  // M_inv: HBM[17]
++    18,  // X: HBM[18]
++    19,  // R: HBM[19]
++    20,  // Z: HBM[20]
++    21,  // P: HBM[21]
++    22,  // AP_spmv: HBM[22], packed float_v16 SpMV output cache
++    24,  // X_spmv: HBM[24], packed float_v16 feed for init A*x0
++    25,  // P_spmv: HBM[25], packed float_v16 feed for iterative A*p
++    26,  // Metrics: HBM[26]
++    26,  // Status: HBM[26]
++};
++
++constexpr std::array<int, 26> kLegacyCuperPcgMemoryGroups = {
++    // 旧标准 bitstream 的 ABI：没有 X_spmv/P_spmv/AP_spmv，AP 仍是 double*，
++    // Metrics/Status 仍在 HBM[23]。
+@@ -187 +230 @@ constexpr std::array<int, 26> kCuperPcgMemoryGroups = {
+-std::array<int, 26> cuper_pcg_memory_groups() {
++std::array<int, 28> cuper_pcg_memory_groups() {
+@@ -209,0 +253,2 @@ void write_reg_u64(xrt::ip& ip, const uint32_t offset, const uint64_t value) {
++    // xrt::ip 的 register 写接口一次写 32 bit；64-bit BO 地址和 double
++    // scalar 都要拆成低/高 32 bit。
+@@ -316 +361,42 @@ AlignedVector<T> aligned_copy(const std::vector<T>& input, int align = 1024) {
+-template <typename T>
++AlignedVector<float_v16> pack_float_v16_from_double(const AlignedVector<double>& input,
++                                                    const int valid_size,
++                                                    const int align_packets = 1024) {
++    // Cuper single SpMV 的 X 是 float_v16 packed HBM。CuperPcg 也维护这份
++    // packed 副本，避免 kernel 内 controller 每次从 double X/P 标量打包。
++    const int packet_count = (valid_size + 15) >> 4;
++    AlignedVector<float_v16> output(
++        static_cast<std::size_t>(round_up(packet_count, align_packets)));
++    for (float_v16& packet : output) {
++        for (int lane = 0; lane < 16; ++lane) {
++            packet[lane] = 0.0f;
++        }
++    }
++
++    for (int packet_index = 0; packet_index < packet_count; ++packet_index) {
++        float_v16 packet;
++        for (int lane = 0; lane < 16; ++lane) {
++            const int index = (packet_index << 4) + lane;
++            packet[lane] = index < valid_size ? static_cast<float>(input[static_cast<std::size_t>(index)])
++                                               : 0.0f;
++        }
++        output[static_cast<std::size_t>(packet_index)] = packet;
++    }
++    return output;
++}
++
++AlignedVector<float_v16> make_zero_float_v16_packets(const int valid_size,
++                                                     const int align_packets = 1024) {
++    // AP_spmv/P_spmv 这类 packed 缓冲启动前需要清零，避免 padding lane
++    // 参与软件仿真或调试读回时出现未初始化值。
++    const int packet_count = (valid_size + 15) >> 4;
++    AlignedVector<float_v16> output(
++        static_cast<std::size_t>(round_up(packet_count, align_packets)));
++    for (float_v16& packet : output) {
++        for (int lane = 0; lane < 16; ++lane) {
++            packet[lane] = 0.0f;
++        }
++    }
++    return output;
++}
++
++template <typename T, std::size_t N>
+@@ -318 +404 @@ xrt::bo make_input_bo(xrt::device& device,
+-                      const std::array<int, 26>& memory_groups,
++                      const std::array<int, N>& memory_groups,
+@@ -328 +414 @@ xrt::bo make_input_bo(xrt::device& device,
+-template <typename T>
++template <typename T, std::size_t N>
+@@ -330 +416 @@ xrt::bo make_input_bo(xrt::device& device,
+-                      const std::array<int, 26>& memory_groups,
++                      const std::array<int, N>& memory_groups,
+@@ -340 +426 @@ xrt::bo make_input_bo(xrt::device& device,
+-template <typename T>
++template <typename T, std::size_t N>
+@@ -342 +428 @@ xrt::bo make_inout_bo(xrt::device& device,
+-                      const std::array<int, 26>& memory_groups,
++                      const std::array<int, N>& memory_groups,
+@@ -352 +438 @@ xrt::bo make_inout_bo(xrt::device& device,
+-template <typename T>
++template <typename T, std::size_t N>
+@@ -354 +440 @@ xrt::bo make_output_bo(xrt::device& device,
+-                       const std::array<int, 26>& memory_groups,
++                       const std::array<int, N>& memory_groups,
+@@ -364,14 +450,16 @@ xrt::bo make_output_bo(xrt::device& device,
+-double run_cuper_pcg_xrt(const CliOptions& options,
+-                         const Dataset& dataset,
+-                         const CuperTapaMatrix& matrix,
+-                         AlignedVector<double>& b,
+-                         AlignedVector<double>& minv,
+-                         AlignedVector<double>& x,
+-                         AlignedVector<double>& r,
+-                         AlignedVector<double>& z,
+-                         AlignedVector<double>& p,
+-                         AlignedVector<double>& ap,
+-                         AlignedVector<double>& metrics,
+-                         AlignedVector<INDEX_TYPE>& status,
+-                         const int effective_max_iters) {
+-    std::cerr << "[xplus-stage] before xrt setup\n" << std::flush;
++double run_cuper_pcg_xrt_legacy(const CliOptions& options,
++                                const Dataset& dataset,
++                                const CuperTapaMatrix& matrix,
++                                AlignedVector<double>& b,
++                                AlignedVector<double>& minv,
++                                AlignedVector<double>& x,
++                                AlignedVector<double>& r,
++                                AlignedVector<double>& z,
++                                AlignedVector<double>& p,
++                                AlignedVector<double>& ap,
++                                AlignedVector<double>& metrics,
++                                AlignedVector<INDEX_TYPE>& status,
++                                const int effective_max_iters) {
++    // legacy 路径只服务旧 26-arg CuperPcg bitstream。不要在这里加入
++    // X_spmv/P_spmv/AP_spmv，否则会把旧 xclbin 的 register ABI 写错。
++    std::cerr << "[xplus-stage] before xrt setup legacy_abi=1\n" << std::flush;
+@@ -381 +469 @@ double run_cuper_pcg_xrt(const CliOptions& options,
+-    const std::array<int, 26> memory_groups = cuper_pcg_memory_groups();
++    const std::array<int, 26> memory_groups = kLegacyCuperPcgMemoryGroups;
+@@ -416,0 +505,2 @@ double run_cuper_pcg_xrt(const CliOptions& options,
++        // 旧 ABI register offset：每个 m_axi 指针占 0x0c 间隔，scalar
++        // 从 0x148 开始。这个布局来自旧 xclbin 的 kernel.xml。
+@@ -515,0 +606,178 @@ double run_cuper_pcg_xrt(const CliOptions& options,
++double run_cuper_pcg_xrt(const CliOptions& options,
++                         const Dataset& dataset,
++                         const CuperTapaMatrix& matrix,
++                         AlignedVector<double>& b,
++                         AlignedVector<double>& minv,
++                         AlignedVector<double>& x,
++                         AlignedVector<double>& r,
++                         AlignedVector<double>& z,
++                         AlignedVector<double>& p,
++                         AlignedVector<double>& legacy_ap,
++                         AlignedVector<float_v16>& ap_spmv,
++                         AlignedVector<float_v16>& x_spmv,
++                         AlignedVector<float_v16>& p_spmv,
++                         AlignedVector<double>& metrics,
++                         AlignedVector<INDEX_TYPE>& status,
++                         const int effective_max_iters) {
++    if (options.legacy_abi) {
++        return run_cuper_pcg_xrt_legacy(options,
++                                        dataset,
++                                        matrix,
++                                        b,
++                                        minv,
++                                        x,
++                                        r,
++                                        z,
++                                        p,
++                                        legacy_ap,
++                                        metrics,
++                                        status,
++                                        effective_max_iters);
++    }
++
++    std::cerr << "[xplus-stage] before xrt setup\n" << std::flush;
++    const auto setup_start = std::chrono::steady_clock::now();
++    xrt::device device(project_xplus::cgsolver::run_defaults::kDeviceIndex);
++    auto uuid = device.load_xclbin(options.bitstream);
++    const std::array<int, 28> memory_groups = cuper_pcg_memory_groups();
++
++    auto sp_ptr_bo = make_input_bo(device, memory_groups, 0, matrix.sp_element_list_ptr);
++    auto matrix0_bo = make_input_bo(device, memory_groups, 1, matrix.matrix_data[0]);
++    auto matrix1_bo = make_input_bo(device, memory_groups, 2, matrix.matrix_data[1]);
++    auto matrix2_bo = make_input_bo(device, memory_groups, 3, matrix.matrix_data[2]);
++    auto matrix3_bo = make_input_bo(device, memory_groups, 4, matrix.matrix_data[3]);
++    auto matrix4_bo = make_input_bo(device, memory_groups, 5, matrix.matrix_data[4]);
++    auto matrix5_bo = make_input_bo(device, memory_groups, 6, matrix.matrix_data[5]);
++    auto matrix6_bo = make_input_bo(device, memory_groups, 7, matrix.matrix_data[6]);
++    auto matrix7_bo = make_input_bo(device, memory_groups, 8, matrix.matrix_data[7]);
++    auto matrix8_bo = make_input_bo(device, memory_groups, 9, matrix.matrix_data[8]);
++    auto matrix9_bo = make_input_bo(device, memory_groups, 10, matrix.matrix_data[9]);
++    auto matrix10_bo = make_input_bo(device, memory_groups, 11, matrix.matrix_data[10]);
++    auto matrix11_bo = make_input_bo(device, memory_groups, 12, matrix.matrix_data[11]);
++    auto matrix12_bo = make_input_bo(device, memory_groups, 13, matrix.matrix_data[12]);
++    auto matrix13_bo = make_input_bo(device, memory_groups, 14, matrix.matrix_data[13]);
++    auto matrix14_bo = make_input_bo(device, memory_groups, 15, matrix.matrix_data[14]);
++    auto matrix15_bo = make_input_bo(device, memory_groups, 16, matrix.matrix_data[15]);
++    auto b_bo = make_input_bo(device, memory_groups, 17, b);
++    auto minv_bo = make_input_bo(device, memory_groups, 18, minv);
++    auto x_bo = make_inout_bo(device, memory_groups, 19, x);
++    auto r_bo = make_inout_bo(device, memory_groups, 20, r);
++    auto z_bo = make_inout_bo(device, memory_groups, 21, z);
++    auto p_bo = make_inout_bo(device, memory_groups, 22, p);
++    auto ap_spmv_bo = make_inout_bo(device, memory_groups, 23, ap_spmv);
++    auto x_spmv_bo = make_input_bo(device, memory_groups, 24, x_spmv);
++    auto p_spmv_bo = make_inout_bo(device, memory_groups, 25, p_spmv);
++    auto metrics_bo = make_output_bo(device, memory_groups, 26, metrics);
++    auto status_bo = make_output_bo(device, memory_groups, 27, status);
++    const auto setup_end = std::chrono::steady_clock::now();
++    std::cerr << "[xplus-stage] after xrt setup ms=" << elapsed_ms(setup_start, setup_end) << "\n"
++              << std::flush;
++
++    std::cerr << "[xplus-stage] before xrt direct register start\n" << std::flush;
++    const auto kernel_start = std::chrono::steady_clock::now();
++    xrt::ip ip = open_cuper_pcg_ip(device, uuid);
++    const std::array<std::pair<uint32_t, uint64_t>, 28> pointer_args = {{
++        // 新 ABI register offset：AP_spmv/X_spmv/P_spmv 插入到 AP 后面，
++        // Metrics/Status 和 scalar 参数整体后移。若 CuperPcg 参数顺序变化，
++        // 这里和 kCuperPcgMemoryGroups/connectivity 必须一起改。
++        {0x010, sp_ptr_bo.address()},
++        {0x01c, matrix0_bo.address()},
++        {0x028, matrix1_bo.address()},
++        {0x034, matrix2_bo.address()},
++        {0x040, matrix3_bo.address()},
++        {0x04c, matrix4_bo.address()},
++        {0x058, matrix5_bo.address()},
++        {0x064, matrix6_bo.address()},
++        {0x070, matrix7_bo.address()},
++        {0x07c, matrix8_bo.address()},
++        {0x088, matrix9_bo.address()},
++        {0x094, matrix10_bo.address()},
++        {0x0a0, matrix11_bo.address()},
++        {0x0ac, matrix12_bo.address()},
++        {0x0b8, matrix13_bo.address()},
++        {0x0c4, matrix14_bo.address()},
++        {0x0d0, matrix15_bo.address()},
++        {0x0dc, b_bo.address()},
++        {0x0e8, minv_bo.address()},
++        {0x0f4, x_bo.address()},
++        {0x100, r_bo.address()},
++        {0x10c, z_bo.address()},
++        {0x118, p_bo.address()},
++        {0x124, ap_spmv_bo.address()},
++        {0x130, x_spmv_bo.address()},
++        {0x13c, p_spmv_bo.address()},
++        {0x148, metrics_bo.address()},
++        {0x154, status_bo.address()},
++    }};
++    for (const auto& [offset, address] : pointer_args) {
++        write_reg_u64(ip, offset, address);
++    }
++    write_reg_i32(ip, 0x160, matrix.batch_num);
++    write_reg_i32(ip, 0x168, matrix.matrix_len);
++    write_reg_i32(ip, 0x170, dataset.n());
++    write_reg_i32(ip, 0x178, dataset.n());
++    write_reg_i32(ip, 0x180, effective_max_iters);
++    write_reg_double(ip, 0x188, options.tau);
++
++    const uint32_t before_ctrl = ip.read_register(0x00);
++    const uint32_t read_batch_num = ip.read_register(0x160);
++    const uint32_t read_matrix_len = ip.read_register(0x168);
++    const uint32_t read_row_num = ip.read_register(0x170);
++    const uint64_t read_sp_ptr = read_reg_u64(ip, 0x010);
++    const uint64_t read_x_ptr = read_reg_u64(ip, 0x0f4);
++    std::cerr << "[xplus-stage] direct ctrl before start=0x" << std::hex << before_ctrl
++              << std::dec << "\n"
++              << std::flush;
++    std::cerr << "[xplus-stage] direct arg readback batch=" << read_batch_num
++              << " matrix_len=" << read_matrix_len
++              << " row=" << read_row_num
++              << " sp_ptr=0x" << std::hex << read_sp_ptr
++              << " x=0x" << read_x_ptr << std::dec << "\n"
++              << std::flush;
++    ip.write_register(0x00, 0x01);
++
++    bool completed = false;
++    uint32_t last_ctrl = 0;
++    auto next_report = kernel_start + std::chrono::seconds(5);
++    while (true) {
++        last_ctrl = ip.read_register(0x00);
++        const bool done = (last_ctrl & 0x02) != 0;
++        const bool idle = (last_ctrl & 0x04) != 0;
++        if (done || idle) {
++            completed = true;
++            break;
++        }
++        const auto now = std::chrono::steady_clock::now();
++        if (now >= next_report) {
++            std::cerr << "[xplus-stage] direct wait ms=" << elapsed_ms(kernel_start, now)
++                      << " ctrl=0x" << std::hex << last_ctrl << std::dec << "\n"
++                      << std::flush;
++            next_report = now + std::chrono::seconds(5);
++        }
++        if (now - kernel_start > std::chrono::seconds(60)) {
++            break;
++        }
++        std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    }
++    if (!completed) {
++        throw std::runtime_error("direct register run did not complete, ctrl=0x" +
++                                 std::to_string(last_ctrl));
++    }
++    const auto kernel_end = std::chrono::steady_clock::now();
++    std::cerr << "[xplus-stage] after xrt direct register wait ctrl=0x" << std::hex
++              << last_ctrl << std::dec << "\n"
++              << std::flush;
++
++    x_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, x.size() * sizeof(double), 0);
++    metrics_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, metrics.size() * sizeof(double), 0);
++    status_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, status.size() * sizeof(INDEX_TYPE), 0);
++    const auto x_mapped = x_bo.map<double*>();
++    const auto metrics_mapped = metrics_bo.map<double*>();
++    const auto status_mapped = status_bo.map<INDEX_TYPE*>();
++    std::copy(x_mapped, x_mapped + x.size(), x.begin());
++    std::copy(metrics_mapped, metrics_mapped + metrics.size(), metrics.begin());
++    std::copy(status_mapped, status_mapped + status.size(), status.begin());
++    std::cerr << "[xplus-stage] after xrt readback\n" << std::flush;
++    return elapsed_ms(kernel_start, kernel_end);
++}
++
+@@ -534,2 +802,3 @@ int main(int argc, char** argv) {
+-        // B/M_inv 是只读输入，X/R/Z/P/AP 是 kernel 内迭代更新的向量，
+-        // Metrics/Status 是收敛状态和调试信息的最小写回口。
++        // B/M_inv 是只读输入，X/R/Z/P 是 kernel 内迭代更新的 FP64
++        // 向量；AP_spmv/X_spmv/P_spmv 是贴近 Cuper SpMV 的 packed
++        // float_v16 缓冲；Metrics/Status 是收敛状态和调试信息的最小写回口。
+@@ -542 +811,4 @@ int main(int argc, char** argv) {
+-        AlignedVector<double> ap(static_cast<std::size_t>(round_up(dataset.n(), 1024)), 0.0);
++        AlignedVector<double> legacy_ap(static_cast<std::size_t>(round_up(dataset.n(), 1024)), 0.0);
++        AlignedVector<float_v16> ap_spmv = make_zero_float_v16_packets(dataset.n());
++        AlignedVector<float_v16> x_spmv = pack_float_v16_from_double(x, dataset.n());
++        AlignedVector<float_v16> p_spmv = make_zero_float_v16_packets(dataset.n());
+@@ -557,0 +830,2 @@ int main(int argc, char** argv) {
++            // 这里的参数顺序同样要与 CuperPcg 顶层完全一致；软件仿真能
++            // 提前发现 ABI 类型或顺序错误。
+@@ -571 +845,3 @@ int main(int argc, char** argv) {
+-                tapa::read_write_mmap<double>(ap),
++                tapa::read_write_mmap<float_v16>(ap_spmv),
++                tapa::read_only_mmap<float_v16>(x_spmv),
++                tapa::read_write_mmap<float_v16>(p_spmv),
+@@ -592 +868,4 @@ int main(int argc, char** argv) {
+-                                                   ap,
++                                                   legacy_ap,
++                                                   ap_spmv,
++                                                   x_spmv,
++                                                   p_spmv,

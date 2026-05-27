@@ -11,6 +11,16 @@
 #include "cuper_spmv_tasks.hpp"
 #include "pcg_common.hpp"
 
+// 本文件把原始一次性 Cuper SpMV task 改造成 CuperPcg 可反复调用的
+// “常驻服务”。共同约定：
+//
+//   1. controller 每需要一次 A*x0 或 A*p，就向 ptr/vector/matrix loader
+//      广播一条 CuperSpmvCommand。
+//   2. loader/core/accumulator/checker/sort tree 保持原 Cuper 的数据粒度：
+//      矩阵 512-bit beat、向量/结果 float_v16、内部部分和 float_v2。
+//   3. controller 结束时广播 stop token，所有常驻 task 有限退出，host
+//      才能看到 AP_CTRL_HS done。
+
 // PCG 版的 SpElement ptr loader。
 //
 // 原始 Cuper 顶层只启动一次，所以 loader 读固定参数后顺序跑完。
@@ -25,6 +35,8 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
                                    tapa::ostream<INDEX_TYPE> &PE_Param) {
     for (;;) {
 #pragma HLS loop_flatten off
+        // read() 是阻塞的：没有 controller 命令时，ptr loader 处于等待状态，
+        // 不会提前读取 SpElement_list_ptr。
         const CuperSpmvCommand command = Command_in.read();
         if (command.stop != 0) {
             PE_Param.write(kPcgStopToken);
@@ -47,6 +59,8 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
             for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_plus_1;) {
 #pragma HLS loop_tripcount min=1 max=800
 #pragma HLS pipeline II=1
+                // Async_Read 用 request/response 两个计数器隐藏 HBM 读延迟；
+                // 输出顺序仍保持 SpElement_list_ptr[0..Batch_num]。
                 Async_Read(SpElement_list_ptr,
                            PE_Param,
                            batch_num_plus_1,
@@ -59,13 +73,18 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
 
 // PCG 版向量 loader。
 //
-// X_in 不是 HBM mmap，而是 controller 写入的流。这样 controller 可以在
-// 同一个 kernel 内把当前 x0 或每轮 p 打包成 float_v16，直接喂给 Cuper
-// SpMV 流水，避免 host 每轮重新 launch Cuper。
+// standalone TAPA Cuper 的向量输入是 float_v16 packed HBM；早期 CuperPcg
+// 让 controller 从 double X/P 逐元素读 16 次再打包，等于把原本的向量
+// loader 退化成单 controller 标量读。这里重新让 SpMV 服务从 packed
+// X_spmv/P_spmv 读入，目标是让内嵌 SpMV 的 feed 路径接近 single SpMV。
 void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
+                       tapa::async_mmap<float_v16> &X_spmv,
+                       tapa::async_mmap<float_v16> &P_spmv,
                        tapa::istream<CuperSpmvCommand> &Command_in,
-                       tapa::istream<float_v16> &X_in,
                        tapa::ostream<float_v16> &Vector_X_Stream) {
+    // 向量以 16 个 float 一包，和 standalone Cuper 的 X HBM 布局一致。
+    // Column_num 通常等于 Row_num；这里按 Column_num 是因为 SpMV 语义上
+    // 输入向量长度由矩阵列数决定。
     const INDEX_TYPE batch_num_x = ((Column_num + 15) >> 4);
 
     for (;;) {
@@ -82,14 +101,23 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
 #pragma HLS loop_flatten off
 #pragma HLS loop_tripcount min=1 max=1
         loader_x:
-            for (INDEX_TYPE i = 0; i < batch_num_x;) {
+            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
-                if (!X_in.empty() && !Vector_X_Stream.full()) {
-                    float_v16 x;
-                    X_in.try_read(x);
-                    Vector_X_Stream.try_write(x);
-                    ++i;
+                // 初始化 A*x0 读 X_spmv；迭代 A*p 读 P_spmv。这样 SpMV 输入
+                // 不再经过 controller 的逐元素 double->float_v16 打包路径。
+                if (command.vector_source == kPcgVectorSourceP) {
+                    Async_Read(P_spmv,
+                               Vector_X_Stream,
+                               batch_num_x,
+                               i_request,
+                               i_response);
+                } else {
+                    Async_Read(X_spmv,
+                               Vector_X_Stream,
+                               batch_num_x,
+                               i_request,
+                               i_response);
                 }
             }
         }
@@ -122,6 +150,9 @@ void Pcg_Matrix_Loader(const INDEX_TYPE Matrix_len,
             for (INDEX_TYPE i_request = 0, i_response = 0; i_response < Matrix_len;) {
 #pragma HLS loop_tripcount min=1 max=10000
 #pragma HLS pipeline II=1
+                // 每个 Matrix_Loader 只读自己的 Matrix_data[channel]。
+                // 16 个实例并行读 16 个 HBM bank，Matrix_len 是每个 channel
+                // 的 512-bit word 数。
                 Async_Read(Matrix_data,
                            Matrix_A_Stream,
                            Matrix_len,
@@ -147,6 +178,8 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
               tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream) {
     for (;;) {
 #pragma HLS loop_flatten off
+        // PE_Param_in 的第一项是 Batch_num 或停止令牌。停止令牌沿 core 链
+        // 继续传到 PE_Param_out，让链尾 Destroy_int 也能退出。
         const INDEX_TYPE Batch_num = PE_Param_in.read();
         if (Batch_num == kPcgStopToken) {
             PE_Param_out.write(kPcgStopToken);
@@ -185,6 +218,8 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
         main:
             for (INDEX_TYPE i = 0; i < Batch_num; ++i) {
 #pragma HLS loop_tripcount min=1 max=49
+                // 每个 batch 对应一个 slice window。core 先把本 batch 需要的
+                // x[col] 范围载入本地 BRAM，再解码本 channel 的矩阵元素。
                 const INDEX_TYPE total_vector_packets = (Column_num + 15) >> 4;
                 const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
                 const INDEX_TYPE end_idx = std::min(start_idx + Slice_WIDTH_DIV_16,
@@ -197,6 +232,8 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                     if (!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
                         float_v16 x;
                         Vector_X_Stream_in.try_read(x);
+                        // 向量包在 core 链上逐级转发；每个 core 都看到同一份
+                        // packed X/P，但只消费自己矩阵分片需要的列值。
                         Vector_X_Stream_out.try_write(x);
 
                         for (INDEX_TYPE k = 0; k < 16; ++k) {
@@ -226,6 +263,9 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                         VALUE_TYPE val_old = 0.0;
 #endif
                         for (INDEX_TYPE p = 0; p < 8; ++p) {
+                            // 一个 512-bit beat 打包 8 个 SpElement，每个元素：
+                            //   col[13:0], row[17:0], value_bits[31:0]
+                            // row 是 Cuper 内部重排编码，不是原始全局行号。
                             ap_uint<64> a = spelement(63 + p * 64, p * 64);
                             ap_uint<14> a_col = a(63, 50);
                             ap_uint<18> a_row = a(49, 32);
@@ -235,6 +275,8 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                             if (a_row[17] == 0) {
 #ifdef FLEX_REUSE
                                 VALUE_TYPE val;
+                                // FLEX_REUSE 是原 Cuper 的小优化：连续元素可能复用
+                                // 上一个 value，减少 bit_cast/寄存器切换。
                                 if ((col_old & a_col) == 0x3FFF) {
                                     val = val_old;
                                 } else {
@@ -307,6 +349,8 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
             for (int i = 0; i < num_v_init; ++i) {
 #pragma HLS loop_tripcount min=1 max=800
 #pragma HLS pipeline II=1
+                // 每次 SpMV 前清空本 accumulator 的局部部分和。num_v_init
+                // 按 16 HBM * 16 float 对齐，而不是简单 Row_num/16。
                 for (int p = 0; p < 8; ++p) {
                     local_part_Y_ping[p][i] = 0;
 #ifdef PINGPONG
@@ -373,6 +417,8 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                 }
 #endif
                 Vector_Y_Stream.write(out_v);
+                // c_idx 在 8 个 lane/PE accumulator bank 间轮转，配合后面的
+                // checker/sort tree 重新组装成 float_v16。
                 ++c_idx;
                 if (c_idx == 8) {
                     c_idx = 0;
@@ -414,6 +460,8 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
             if (!Vector_Y_Stream[c_idx].empty() && !Vector_Y_Stream_Aftck.full()) {
                 float_v2 tmp;
                 Vector_Y_Stream[c_idx].try_read(tmp);
+                // 只保留真实 Row_num 对应的输出包。padding 仍要从上游读掉，
+                // 否则 accumulator 会被反压。
                 if (o_idx < num_out) {
                     Vector_Y_Stream_Aftck.try_write(tmp);
                 }
@@ -431,6 +479,8 @@ void Pcg_Vector_Checker(const INDEX_TYPE Row_num,
     }
 }
 
+// 把 8 路 float_v2 合并成 1 路 float_v16，恢复 controller 期望的
+// “连续 16 行一包”的 SpMV 输出格式。
 void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
                         tapa::ostream<float_v16> &Vector_Y_Stream_Ans,
                         tapa::istream<INDEX_TYPE> &Stop_in) {
@@ -456,6 +506,8 @@ void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
                 float_v2 val;
                 Vector_Y_Stream_Aftck[i].try_read(val);
 
+                // lane 0/1 来自第 0 路 float_v2，lane 2/3 来自第 1 路，
+                // 依次拼成 controller 读取的 A*x0/A*p packet。
                 tmpv16[(i << 1)]     = val[0];
                 tmpv16[(i << 1) + 1] = val[1];
             }

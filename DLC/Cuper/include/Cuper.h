@@ -73,6 +73,12 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 // 这个版本保留 Cuper 的 TAPA SpMV task graph，但不再让 host 每轮调用
 // SpMV。PCG controller 在 FPGA 内部发起每次 SpMV、消费 y=A*x/A*p，
 // 并更新 x/r/z/p、metrics/status。
+//
+// 参数分组：
+//   - SpElement_list_ptr / Matrix_data[0..15]：原 Cuper 矩阵格式；
+//   - B/M_inv/X/R/Z/P：FP64 Jacobi-PCG 状态；
+//   - AP_spmv/X_spmv/P_spmv：FP32 float_v16 packed SpMV 辅助缓冲；
+//   - Metrics/Status：host 读取的调试计时和收敛状态。
 void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
               tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
               tapa::mmap<double> B,
@@ -81,7 +87,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
               tapa::mmap<double> R,
               tapa::mmap<double> Z,
               tapa::mmap<double> P,
-              tapa::mmap<double> AP,
+              tapa::mmap<float_v16> AP_spmv,
+              tapa::mmap<float_v16> X_spmv,
+              tapa::mmap<float_v16> P_spmv,
               tapa::mmap<double> Metrics,
               tapa::mmap<INDEX_TYPE> Status,
               const INDEX_TYPE Batch_num,

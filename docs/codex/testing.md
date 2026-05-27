@@ -105,7 +105,9 @@ cuper-notapa-spmv
    - 简短结论；
    - 折线图或表格中的 demo 数据点。
 7. demo 的详细 Markdown 总结放入 `docs/bitstream_summaries/<版本目录>/`，
-   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。
+   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。目录内必须包含
+   `README.md`、`changes.md`、`testing.md` 和 `source.diff`；其中
+   `testing.md` 记录测试命令、关键输出、失败边界和待补项目。
 8. 只有用户明确表示结果满意，demo 才能按 `docs/codex/coding.md` 的归档流程
    晋级并替换标准版。否则 demo 保持 demo 后缀，不能覆盖标准文件。
 

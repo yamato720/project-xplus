@@ -17,11 +17,21 @@ YYYY-MM-DD-<主线>-<简短说明>/
 2026-05-27-cuper-tapa-pcg-demo/
 ```
 
+## 已有版本记录
+
+- `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
+  receive-path demo 对比。
+- `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
+  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 构建中。
+
 每个版本目录至少包含：
 
 - `README.md`：测试摘要、关键结论、日志路径、是否建议晋级。
 - `changes.md`：这一版相对上一标准版改了什么、预期收益、实际结果。
-- `source.diff`：可选但推荐。记录这一版相对上一标准源码的可逆补丁，
+- `testing.md`：测试命令、数据集、关键输出、失败边界、待补项目。
+- `code_reading_guide.md`：版本相关代码阅读指南。只在该版源码较复杂或用户
+  要求研究代码时补充，避免把版本特有解释散落到全局设计文档。
+- `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
   用于以后复现或回退源码改动，避免在 Markdown 里粘贴大段源码。
 
 ## diff 文件规则
@@ -63,4 +73,5 @@ git apply --unidiff-zero docs/bitstream_summaries/<version>/source.diff
 demo 的结果必须同时写入：
 
 - `395bitstream/` 下的 HTML 报告；
-- 本目录对应版本子文件夹的 Markdown 总结。
+- 本目录对应版本子文件夹的 Markdown 总结，详细测试过程写入该目录
+  `testing.md`，不要只在最终回复或日志里保留。

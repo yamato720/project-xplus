@@ -78,7 +78,14 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
               tapa::mmap<double> R,
               tapa::mmap<double> Z,
               tapa::mmap<double> P,
-              tapa::mmap<double> AP,
+              // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
+              // Cuper SpMV 新增的 packed float_v16 缓冲：
+              //   X_spmv: host 预打包 x0，初始化 A*x0 时读取
+              //   P_spmv: controller 维护 p 的 packed 副本，每轮 A*p 时读取
+              //   AP_spmv: controller 缓存 A*p 的 packed 输出，供 dot/update 复用
+              tapa::mmap<float_v16> AP_spmv,
+              tapa::mmap<float_v16> X_spmv,
+              tapa::mmap<float_v16> P_spmv,
               tapa::mmap<double> Metrics,
               tapa::mmap<INDEX_TYPE> Status,
               const INDEX_TYPE Batch_num,
@@ -93,8 +100,10 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     //
     //   Pcg_Controller
     //       -> 发送 SpMV 命令到 ptr/vector/matrix loader
-    //       -> 将 x0 或 p 打包成 float_v16 送入 Pcg_X_Stream
     //       <- 从 Pcg_Spmv_Stream 接收 A*x0 或 A*p
+    //
+    //   Pcg_Vector_Loader
+    //       -> 从 X_spmv/P_spmv packed HBM 读 float_v16 向量输入
     //
     //   Pcg_* loader/Core/Accumulator/Checker/Mult_Sort_Tree
     //       -> 基本沿用原始 Cuper 的 16 HBM SpMV 流水
@@ -152,9 +161,6 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // 16 条矩阵命令流：controller 给每个 HBM matrix loader 发同一轮
     // SpMV 命令。HBM_CHANNEL_NUM 当前是 16。
     tapa::streams<CuperSpmvCommand, HBM_CHANNEL_NUM, 4>     Matrix_Command_Stream("Matrix_Command_Stream");
-    // controller 输出的 x0/p 向量流。float_v16 是 16 个 float 一包，
-    // 先进入 Pcg_Vector_Loader，再被广播到 16 个 core。
-    tapa::stream<float_v16, 128>                            Pcg_X_Stream("Pcg_X_Stream");
     // 参数广播链：PE_Param[0] 由 ptr loader 写入，随后 Core0..Core15
     // 逐级转发到 PE_Param[16]。链尾由 Destroy_int 消费。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>     PE_Param("PE_Param");
@@ -182,9 +188,13 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // 该中间层会增加流控不确定性，所以这里保留 128 深度 FIFO 后直接消费。
     // 这里也不再把 y 写回 HBM；CuperPcg 内部直接拿 A*x0/A*p 更新 PCG 状态。
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    // checker/sort/vector-destroy 都是常驻服务，需要单独 stop 流退出。
+    // 这些 stream 深度很小，只承载停止令牌，不承载矩阵/向量数据。
     tapa::streams<INDEX_TYPE, 8, 2>                          Checker_Stop_Stream("Checker_Stop_Stream");
     tapa::stream<INDEX_TYPE, 2>                              Sort_Stop_Stream("Sort_Stop_Stream");
     tapa::stream<INDEX_TYPE, 2>                              Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
+    // Stage_Event_Stream 是 controller -> timer 的事件流；Stage_Ticks_Stream
+    // 是 timer -> controller 的最终 cycle 数组。
     tapa::stream<PcgStageEvent, 16>                          Stage_Event_Stream("Stage_Event_Stream");
     tapa::stream<ap_uint<64>, 16>                             Stage_Ticks_Stream("Stage_Ticks_Stream");
 
@@ -199,7 +209,6 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Destroy_Stop_Stream,
                 Stage_Event_Stream,
                 Stage_Ticks_Stream,
-                Pcg_X_Stream,
                 Pcg_Spmv_Stream,
                 B,
                 M_inv,
@@ -207,7 +216,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 R,
                 Z,
                 P,
-                AP,
+                AP_spmv,
+                P_spmv,
                 Metrics,
                 Status,
                 Row_num,
@@ -226,8 +236,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 PE_Param[0])
         .invoke(Pcg_Vector_Loader,
                 Column_num,
+                X_spmv,
+                P_spmv,
                 Command_Stream[1],
-                Pcg_X_Stream,
                 Vector_X_Stream[0])
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader, Matrix_len, Matrix_data, Matrix_Command_Stream, Matrix_A_Stream)
         // 16 级 Cuper Core 链。PE_Param 和 Vector_X_Stream 在各级之间传递，
