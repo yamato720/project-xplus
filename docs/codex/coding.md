@@ -50,21 +50,25 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 - `pcg-fpga` 表示 PCG 主循环、dot、alpha/beta、向量更新和收敛判断在 FPGA kernel 内。
 - `spmv` 表示只测/只构造 SpMV kernel，host 可以控制 PCG 或只跑 single SpMV。
 - `host-PCG`、旧 CSR 多 kernel、packed16hbm legacy 等都属于兼容或历史路线，不加入四条主线命名。
+- `395bitstream/` 的成品槽位是四个标准 bitstream 加一个当前 demo 候选；
+  新 demo 允许覆盖旧 demo 文件，但不能覆盖四条标准文件。
 
 ## 3. 高优先级规则
 
 1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
 2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
    `workflows/bitstreams.md` 归档旧版。
-3. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
+3. 允许用最新 demo 覆盖 `395bitstream/` 中旧 demo 候选槽；覆盖后必须更新
+   `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
+4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
-4. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
-5. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
+5. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
+6. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
    `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
    `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
-6. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
+7. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
    `docs/bitstream_summaries/<版本>/`。
-7. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
+8. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
 
 ## 4. 常用验证
 

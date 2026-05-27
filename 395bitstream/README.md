@@ -6,6 +6,10 @@
 cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 ```
 
+同步目录常态保留五个成品槽位：四个标准 bitstream，加一个带 `-demo` 后缀的当前
+候选 bitstream。新 demo 进入本目录时优先覆盖旧 demo 槽位；四个标准版只有在
+用户明确确认满意后才会归档旧版并晋级替换。
+
 如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
 
 ## 当前文件
@@ -14,7 +18,7 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | --- | --- | --- | --- | --- |
 | `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
 | `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
-| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-27 demo 候选版，未替换当前标准 |
+| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 当前 demo 槽：packed feed/AP 候选版，未替换当前标准 |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 
@@ -39,17 +43,21 @@ TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 ```
 
-这版仍是 `CuperPcg`，来自 2026-05-27 的 TAPA full-PCG SpMV receive path
+这版仍是 `CuperPcg`，来自 2026-05-27 的 TAPA full-PCG packed feed/AP
 优化构建。它只作为 demo 候选保留在 `395bitstream/` 中，当前标准版仍是
 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。demo xclbin UUID 为
-`9474ef8e-571b-ae13-f898-890e3af8ae5e`，SHA256 为
-`440d6969ff869d47aae5b12ab6d86d51b80794c07445799599ae13594a9166c5`。
+`cc61e044-06f7-4726-8f18-773ac52ab1b2`，SHA256 为
+`add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb`。
 最终 xclbin info 中 DATA clock 为 216 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 450 MHz。本轮动态对比见
-`cuper_spmv_u55c_compare_20260524.html` 和
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/`。
-结论：demo 在 `thermal2_n262144` 的 1iter 总 kernel 约快 3.3%，但完整
-`thermal2` 仍失败在 direct-register 运行后的 `ctrl=0x0`，因此尚未晋级为标准版。
+HBM clock 为 450 MHz。构建日志为
+`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`，版本记录见
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`。
+
+注意：这个文件名之前曾放过 receive-path demo
+`9474ef8e-571b-ae13-f898-890e3af8ae5e`。该旧 demo 的测试结论仍保存在
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/` 和 HTML 报告中，
+但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 尚未上板完成
+standard-vs-demo 动态对比，因此尚未晋级为标准版。
 
 ## 运行入口
 

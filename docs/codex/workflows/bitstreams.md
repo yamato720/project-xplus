@@ -2,15 +2,24 @@
 
 ## 1. bitstream 同步目录
 
-`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。
+`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。同步目录的
+常态是“四个标准成品 + 一个 demo 候选槽”：
+
+- 四个标准成品分别对应四条主线；
+- 第五个成品是当前 demo 候选，用 `-demo` 后缀标识；
+- 新生成的 demo 进入 `395bitstream/` 时，优先覆盖旧 demo 候选槽，不新增一串
+  历史 demo 文件。
 
 要求：
 
-1. 四条主线各自保留一个当前首选 `.xclbin`。
+1. 四条主线各自保留一个当前首选标准 `.xclbin`。
 2. 文件名保持稳定、简洁，不往文件名里塞 `debug`、`fix`、频率、UUID 等额外信息。
 3. 版本差异写进 `395bitstream/README.md` 和 `.xclbin.info`，不要靠改文件名表达。
 4. 对比报告 HTML 也放在 `395bitstream/`，文件名要能看出测试对象和日期。
 5. 替换 `.xclbin` 时必须同步替换对应 `.xclbin.info`。
+6. 覆盖 demo 候选槽不需要归档旧 demo 二进制，但必须在 `395bitstream/README.md`
+   和对应 `docs/bitstream_summaries/` 中说明当前 demo 文件已经变更；旧 demo 的
+   测试结论只能继续作为历史记录，不能再套到当前 demo 文件上。
 
 ## 2. demo bitstream 规则
 
@@ -38,16 +47,18 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 
 4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
-5. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
+5. `395bitstream/` 只保留一个当前 demo 候选槽。新 demo 可以直接覆盖旧 demo
+   文件和 `.xclbin.info`，但不能覆盖四条主线标准文件。
+6. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
    默认复用当前 HTML 和 `docs/bitstream_summaries/` 的记录，除非用户要求、
    标准 bitstream/host 变化、或 demo 结果与旧记录矛盾。
-6. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
+7. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
    归档，并把 demo 晋级为稳定标准文件名。
-7. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
+8. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
    `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
-8. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
+9. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
    `logs/` 目录。
-9. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
+10. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
    留一份 Markdown 详细总结，并包含：
    - `README.md`：版本摘要和是否建议晋级；
    - `changes.md`：说明“这一版改了什么”；

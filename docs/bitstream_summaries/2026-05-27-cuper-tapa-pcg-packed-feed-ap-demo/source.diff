@@ -1,59 +1,133 @@
 diff --git a/DLC/Cuper/include/Cuper.h b/DLC/Cuper/include/Cuper.h
-index a46f2cd..0055b3f 100644
+index a46f2cd..7a9fe75 100644
 --- a/DLC/Cuper/include/Cuper.h
 +++ b/DLC/Cuper/include/Cuper.h
-@@ -75,0 +76,6 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -76,17 +76,31 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+-              tapa::mmap<double> B,
+-              tapa::mmap<double> M_inv,
+-              tapa::mmap<double> X,
+-              tapa::mmap<double> R,
+-              tapa::mmap<double> Z,
+-              tapa::mmap<double> P,
+-              tapa::mmap<double> AP,
+-              tapa::mmap<double> Metrics,
+-              tapa::mmap<INDEX_TYPE> Status,
+-              const INDEX_TYPE Batch_num,
+-              const INDEX_TYPE Matrix_len,
+-              const INDEX_TYPE Row_num,
+-              const INDEX_TYPE Column_num,
+-              const INDEX_TYPE Max_iters,
+-              const double Tau
 +//
 +// 参数分组：
 +//   - SpElement_list_ptr / Matrix_data[0..15]：原 Cuper 矩阵格式；
 +//   - B/M_inv/X/R/Z/P：FP64 Jacobi-PCG 状态；
 +//   - AP_spmv/X_spmv/P_spmv：FP32 float_v16 packed SpMV 辅助缓冲；
 +//   - Metrics/Status：host 读取的调试计时和收敛状态。
-@@ -84 +90,3 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
--              tapa::mmap<double> AP,
-+              tapa::mmap<float_v16> AP_spmv,
-+              tapa::mmap<float_v16> X_spmv,
-+              tapa::mmap<float_v16> P_spmv,
++//
++// TAPA 端口类型：
++//   - tapa::mmap<T> 表示一个连续的全局内存映射端口，host 侧通常对应一个
++//     xrt::bo；kernel 内用数组下标读写 T 类型元素。
++//   - tapa::mmaps<T, N> 表示 N 个同类型 mmap 端口的数组，常用来把同一类数据
++//     分散到 N 个 HBM bank。这里 Matrix_data[0..15] 对应 16 路矩阵 HBM 端口。
++void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper 预处理后的稀疏元素/批次索引表，驱动 16 路 SpMV 调度
++              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,   // 16 个 HBM 通道上的 512-bit packed 矩阵数据
++              tapa::mmap<double> B,                                     // PCG 右端项 b，FP64 主状态
++              tapa::mmap<double> M_inv,                                 // Jacobi 预条件器对角逆 M^{-1}
++              tapa::mmap<double> X,                                     // 解向量 x，输入初值 x0，kernel 内更新并写回最终解
++              tapa::mmap<double> R,                                     // 残差向量 r = b - A*x
++              tapa::mmap<double> Z,                                     // 预条件残差 z = M^{-1}*r
++              tapa::mmap<double> P,                                     // PCG 搜索方向 p，FP64 权威状态
++              tapa::mmap<float_v16> AP_spmv,                            // packed FP32 的 A*p 缓冲，供 dot/update 阶段复用 SpMV 输出
++              tapa::mmap<float_v16> X_spmv,                             // packed FP32 的 x0 副本，初始化 A*x0 时喂给 Cuper vector loader
++              tapa::mmap<float_v16> P_spmv,                             // packed FP32 的 p 副本，每轮 A*p 时喂给 Cuper vector loader
++              tapa::mmap<double> Metrics,                               // kernel 写回的阶段计时/调试统计数组
++              tapa::mmap<INDEX_TYPE> Status,                            // kernel 写回的收敛、max-iter、breakdown 等状态码
++              const INDEX_TYPE Batch_num,                               // Cuper SpMV 批次数/任务批数量
++              const INDEX_TYPE Matrix_len,                              // Cuper 编码后的矩阵数据长度
++              const INDEX_TYPE Row_num,                                 // 矩阵行数，也是 PCG 向量长度 n
++              const INDEX_TYPE Column_num,                              // 矩阵列数，PCG 方阵场景通常等于 Row_num
++              const INDEX_TYPE Max_iters,                               // PCG 最大迭代次数
++              const double Tau                                          // PCG 收敛阈值
 diff --git a/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp b/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
-index aea4bdb..8de97cf 100644
+index aea4bdb..9e737d4 100644
 --- a/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
 +++ b/DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
-@@ -81 +81,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -73,17 +73,29 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+-              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+-              tapa::mmap<double> B,
+-              tapa::mmap<double> M_inv,
+-              tapa::mmap<double> X,
+-              tapa::mmap<double> R,
+-              tapa::mmap<double> Z,
+-              tapa::mmap<double> P,
 -              tapa::mmap<double> AP,
+-              tapa::mmap<double> Metrics,
+-              tapa::mmap<INDEX_TYPE> Status,
+-              const INDEX_TYPE Batch_num,
+-              const INDEX_TYPE Matrix_len,
+-              const INDEX_TYPE Row_num,
+-              const INDEX_TYPE Column_num,
+-              const INDEX_TYPE Max_iters,
+-              const double Tau
++// TAPA 端口类型速记：
++//   - tapa::mmap<T> 是一个连续全局内存端口，host 侧通常绑定一个 xrt::bo；
++//     kernel 内用 array[index] 形式访问 T 类型元素。
++//   - tapa::mmaps<T, N> 是 N 个同类型 mmap 端口的数组；这里用于把 16 路
++//     Matrix_data 分散到 16 个 HBM bank，支撑 Cuper 的 16 路并行 SpMV。
++void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper 预处理后的稀疏元素/批次索引表，驱动 16 路 SpMV 调度
++              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,   // 16 个 HBM 通道上的 512-bit packed 矩阵数据
++              tapa::mmap<double> B,                                     // PCG 右端项 b，FP64 主状态
++              tapa::mmap<double> M_inv,                                 // Jacobi 预条件器对角逆 M^{-1}
++              tapa::mmap<double> X,                                     // 解向量 x，输入初值 x0，kernel 内更新并写回最终解
++              tapa::mmap<double> R,                                     // 残差向量 r = b - A*x
++              tapa::mmap<double> Z,                                     // 预条件残差 z = M^{-1}*r
++              tapa::mmap<double> P,                                     // PCG 搜索方向 p，FP64 权威状态
 +              // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
 +              // Cuper SpMV 新增的 packed float_v16 缓冲：
 +              //   X_spmv: host 预打包 x0，初始化 A*x0 时读取
 +              //   P_spmv: controller 维护 p 的 packed 副本，每轮 A*p 时读取
 +              //   AP_spmv: controller 缓存 A*p 的 packed 输出，供 dot/update 复用
-+              tapa::mmap<float_v16> AP_spmv,
-+              tapa::mmap<float_v16> X_spmv,
-+              tapa::mmap<float_v16> P_spmv,
-@@ -96 +102,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
++              tapa::mmap<float_v16> AP_spmv,                            // packed FP32 的 A*p 缓冲，供 dot/update 阶段复用 SpMV 输出
++              tapa::mmap<float_v16> X_spmv,                             // packed FP32 的 x0 副本，初始化 A*x0 时喂给 Cuper vector loader
++              tapa::mmap<float_v16> P_spmv,                             // packed FP32 的 p 副本，每轮 A*p 时喂给 Cuper vector loader
++              tapa::mmap<double> Metrics,                               // kernel 写回的阶段计时/调试统计数组
++              tapa::mmap<INDEX_TYPE> Status,                            // kernel 写回的收敛、max-iter、breakdown 等状态码
++              const INDEX_TYPE Batch_num,                               // Cuper SpMV 批次数/任务批数量
++              const INDEX_TYPE Matrix_len,                              // Cuper 编码后的矩阵数据长度
++              const INDEX_TYPE Row_num,                                 // 矩阵行数，也是 PCG 向量长度 n
++              const INDEX_TYPE Column_num,                              // 矩阵列数，PCG 方阵场景通常等于 Row_num
++              const INDEX_TYPE Max_iters,                               // PCG 最大迭代次数
++              const double Tau                                          // PCG 收敛阈值
+@@ -96 +107,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 -    //       -> 将 x0 或 p 打包成 float_v16 送入 Pcg_X_Stream
-@@ -98,0 +105,3 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -98,0 +110,3 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 +    //   Pcg_Vector_Loader
 +    //       -> 从 X_spmv/P_spmv packed HBM 读 float_v16 向量输入
 +    //
-@@ -155,3 +163,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -155,3 +168,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 -    // controller 输出的 x0/p 向量流。float_v16 是 16 个 float 一包，
 -    // 先进入 Pcg_Vector_Loader，再被广播到 16 个 core。
 -    tapa::stream<float_v16, 128>                            Pcg_X_Stream("Pcg_X_Stream");
-@@ -184,0 +191,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -184,0 +196,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 +    // checker/sort/vector-destroy 都是常驻服务，需要单独 stop 流退出。
 +    // 这些 stream 深度很小，只承载停止令牌，不承载矩阵/向量数据。
-@@ -187,0 +196,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -187,0 +201,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 +    // Stage_Event_Stream 是 controller -> timer 的事件流；Stage_Ticks_Stream
 +    // 是 timer -> controller 的最终 cycle 数组。
-@@ -202 +211,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -202 +216,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 -                Pcg_X_Stream,
-@@ -210 +219,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -210 +224,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 -                AP,
 +                AP_spmv,
 +                P_spmv,
-@@ -228,0 +239,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -228,0 +244,2 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 +                X_spmv,
 +                P_spmv,
-@@ -230 +241,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+@@ -230 +246,0 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 -                Pcg_X_Stream,
 diff --git a/DLC/Cuper/kernels/detail/pcg_common.hpp b/DLC/Cuper/kernels/detail/pcg_common.hpp
 index a00fcd0..2fe11e8 100644
@@ -443,29 +517,30 @@ index 9ce1f85..313aeb1 100644
 +sp=CuperPcg_1.Metrics:HBM[26]
 +sp=CuperPcg_1.Status:HBM[26]
 diff --git a/docs/bitstream_summaries/README.md b/docs/bitstream_summaries/README.md
-index 27a8295..337a10c 100644
+index 27a8295..5b74975 100644
 --- a/docs/bitstream_summaries/README.md
 +++ b/docs/bitstream_summaries/README.md
-@@ -19,0 +20,7 @@ YYYY-MM-DD-<主线>-<简短说明>/
+@@ -19,0 +20,8 @@ YYYY-MM-DD-<主线>-<简短说明>/
 +## 已有版本记录
 +
 +- `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
 +  receive-path demo 对比。
 +- `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
-+  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 构建中。
++  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 已生成并覆盖
++  `395bitstream/` 当前 demo 槽位，等待板上动态对比。
 +
-@@ -24 +31,4 @@ YYYY-MM-DD-<主线>-<简短说明>/
+@@ -24 +32,4 @@ YYYY-MM-DD-<主线>-<简短说明>/
 -- `source.diff`：可选但推荐。记录这一版相对上一标准源码的可逆补丁，
 +- `testing.md`：测试命令、数据集、关键输出、失败边界、待补项目。
 +- `code_reading_guide.md`：版本相关代码阅读指南。只在该版源码较复杂或用户
 +  要求研究代码时补充，避免把版本特有解释散落到全局设计文档。
 +- `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
-@@ -66 +76,2 @@ demo 的结果必须同时写入：
+@@ -66 +77,2 @@ demo 的结果必须同时写入：
 -- 本目录对应版本子文件夹的 Markdown 总结。
 +- 本目录对应版本子文件夹的 Markdown 总结，详细测试过程写入该目录
 +  `testing.md`，不要只在最终回复或日志里保留。
 diff --git a/docs/codex/coding.md b/docs/codex/coding.md
-index dba6786..a11d4e4 100644
+index dba6786..3bf712f 100644
 --- a/docs/codex/coding.md
 +++ b/docs/codex/coding.md
 @@ -3,2 +3,2 @@
@@ -509,7 +584,8 @@ index dba6786..a11d4e4 100644
 +```
 +
 +## 2. 四条主线
-@@ -36,94 +54 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路
+@@ -35,158 +53,23 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路
+-
 -## 2. bitstream 同步目录
 -
 -`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。
@@ -604,26 +680,12 @@ index dba6786..a11d4e4 100644
 -11. 更新 `395bitstream/README.md`。
 -
 -如果 `.gitignore` 导致 `bitstream_archive/*.xclbin` 被忽略，不能悄悄漏掉：
-+## 3. 高优先级规则
-@@ -131,2 +56,12 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-
 -- 若用户要求同步归档二进制，用 `git add -f` 加入归档 `.xclbin`。
 -- 若决定只本地保留二进制，必须在 README 和回复里明确说明。
-+1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
-+2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
-+   `workflows/bitstreams.md` 归档旧版。
-+3. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
-+   `-build` 后缀。
-+4. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
-+5. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
-+   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
-+   `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
-+6. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
-+   `docs/bitstream_summaries/<版本>/`。
-+7. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
-@@ -134 +69 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-
 -## 4. 构建目录纪律
-+## 4. 常用验证
-@@ -136,57 +71 @@ bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
+-
 -硬件构建不要使用裸 `build/` 混放。
 -
 -规则：
@@ -681,11 +743,34 @@ index dba6786..a11d4e4 100644
 -建议顺序：
 -
 -1. 纯软件/本地小数据 smoke：
++- `395bitstream/` 的成品槽位是四个标准 bitstream 加一个当前 demo 候选；
++  新 demo 允许覆盖旧 demo 文件，但不能覆盖四条标准文件。
++
++## 3. 高优先级规则
++
++1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
++2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
++   `workflows/bitstreams.md` 归档旧版。
++3. 允许用最新 demo 覆盖 `395bitstream/` 中旧 demo 候选槽；覆盖后必须更新
++   `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
++4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
++   `-build` 后缀。
++5. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
++6. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
++   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
++   `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
++7. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
++   `docs/bitstream_summaries/<版本>/`。
++8. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
++
++## 4. 常用验证
++
 +Host smoke：
-@@ -195,27 +74,2 @@ project-xplus-cuper-notapa-spmv-hw
+@@ -195 +78,2 @@ project-xplus-cuper-notapa-spmv-hw
 -make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
--```
--
++make cuper-tapa-pcg-fpga-host
++make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
+@@ -198,54 +82 @@ make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
 -2. `thermal2_n1024` 低迭代检查数值和返回路径。
 -3. 新 bitstream 上板后先跑 `MAX_ITERS=0` 或 `MAX_ITERS=1`，区分 init SpMV、迭代 SpMV、PCG 更新阶段问题。
 -4. 大矩阵问题按规模递增：
@@ -710,9 +795,8 @@ index dba6786..a11d4e4 100644
 -kernel time
 -host wall time
 -bitstream path / SHA256 / UUID
-+make cuper-tapa-pcg-fpga-host
-+make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
-@@ -224,28 +78 @@ bitstream path / SHA256 / UUID
+-```
+-
 -## 8. 报告纪律
 -
 -1. 面向同步/对比的 HTML 报告放 `395bitstream/`。
@@ -742,11 +826,11 @@ index dba6786..a11d4e4 100644
 -
 -1. 提交前跑：
 +提交或结束代码/文档改动前：
-@@ -254 +80,0 @@ bitstream path / SHA256 / UUID
+@@ -254 +84,0 @@ bitstream path / SHA256 / UUID
 -git status --short
-@@ -255,0 +82 @@ git diff --check
+@@ -255,0 +86 @@ git diff --check
 +git status --short
-@@ -258,2 +85,6 @@ git diff --check
+@@ -258,2 +89,6 @@ git diff --check
 -2. 只提交本次任务相关文件，不顺手提交无关脏改动。
 -3. 替换 bitstream 的提交必须包含：
 +硬件测试和 demo 对比按 `docs/codex/testing.md` 执行，不要只说“理论上可以”。
@@ -755,15 +839,15 @@ index dba6786..a11d4e4 100644
 +
 +1. 只提交本次任务相关文件，不顺手提交无关脏改动。
 +2. 替换 bitstream 的提交必须包含：
-@@ -264,2 +95,2 @@ git diff --check
+@@ -264,2 +99,2 @@ git diff --check
 -4. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
 -5. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
 +3. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
 +4. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
-@@ -267 +98 @@ git diff --check
+@@ -267 +102 @@ git diff --check
 -## 10. 回复纪律
 +## 6. 回复纪律
-@@ -270,6 +101,3 @@ git diff --check
+@@ -270,6 +105,3 @@ git diff --check
 -2. 用户问“能不能过某规模”，必须区分：
 -   - 编码/位宽硬边界
 -   - stream/死锁问题
@@ -773,8 +857,153 @@ index dba6786..a11d4e4 100644
 +2. 用户问“能不能过某规模”，必须区分编码/位宽硬边界、stream/死锁、host/runtime
 +   返回问题、routing/timing 问题。
 +3. 用户问“这是不是顶层/并行/流水”，用 `CuperPcg` 的 task graph 解释，不要泛泛讲 FPGA。
-@@ -277 +104,0 @@ git diff --check
+@@ -277 +108,0 @@ git diff --check
 -5. 对中文源码和文档，优先写中文注释；英文只用于代码符号、命令和固定术语。
+diff --git a/docs/codex/skills/README.md b/docs/codex/skills/README.md
+new file mode 100644
+index 0000000..04b592e
+--- /dev/null
++++ b/docs/codex/skills/README.md
+@@ -0,0 +1,63 @@
++# Codex Skills
++
++这里存放 Project-XPlus 可同步到其它机器的 Codex skill 副本。真正启用时，要把
++对应 skill 目录复制到目标机器的 `$CODEX_HOME/skills/` 下。
++
++默认 `$CODEX_HOME` 通常是：
++
++```text
++~/.codex
++```
++
++## project-xplus
++
++用途：让新 Codex 会话在处理 Project-XPlus / Cuper / TAPA / U55C / bitstream
++相关任务时，先读仓库内纪律文档。
++
++安装到当前机器：
++
++```bash
++mkdir -p ~/.codex/skills
++cp -r Project-XPlus/docs/codex/skills/project-xplus ~/.codex/skills/
++```
++
++在服务器上安装：
++
++```bash
++cd /path/to/project-x
++mkdir -p ~/.codex/skills
++cp -r Project-XPlus/docs/codex/skills/project-xplus ~/.codex/skills/
++```
++
++如果服务器的 Codex 使用不同 `CODEX_HOME`，改成：
++
++```bash
++mkdir -p "$CODEX_HOME/skills"
++cp -r Project-XPlus/docs/codex/skills/project-xplus "$CODEX_HOME/skills/"
++```
++
++## 怎么触发
++
++新对话里提到 `Project-XPlus`、`Project-X`、`Project-XS`、`Cuper`、`TAPA`、
++`U55C`、`bitstream`、`395bitstream`、`docs/bitstream_summaries` 等任务时，
++Codex 会按 skill 描述加载它。
++
++也可以显式说：
++
++```text
++使用 project-xplus skill
++```
++
++skill 本体只做入口，不替代仓库文档。事实源仍然是：
++
++```text
++Project-XPlus/docs/codex/coding.md
++Project-XPlus/docs/codex/testing.md
++Project-XPlus/395bitstream/README.md
++```
++
++其中 `coding.md` 是入口页，细分流程放在：
++
++```text
++Project-XPlus/docs/codex/workflows/
++```
+diff --git a/docs/codex/skills/project-xplus/SKILL.md b/docs/codex/skills/project-xplus/SKILL.md
+new file mode 100644
+index 0000000..5908fe5
+--- /dev/null
++++ b/docs/codex/skills/project-xplus/SKILL.md
+@@ -0,0 +1,70 @@
++---
++name: project-xplus
++description: Use when working in the Project-XPlus / Project-X / Project-XS codebase, especially Cuper, TAPA, U55C, Vitis/Vivado, bitstream generation, tmux hardware builds, 395bitstream synchronization, demo bitstream testing, docs/bitstream_summaries version records, source.diff, testing.md, or code_reading_guide.md.
++metadata:
++  short-description: Project-XPlus Cuper/TAPA/U55C workflow
++---
++
++# Project-XPlus
++
++This skill is only an entry point. The repository documents are the source of truth.
++
++## First Steps
++
++1. Find the repo root. Prefer the current working directory if it contains `Project-XPlus`; otherwise check:
++
++```bash
++/home/pyx/ProjectFS/Project-X/Project-XPlus
++/home/pyx/project-x/Project-XPlus
++```
++
++2. For narrow read-only questions, load only the relevant repository docs/sections. Before changing build scripts, kernels, bitstreams, reports, or version docs, read these files:
++
++```text
++Project-XPlus/docs/codex/coding.md
++Project-XPlus/docs/codex/testing.md
++Project-XPlus/395bitstream/README.md
++```
++
++3. If the task touches implementation naming, also read:
++
++```text
++Project-XPlus/docs/design/implementation_versions_zh.md
++```
++
++4. Run:
++
++```bash
++git status --short
++tmux ls 2>/dev/null || true
++```
++
++If a hardware build is already in `vpl`, `impl`, or routing, say that source edits affect only the next build.
++
++## Workflow Rules
++
++- Follow `docs/codex/coding.md` as the entry point. It links to detailed workflow docs under `docs/codex/workflows/`.
++- Follow `docs/codex/testing.md` for demo-vs-standard dynamic comparison and required datasets.
++- For bitstream/build/TAPA/report/version-record work, read the matching `docs/codex/workflows/*.md` file before editing.
++- Keep version records in `docs/bitstream_summaries/<version>/`.
++- For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, `source.diff`, and, when useful, `code_reading_guide.md`.
++- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
++- Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
++
++## Common Commands
++
++Host smoke:
++
++```bash
++make cuper-tapa-pcg-fpga-host
++make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
++```
++
++Hardware builds should run in tmux and keep the shell open after completion. Use existing Makefile tmux targets when available.
++
++Before finalizing code/docs:
++
++```bash
++git diff --check
++git status --short
++```
 diff --git a/docs/codex/testing.md b/docs/codex/testing.md
 index 2a33eaa..2e24df8 100644
 --- a/docs/codex/testing.md
@@ -784,6 +1013,352 @@ index 2a33eaa..2e24df8 100644
 +   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。目录内必须包含
 +   `README.md`、`changes.md`、`testing.md` 和 `source.diff`；其中
 +   `testing.md` 记录测试命令、关键输出、失败边界和待补项目。
+diff --git a/docs/codex/workflows/bitstreams.md b/docs/codex/workflows/bitstreams.md
+new file mode 100644
+index 0000000..7e120e3
+--- /dev/null
++++ b/docs/codex/workflows/bitstreams.md
+@@ -0,0 +1,115 @@
++# Bitstream 同步与归档纪律
++
++## 1. bitstream 同步目录
++
++`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。同步目录的
++常态是“四个标准成品 + 一个 demo 候选槽”：
++
++- 四个标准成品分别对应四条主线；
++- 第五个成品是当前 demo 候选，用 `-demo` 后缀标识；
++- 新生成的 demo 进入 `395bitstream/` 时，优先覆盖旧 demo 候选槽，不新增一串
++  历史 demo 文件。
++
++要求：
++
++1. 四条主线各自保留一个当前首选标准 `.xclbin`。
++2. 文件名保持稳定、简洁，不往文件名里塞 `debug`、`fix`、频率、UUID 等额外信息。
++3. 版本差异写进 `395bitstream/README.md` 和 `.xclbin.info`，不要靠改文件名表达。
++4. 对比报告 HTML 也放在 `395bitstream/`，文件名要能看出测试对象和日期。
++5. 替换 `.xclbin` 时必须同步替换对应 `.xclbin.info`。
++6. 覆盖 demo 候选槽不需要归档旧 demo 二进制，但必须在 `395bitstream/README.md`
++   和对应 `docs/bitstream_summaries/` 中说明当前 demo 文件已经变更；旧 demo 的
++   测试结论只能继续作为历史记录，不能再套到当前 demo 文件上。
++
++## 2. demo bitstream 规则
++
++新生成的 bitstream 在用户明确认可前，一律只是候选版，不允许直接替换四条主线
++的标准文件。
++
++1. 候选 bitstream 必须仍归入四条基础版本之一：
++   - `cuper-tapa-pcg`
++   - `cuper-tapa-spmv`
++   - `cuper-notapa-pcg`
++   - `cuper-notapa-spmv`
++2. 候选 bitstream 放进 `395bitstream/` 时，文件名必须在 `.xclbin` 前加入
++   `-demo` 后缀，例如：
++
++```text
++cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
++cuper-notapa-spmv-u55c-20260527-demo.xclbin
++```
++
++3. 候选版必须同时放入对应 `.xclbin.info`：
++
++```text
++cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
++```
++
++4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
++   `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
++5. `395bitstream/` 只保留一个当前 demo 候选槽。新 demo 可以直接覆盖旧 demo
++   文件和 `.xclbin.info`，但不能覆盖四条主线标准文件。
++6. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
++   默认复用当前 HTML 和 `docs/bitstream_summaries/` 的记录，除非用户要求、
++   标准 bitstream/host 变化、或 demo 结果与旧记录矛盾。
++7. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
++   归档，并把 demo 晋级为稳定标准文件名。
++8. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
++   `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
++9. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
++   `logs/` 目录。
++10. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
++   留一份 Markdown 详细总结，并包含：
++   - `README.md`：版本摘要和是否建议晋级；
++   - `changes.md`：说明“这一版改了什么”；
++   - `testing.md`：测试命令、关键输出和失败边界；
++   - `code_reading_guide.md`：版本相关代码阅读指南，复杂版本或用户要求时补；
++   - `source.diff`：这一版源码/脚本改动的可逆补丁。
++
++## 3. 替换后至少记录
++
++```text
++生成日期/时间
++主线
++构建目的或关键改动
++DATA/KERNEL/HBM clock
++UUID
++SHA256
++已知测试状态
++旧版归档路径
++```
++
++## 4. 标准 bitstream 替换与归档流程
++
++替换 `395bitstream/` 里的任何标准 `.xclbin` 前，必须先归档旧版。demo 版
++只能在用户确认满意后晋级为标准版；测试未完成或用户未确认时，不能覆盖标准
++文件。
++
++标准流程：
++
++1. 确认新构建成功，日志里应有 `impl Complete` 或等价成功信息。
++2. 先以 `-demo.xclbin` 形式放入 `395bitstream/`，同步 `.xclbin.info`。
++3. 按 `docs/codex/testing.md` 与同主线当前标准 bitstream 做动态对比。
++4. 用户明确确认 demo 结果满意后，才进入标准替换流程。
++5. 对新 `.xclbin` 生成或复制 `.xclbin.info`。
++6. 计算新旧文件 `sha256sum`，必要时记录 UUID。
++7. 在 `bitstream_archive/` 下新建目录：
++
++```text
++bitstream_archive/YYYY-MM-DD-<主线>-<简短原因>/
++```
++
++8. 把即将被替换的旧 `.xclbin` 和 `.xclbin.info` 放入该归档目录。
++9. 在归档目录写中文 `README.md`，说明：
++   - 归档对象
++   - 被什么版本替换
++   - 旧版频率/UUID/SHA256
++   - 旧版已知表现或失败原因
++   - 相关日志/报告路径
++10. 再覆盖 `395bitstream/` 里的当前标准文件。
++11. 更新 `395bitstream/README.md`。
++
++如果 `.gitignore` 导致 `bitstream_archive/*.xclbin` 被忽略，不能悄悄漏掉：
++
++- 若用户要求同步归档二进制，用 `git add -f` 加入归档 `.xclbin`。
++- 若决定只本地保留二进制，必须在 README 和回复里明确说明。
+diff --git a/docs/codex/workflows/builds.md b/docs/codex/workflows/builds.md
+new file mode 100644
+index 0000000..148a786
+--- /dev/null
++++ b/docs/codex/workflows/builds.md
+@@ -0,0 +1,40 @@
++# 构建目录与 tmux 纪律
++
++## 1. 构建目录
++
++硬件构建不要使用裸 `build/` 混放。
++
++规则：
++
++1. 构建目录必须使用当前主线或当前 bitstream 名加 `-build` 后缀。
++2. 典型形式：
++
++```text
++cuper-tapa-spmv-build/
++cuper-notapa-spmv-build/
++cuper-notapa-fpga-pcg-build/
++cuper-tapa-pcg-fpga-u55c-YYYYMMDD-build/
++```
++
++3. 所有 build 目录必须被 `.gitignore` 忽略。
++4. 如果新增 build 目录，要确认 `*-build/` 或显式条目已经覆盖。
++5. 不要把临时 build 产物、`.xo`、`.link_summary`、`.compile_summary`、Vivado
++   中间目录提交进仓库。
++6. 只把需要同步的 `.xclbin` 放到 `395bitstream/`，只把需要归档的文件放到
++   `bitstream_archive/`。
++
++## 2. tmux 和长时间构建
++
++1. 长时间硬件构建用 tmux，不在普通前台会话里跑。
++2. tmux 命名要能看出主线，例如：
++
++```text
++project-xplus-cuper-tapa-pcg-hw
++project-xplus-cuper-notapa-spmv-hw
++```
++
++3. tmux 命令结束后保留 shell，不要自动退出，方便回看日志。
++4. 构建日志写入 `logs/`，文件名包含主线和时间戳。
++5. 不要随意杀正在跑的实现。需要停止时先确认阶段、日志和是否有并行构建。
++6. 如果构建进入 `vpl` / `impl` / routing，后续源码注释或重构不会影响这次结果；
++   新源码只影响下一次构建。
+diff --git a/docs/codex/workflows/reports.md b/docs/codex/workflows/reports.md
+new file mode 100644
+index 0000000..33228c0
+--- /dev/null
++++ b/docs/codex/workflows/reports.md
+@@ -0,0 +1,27 @@
++# 报告生成与口径纪律
++
++1. 面向同步/对比的 HTML 报告放 `395bitstream/`。
++2. bitstream 版本级详细总结放 `docs/bitstream_summaries/<版本目录>/`。
++   一个版本一个子文件夹，至少包含：
++   - `README.md`：测试摘要、关键结论、日志路径、是否建议晋级；
++   - `changes.md`：这一版相对上一标准版改了什么、预期收益、实际结果。
++   - `testing.md`：测试命令、数据集、关键输出、失败边界、待补项；
++   - `code_reading_guide.md`：版本相关代码阅读指南，复杂版本或用户要求时补；
++   - `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
++     不要把大段源码直接贴进 Markdown。
++3. demo 的数据必须同时写进 HTML 报告和对应 Markdown 总结。HTML 给同步查看，
++   Markdown 给详细追踪；测试过程的详细 md 版本写入对应版本目录的
++   `testing.md`。
++4. 设计解释、失败分析、实现版本说明放 `docs/design/`。
++5. 旧版构建尝试、失败原因、routing 信息要写清楚日志路径，不要只贴最后一屏错误。
++6. 频率、资源、时序结论要注明来自哪个报告：
++   - `.xclbin.info`
++   - timing summary
++   - implementation report
++   - TAPA HLS report
++   - Vitis system estimate
++7. `sw_emu` / HLS 资源估算不能当作 routed bitstream 的最终资源。
++8. 如果版本总结目录里有 `source.diff`，回退说明使用
++   `git apply --unidiff-zero -R docs/bitstream_summaries/<版本目录>/source.diff`；
++   复现说明使用
++   `git apply --unidiff-zero docs/bitstream_summaries/<版本目录>/source.diff`。
+diff --git a/docs/codex/workflows/tapa_sources.md b/docs/codex/workflows/tapa_sources.md
+new file mode 100644
+index 0000000..4a36b02
+--- /dev/null
++++ b/docs/codex/workflows/tapa_sources.md
+@@ -0,0 +1,38 @@
++# TAPA 源码组织与 SpMV 优化纪律
++
++## 1. 源码组织
++
++1. `DLC/Cuper/kernels/Cuper.cpp` 里有两个 TAPA top：
++   - `Cuper(...)`：TAPA single SpMV
++   - `CuperPcg(...)`：TAPA Cuper + FPGA 内 PCG
++2. `CuperPcg` 是 `tapa compile -t CuperPcg` 的顶层。
++3. 若拆文件，优先拆成被 `Cuper.cpp` include 的 `.hpp` / `.inc` 片段，让 TAPA
++   仍看到一个 translation unit。
++4. 不要直接拆成多个 `.cpp`，除非同步修改 Makefile/TAPA compile 命令并验证。
++5. TAPA task graph 里的 stream、core 链、HBM channel 映射要加中文注释；尤其是：
++   - `PE_Param[0..16]`
++   - `Vector_X_Stream[0..16]`
++   - `Matrix_A_Stream[0..15]`
++   - `Matrix_Mult_Vector_Stream[0..15]`
++   - `Destroy_*` 链尾消费
++6. 对 Cuper 内部 row 编码必须说明它不是原始全局 row，避免误判 `65535` 边界。
++
++## 2. TAPA full-PCG SpMV 优化目标
++
++当前 `cuper-tapa-pcg` 的核心优化目标是：让 `CuperPcg` 内嵌 SpMV 的性能逐步
++向 `cuper-tapa-spmv` / TAPA Cuper single SpMV 靠拢。判断一次优化是否有效时，
++优先看 `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported` 的
++动态对比，而不是只看时钟频率或资源。
++
++优化时优先处理会把原 Cuper 16 路 SpMV 压成串行的周边路径：
++
++1. SpMV 输入向量应尽量保持 `float_v16` packed 形态，避免 controller 从
++   `double X/P` 逐元素读 16 次再临时打包。
++2. SpMV 输出的 `AP` 也应优先保持 packed 形态，例如使用 `AP_spmv`
++   缓存一包 `float_v16`，避免刚离开 Cuper 就拆成 16 个 double HBM 访问。
++3. SpMV 服务化路径的命令、向量 loader、输出回收和流水 drain 要对齐
++   standalone TAPA Cuper 的数据粒度。
++4. PCG 的 FP64 dot/reduction 和 `x/r/z/p` 更新可以单独优化，但不要把这些
++   串行 HBM 扫描误记成 Cuper SpMV 本体性能。
++5. 新 demo 的性能结论必须说明：提升落在 SpMV 本体、vector feed、AP 回收、
++   还是 PCG controller 其它阶段。
+diff --git a/docs/codex/workflows/version_records.md b/docs/codex/workflows/version_records.md
+new file mode 100644
+index 0000000..0834473
+--- /dev/null
++++ b/docs/codex/workflows/version_records.md
+@@ -0,0 +1,96 @@
++# 版本记录与阅读辅助纪律
++
++当一次改动已经进入“可能生成 demo bitstream 或影响主线行为”的程度，不能只把
++源码改完就结束。必须同步做版本级记录，让新对话、服务器侧 AI 和未来回退都能
++知道这一版到底是什么。
++
++## 1. 版本目录
++
++每个候选版或标准替换版都放到：
++
++```text
++docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
++```
++
++目录内至少维护：
++
++```text
++README.md
++changes.md
++testing.md
++source.diff
++```
++
++复杂代码改动、用户明确要研究代码、或接口/数据流容易混淆时，再加：
++
++```text
++code_reading_guide.md
++```
++
++`code_reading_guide.md` 放在版本目录里，不默认放 `docs/design/`。只有当内容已经
++抽象成长期通用设计说明，才另写或同步到 `docs/design/`。
++
++## 2. 每个文件写什么
++
++- `README.md`：版本状态、主线、构建目录、bitstream/demo 名、是否建议晋级。
++- `changes.md`：这一版改了什么、为什么改、预期收益、已知代价。
++- `testing.md`：已经跑过的命令、关键输出、日志路径、失败边界、下一步测试计划。
++- `code_reading_guide.md`：按文件顺序解释怎么读这版代码，重点写 ABI、HBM 映射、
++  task graph、controller 阶段、metrics 口径。
++- `source.diff`：这一版源码/脚本/纪律文档的可逆补丁。
++
++不要把大段源码复制进 Markdown；解释写在 Markdown，真实改动以 `source.diff`
++为准。
++
++## 3. source.diff 生成纪律
++
++生成 `source.diff` 时只包含本版相关源码、host、cfg、Makefile 和纪律文档。不要把
++build 产物、日志、`.xclbin` 或版本目录自身递归塞进去。
++
++示例：
++
++```bash
++git diff --no-ext-diff --unified=0 -- \
++  DLC/Cuper/include/Cuper.h \
++  DLC/Cuper/kernels/detail/cuper_top_graphs.hpp \
++  DLC/Cuper/kernels/detail/pcg_common.hpp \
++  DLC/Cuper/kernels/detail/pcg_controller.hpp \
++  DLC/Cuper/kernels/detail/pcg_spmv_service.hpp \
++  Makefile \
++  cfg/connectivity_cuper_tapa_pcg_u55c.cfg \
++  host/cuper_tapa_pcg_fpga_main.cpp \
++  docs/codex/coding.md \
++  docs/codex/testing.md \
++  docs/codex/workflows/bitstreams.md \
++  docs/codex/workflows/builds.md \
++  docs/codex/workflows/reports.md \
++  docs/codex/workflows/tapa_sources.md \
++  docs/codex/workflows/version_records.md \
++  docs/codex/skills/README.md \
++  docs/codex/skills/project-xplus/SKILL.md \
++  docs/bitstream_summaries/README.md \
++  > docs/bitstream_summaries/<版本目录>/source.diff
++```
++
++如果新增了别的相关源码，要加入路径列表。生成后跑：
++
++```bash
++git diff --check
++```
++
++## 4. 阅读辅助写法
++
++阅读辅助优先服务“以后怎么接着改”，不是写科普文章。至少回答：
++
++1. 这版新增/改变了哪些 ABI、BO、HBM bank 或 register offset。
++2. 从 host 到 kernel 的数据如何流动。
++3. TAPA task graph 里哪些 stream 是串接链，哪些是真并行数组。
++4. controller 每个 PCG 阶段读写哪些 HBM/stream。
++5. 哪些 metrics 可以信，哪些当前只是粗略拆分。
++6. 旧标准版和新 demo 的兼容开关是什么，例如 `LEGACY_ABI=1`。
++
++## 5. 构建并行状态
++
++如果 tmux 里已经有硬件构建进入 `vpl` / `impl` / routing，后续源码注释、
++阅读指南和 `source.diff` 更新不会影响那一次构建。回复里必须说明“这些改动只影响
++下一次构建”，并记录当前日志阶段。
 diff --git a/host/cuper_tapa_pcg_fpga_main.cpp b/host/cuper_tapa_pcg_fpga_main.cpp
 index 35e4d90..d93e931 100644
 --- a/host/cuper_tapa_pcg_fpga_main.cpp

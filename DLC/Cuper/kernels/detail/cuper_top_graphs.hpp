@@ -70,30 +70,35 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     ;
 }
 
-void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
-              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
-              tapa::mmap<double> B,
-              tapa::mmap<double> M_inv,
-              tapa::mmap<double> X,
-              tapa::mmap<double> R,
-              tapa::mmap<double> Z,
-              tapa::mmap<double> P,
+// TAPA 端口类型速记：
+//   - tapa::mmap<T> 是一个连续全局内存端口，host 侧通常绑定一个 xrt::bo；
+//     kernel 内用 array[index] 形式访问 T 类型元素。
+//   - tapa::mmaps<T, N> 是 N 个同类型 mmap 端口的数组；这里用于把 16 路
+//     Matrix_data 分散到 16 个 HBM bank，支撑 Cuper 的 16 路并行 SpMV。
+void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper 预处理后的稀疏元素/批次索引表，驱动 16 路 SpMV 调度
+              tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,   // 16 个 HBM 通道上的 512-bit packed 矩阵数据
+              tapa::mmap<double> B,                                     // PCG 右端项 b，FP64 主状态
+              tapa::mmap<double> M_inv,                                 // Jacobi 预条件器对角逆 M^{-1}
+              tapa::mmap<double> X,                                     // 解向量 x，输入初值 x0，kernel 内更新并写回最终解
+              tapa::mmap<double> R,                                     // 残差向量 r = b - A*x
+              tapa::mmap<double> Z,                                     // 预条件残差 z = M^{-1}*r
+              tapa::mmap<double> P,                                     // PCG 搜索方向 p，FP64 权威状态
               // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
               // Cuper SpMV 新增的 packed float_v16 缓冲：
               //   X_spmv: host 预打包 x0，初始化 A*x0 时读取
               //   P_spmv: controller 维护 p 的 packed 副本，每轮 A*p 时读取
               //   AP_spmv: controller 缓存 A*p 的 packed 输出，供 dot/update 复用
-              tapa::mmap<float_v16> AP_spmv,
-              tapa::mmap<float_v16> X_spmv,
-              tapa::mmap<float_v16> P_spmv,
-              tapa::mmap<double> Metrics,
-              tapa::mmap<INDEX_TYPE> Status,
-              const INDEX_TYPE Batch_num,
-              const INDEX_TYPE Matrix_len,
-              const INDEX_TYPE Row_num,
-              const INDEX_TYPE Column_num,
-              const INDEX_TYPE Max_iters,
-              const double Tau
+              tapa::mmap<float_v16> AP_spmv,                            // packed FP32 的 A*p 缓冲，供 dot/update 阶段复用 SpMV 输出
+              tapa::mmap<float_v16> X_spmv,                             // packed FP32 的 x0 副本，初始化 A*x0 时喂给 Cuper vector loader
+              tapa::mmap<float_v16> P_spmv,                             // packed FP32 的 p 副本，每轮 A*p 时喂给 Cuper vector loader
+              tapa::mmap<double> Metrics,                               // kernel 写回的阶段计时/调试统计数组
+              tapa::mmap<INDEX_TYPE> Status,                            // kernel 写回的收敛、max-iter、breakdown 等状态码
+              const INDEX_TYPE Batch_num,                               // Cuper SpMV 批次数/任务批数量
+              const INDEX_TYPE Matrix_len,                              // Cuper 编码后的矩阵数据长度
+              const INDEX_TYPE Row_num,                                 // 矩阵行数，也是 PCG 向量长度 n
+              const INDEX_TYPE Column_num,                              // 矩阵列数，PCG 方阵场景通常等于 Row_num
+              const INDEX_TYPE Max_iters,                               // PCG 最大迭代次数
+              const double Tau                                          // PCG 收敛阈值
              ) {
 
     // CuperPcg 顶层数据流：

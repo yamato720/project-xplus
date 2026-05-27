@@ -78,8 +78,13 @@
 
 ## 后续动作
 
-1. 等 tmux 中 `hw` 构建结束。
-2. 若生成成功，把 xclbin 以 `-demo` 后缀放入 `395bitstream/`。
-3. 生成 `.xclbin.info`，记录 UUID、SHA256、DATA/HBM clock。
-4. 按 `testing.md` 对比当前标准版并更新本目录 `testing.md`。
-5. 同步更新 `395bitstream/cuper_spmv_u55c_compare_20260524.html` 或新的 HTML 报告。
+已完成：
+
+1. tmux 中 `hw` 构建成功结束。
+2. xclbin 已以 `-demo` 后缀放入 `395bitstream/`，覆盖当前 demo 槽位。
+3. `.xclbin.info`、UUID、SHA256、DATA/HBM clock 已记录到 `testing.md`。
+
+仍需完成：
+
+1. 按 `testing.md` 对比当前标准版并更新本目录 `testing.md`。
+2. 同步更新 `395bitstream/cuper_spmv_u55c_compare_20260524.html` 或新的 HTML 报告。

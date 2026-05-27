@@ -3,11 +3,14 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-pcg`
-- 状态：源码/XO 候选，硬件 bitstream 构建中，尚未替换当前标准版
+- 状态：demo bitstream 已生成并放入 `395bitstream/`，尚未替换当前标准版
 - 目标：把 `CuperPcg` 内嵌 SpMV 的输入/输出路径继续向 standalone
   `cuper-tapa-spmv` 靠拢
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
-- 预期 demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
+- demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
+- demo UUID：`cc61e044-06f7-4726-8f18-773ac52ab1b2`
+- demo SHA256：`add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb`
+- demo DATA/KERNEL/HBM：216/500/450 MHz
 - 构建目录：`cuper-tapa-pcg-packed-ap-build/`
 - tmux 会话：`project-xplus-cuper-tapa-pcg-packed-ap-hw`
 - 构建日志：`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`
@@ -47,22 +50,21 @@
 - `n512 MAX_ITERS=1` TAPA 软件仿真通过；
 - `thermal2_n1024 MAX_ITERS=1` TAPA 软件仿真通过；
 - `hw_emu` 目标的 TAPA/HLS/XO 生成通过；
+- `hw` bitstream 生成成功，`v++` 总耗时 4h39m35s；
+- 新 xclbin 和 `.xclbin.info` 已覆盖 `395bitstream/` 当前 demo 槽位；
 - `source.diff` 已记录本版源码和脚本改动。
 - `code_reading_guide.md` 已记录本版代码阅读顺序和关键数据流。
 
 尚未完成：
 
-- `hw` bitstream 仍在 tmux 构建中；
-- 尚未生成新的 `.xclbin.info`、UUID、SHA256；
 - 尚未上板做 demo vs 当前标准版动态对比；
 - 尚未更新 `395bitstream/` HTML 报告。
 
 ## 是否建议晋级
 
-目前不能晋级。原因是还没有硬件 bitstream 和板上数据。
+目前不能晋级。原因是还没有板上 standard-vs-demo 动态对比数据。
 
-如果 bitstream 生成成功，下一步按 `docs/codex/testing.md` 先以 `-demo` 后缀
-放入 `395bitstream/`，再对比当前标准版：
+下一步按 `docs/codex/testing.md` 对比当前标准版：
 
 - `thermal2_n16`
 - `thermal2_n65536`

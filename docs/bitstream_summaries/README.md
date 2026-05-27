@@ -22,7 +22,8 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
   receive-path demo 对比。
 - `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
-  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 构建中。
+  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 已生成并覆盖
+  `395bitstream/` 当前 demo 槽位，等待板上动态对比。
 
 每个版本目录至少包含：
 

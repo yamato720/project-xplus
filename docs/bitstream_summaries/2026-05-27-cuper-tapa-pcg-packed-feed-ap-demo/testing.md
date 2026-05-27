@@ -4,14 +4,15 @@
 
 记录时间：2026-05-27
 
-本版还处于源码/XO 候选阶段，完整 `hw` bitstream 正在 tmux 中构建：
+本版已完成 `hw` bitstream 构建，并已覆盖 `395bitstream/` 当前 demo 槽位：
 
 ```bash
-tmux attach -t project-xplus-cuper-tapa-pcg-packed-ap-hw
-tail -f logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 ```
 
-截至写入本文件时，构建已进入 `vpl`，日志显示正在进行 block-level synthesis。
+当前 demo 文件会被后续新 demo 优先覆盖；旧 receive-path demo 的测试结论只作为
+历史记录保留，不再对应当前这个 `.xclbin` 文件。
 
 ## 已跑命令
 
@@ -111,13 +112,30 @@ tmux 包装命令已让 shell 在结束后保留，方便回看日志。
 logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log
 ```
 
-下一次更新本文件时，需要补充：
+构建结果：成功。
 
-- 是否生成 `CuperPcg.xclbin`；
-- `.xclbin.info` 中 UUID 和 DATA/HBM clock；
-- `sha256sum`；
-- 板上 demo vs 标准版动态对比表；
-- 是否建议晋级。
+关键输出：
+
+```text
+INFO: [v++ 60-586] Created /home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-packed-ap-build/hw/CuperPcg.xclbin
+INFO: [v++ 60-791] Total elapsed time: 4h 39m 35s
+build finished with exit code: 0
+```
+
+同步到 `395bitstream/` 的 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| demo xclbin | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` |
+| demo info | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info` |
+| UUID | `cc61e044-06f7-4726-8f18-773ac52ab1b2` |
+| SHA256 | `add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb` |
+| DATA clock | 216 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 450 MHz |
+| kernel signature | 新 ABI，含 `AP_spmv` / `X_spmv` / `P_spmv` |
+
+下一次更新本文件时，需要补充板上 demo vs 标准版动态对比表和是否建议晋级。
 
 ## 板上测试计划
 
