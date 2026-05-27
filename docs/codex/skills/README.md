@@ -56,6 +56,13 @@ Project-XPlus/docs/codex/testing.md
 Project-XPlus/395bitstream/README.md
 ```
 
+当前 skill 目标是：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
+TAPA Cuper SpMV。围绕该目标的连续修改记录统一维护在：
+
+```text
+Project-XPlus/docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+```
+
 其中 `coding.md` 是入口页，细分流程放在：
 
 ```text

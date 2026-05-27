@@ -14,16 +14,22 @@ YYYY-MM-DD-<主线>-<简短说明>/
 例如：
 
 ```text
-2026-05-27-cuper-tapa-pcg-demo/
+2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
 ```
 
 ## 已有版本记录
 
-- `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
-  receive-path demo 对比。
-- `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
-  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 已生成并覆盖
-  `395bitstream/` 当前 demo 槽位，等待板上动态对比。
+- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：当前持续目标目录。
+  目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
+  Cuper SpMV。后续围绕这个目标的源码改动、demo bitstream、测试结论和
+  `source.diff` 都继续写入该目录，不再为每个小 demo 新建目录。
+
+该目标目录内同时保留历史阶段：
+
+- `receive_path_demo.md` / `receive_path_changes.md` / `receive_path_source.diff`：
+  旧 receive-path demo 的历史记录；
+- `README.md` / `changes.md` / `testing.md` / `source.diff`：
+  当前最新候选状态。
 
 每个版本目录至少包含：
 

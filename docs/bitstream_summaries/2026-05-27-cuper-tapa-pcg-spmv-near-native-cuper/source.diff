@@ -1,3 +1,39 @@
+diff --git a/395bitstream/README.md b/395bitstream/README.md
+index a8b75fe..69ac54e 100644
+--- a/395bitstream/README.md
++++ b/395bitstream/README.md
+@@ -8,0 +9,4 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
++同步目录常态保留五个成品槽位：四个标准 bitstream，加一个带 `-demo` 后缀的当前
++候选 bitstream。新 demo 进入本目录时优先覆盖旧 demo 槽位；四个标准版只有在
++用户明确确认满意后才会归档旧版并晋级替换。
++
+@@ -17 +21 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
+-| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-27 demo 候选版，未替换当前标准 |
++| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 当前 demo 槽：packed feed/AP 候选版，未替换当前标准 |
+@@ -42 +46 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+-这版仍是 `CuperPcg`，来自 2026-05-27 的 TAPA full-PCG SpMV receive path
++这版仍是 `CuperPcg`，来自 2026-05-27 的 TAPA full-PCG packed feed/AP
+@@ -45,2 +49,2 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+-`9474ef8e-571b-ae13-f898-890e3af8ae5e`，SHA256 为
+-`440d6969ff869d47aae5b12ab6d86d51b80794c07445799599ae13594a9166c5`。
++`cc61e044-06f7-4726-8f18-773ac52ab1b2`，SHA256 为
++`add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb`。
+@@ -48,5 +52,10 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+-HBM clock 为 450 MHz。本轮动态对比见
+-`cuper_spmv_u55c_compare_20260524.html` 和
+-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/`。
+-结论：demo 在 `thermal2_n262144` 的 1iter 总 kernel 约快 3.3%，但完整
+-`thermal2` 仍失败在 direct-register 运行后的 `ctrl=0x0`，因此尚未晋级为标准版。
++HBM clock 为 450 MHz。构建日志为
++`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`，版本记录见
++`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
++
++注意：这个文件名之前曾放过 receive-path demo
++`9474ef8e-571b-ae13-f898-890e3af8ae5e`。该旧 demo 的测试结论仍保存在
++`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`
++的历史记录和 HTML 报告中，
++但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 尚未上板完成
++standard-vs-demo 动态对比，因此尚未晋级为标准版。
 diff --git a/DLC/Cuper/include/Cuper.h b/DLC/Cuper/include/Cuper.h
 index a46f2cd..7a9fe75 100644
 --- a/DLC/Cuper/include/Cuper.h
@@ -516,31 +552,49 @@ index 9ce1f85..313aeb1 100644
 +sp=CuperPcg_1.P_spmv:HBM[25]
 +sp=CuperPcg_1.Metrics:HBM[26]
 +sp=CuperPcg_1.Status:HBM[26]
+diff --git a/docs/README.md b/docs/README.md
+index dd64cc6..ce442a4 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -24,2 +24,2 @@
+-- [2026-05-27 TAPA full-PCG demo 总结](bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/README.md)
+-  - 记录当前 demo bitstream 的测试边界、性能差值、是否建议晋级。
++- [TAPA full-PCG SpMV 接近原生 Cuper 性能目标记录](bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/README.md)
++  - 记录当前 demo bitstream、历史 receive-path demo、测试边界、性能差值和是否建议晋级。
 diff --git a/docs/bitstream_summaries/README.md b/docs/bitstream_summaries/README.md
-index 27a8295..5b74975 100644
+index 27a8295..adfa606 100644
 --- a/docs/bitstream_summaries/README.md
 +++ b/docs/bitstream_summaries/README.md
-@@ -19,0 +20,8 @@ YYYY-MM-DD-<主线>-<简短说明>/
+@@ -17 +17 @@ YYYY-MM-DD-<主线>-<简短说明>/
+-2026-05-27-cuper-tapa-pcg-demo/
++2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+@@ -19,0 +20,14 @@ YYYY-MM-DD-<主线>-<简短说明>/
 +## 已有版本记录
 +
-+- `2026-05-27-cuper-tapa-pcg-demo/`：已生成 bitstream 的 TAPA full-PCG
-+  receive-path demo 对比。
-+- `2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`：当前 packed
-+  `X_spmv/P_spmv/AP_spmv` 优化候选，硬件 bitstream 已生成并覆盖
-+  `395bitstream/` 当前 demo 槽位，等待板上动态对比。
++- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：当前持续目标目录。
++  目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
++  Cuper SpMV。后续围绕这个目标的源码改动、demo bitstream、测试结论和
++  `source.diff` 都继续写入该目录，不再为每个小 demo 新建目录。
 +
-@@ -24 +32,4 @@ YYYY-MM-DD-<主线>-<简短说明>/
++该目标目录内同时保留历史阶段：
++
++- `receive_path_demo.md` / `receive_path_changes.md` / `receive_path_source.diff`：
++  旧 receive-path demo 的历史记录；
++- `README.md` / `changes.md` / `testing.md` / `source.diff`：
++  当前最新候选状态。
++
+@@ -24 +38,4 @@ YYYY-MM-DD-<主线>-<简短说明>/
 -- `source.diff`：可选但推荐。记录这一版相对上一标准源码的可逆补丁，
 +- `testing.md`：测试命令、数据集、关键输出、失败边界、待补项目。
 +- `code_reading_guide.md`：版本相关代码阅读指南。只在该版源码较复杂或用户
 +  要求研究代码时补充，避免把版本特有解释散落到全局设计文档。
 +- `source.diff`：必须提供。记录这一版相对上一标准源码的可逆补丁，
-@@ -66 +77,2 @@ demo 的结果必须同时写入：
+@@ -66 +83,2 @@ demo 的结果必须同时写入：
 -- 本目录对应版本子文件夹的 Markdown 总结。
 +- 本目录对应版本子文件夹的 Markdown 总结，详细测试过程写入该目录
 +  `testing.md`，不要只在最终回复或日志里保留。
 diff --git a/docs/codex/coding.md b/docs/codex/coding.md
-index dba6786..3bf712f 100644
+index dba6786..325b7e1 100644
 --- a/docs/codex/coding.md
 +++ b/docs/codex/coding.md
 @@ -3,2 +3,2 @@
@@ -584,7 +638,7 @@ index dba6786..3bf712f 100644
 +```
 +
 +## 2. 四条主线
-@@ -35,158 +53,23 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路
+@@ -35,158 +53,24 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路
 -
 -## 2. bitstream 同步目录
 -
@@ -759,18 +813,19 @@ index dba6786..3bf712f 100644
 +6. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
 +   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
 +   `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
-+7. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
-+   `docs/bitstream_summaries/<版本>/`。
++7. 这个 SpMV 优化目标的连续改动统一维护在
++   `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`；
++   除非用户明确要求新建独立版本目录，否则不要每做一版 demo 就新增目录。
 +8. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
 +
 +## 4. 常用验证
 +
 +Host smoke：
-@@ -195 +78,2 @@ project-xplus-cuper-notapa-spmv-hw
+@@ -195 +79,2 @@ project-xplus-cuper-notapa-spmv-hw
 -make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
 +make cuper-tapa-pcg-fpga-host
 +make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
-@@ -198,54 +82 @@ make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
+@@ -198,54 +83 @@ make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=...
 -2. `thermal2_n1024` 低迭代检查数值和返回路径。
 -3. 新 bitstream 上板后先跑 `MAX_ITERS=0` 或 `MAX_ITERS=1`，区分 init SpMV、迭代 SpMV、PCG 更新阶段问题。
 -4. 大矩阵问题按规模递增：
@@ -826,11 +881,11 @@ index dba6786..3bf712f 100644
 -
 -1. 提交前跑：
 +提交或结束代码/文档改动前：
-@@ -254 +84,0 @@ bitstream path / SHA256 / UUID
+@@ -254 +85,0 @@ bitstream path / SHA256 / UUID
 -git status --short
-@@ -255,0 +86 @@ git diff --check
+@@ -255,0 +87 @@ git diff --check
 +git status --short
-@@ -258,2 +89,6 @@ git diff --check
+@@ -258,2 +90,6 @@ git diff --check
 -2. 只提交本次任务相关文件，不顺手提交无关脏改动。
 -3. 替换 bitstream 的提交必须包含：
 +硬件测试和 demo 对比按 `docs/codex/testing.md` 执行，不要只说“理论上可以”。
@@ -839,15 +894,15 @@ index dba6786..3bf712f 100644
 +
 +1. 只提交本次任务相关文件，不顺手提交无关脏改动。
 +2. 替换 bitstream 的提交必须包含：
-@@ -264,2 +99,2 @@ git diff --check
+@@ -264,2 +100,2 @@ git diff --check
 -4. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
 -5. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
 +3. 大文件 push 出现 GitHub 50 MB warning 时要在回复里说明。不要假装没看见。
 +4. 用户明确要求 push 时再 push；否则保留本地提交或本地改动并说明状态。
-@@ -267 +102 @@ git diff --check
+@@ -267 +103 @@ git diff --check
 -## 10. 回复纪律
 +## 6. 回复纪律
-@@ -270,6 +105,3 @@ git diff --check
+@@ -270,6 +106,3 @@ git diff --check
 -2. 用户问“能不能过某规模”，必须区分：
 -   - 编码/位宽硬边界
 -   - stream/死锁问题
@@ -857,14 +912,14 @@ index dba6786..3bf712f 100644
 +2. 用户问“能不能过某规模”，必须区分编码/位宽硬边界、stream/死锁、host/runtime
 +   返回问题、routing/timing 问题。
 +3. 用户问“这是不是顶层/并行/流水”，用 `CuperPcg` 的 task graph 解释，不要泛泛讲 FPGA。
-@@ -277 +108,0 @@ git diff --check
+@@ -277 +109,0 @@ git diff --check
 -5. 对中文源码和文档，优先写中文注释；英文只用于代码符号、命令和固定术语。
 diff --git a/docs/codex/skills/README.md b/docs/codex/skills/README.md
 new file mode 100644
-index 0000000..04b592e
+index 0000000..9876189
 --- /dev/null
 +++ b/docs/codex/skills/README.md
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,70 @@
 +# Codex Skills
 +
 +这里存放 Project-XPlus 可同步到其它机器的 Codex skill 副本。真正启用时，要把
@@ -923,6 +978,13 @@ index 0000000..04b592e
 +Project-XPlus/395bitstream/README.md
 +```
 +
++当前 skill 目标是：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
++TAPA Cuper SpMV。围绕该目标的连续修改记录统一维护在：
++
++```text
++Project-XPlus/docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
++```
++
 +其中 `coding.md` 是入口页，细分流程放在：
 +
 +```text
@@ -930,10 +992,10 @@ index 0000000..04b592e
 +```
 diff --git a/docs/codex/skills/project-xplus/SKILL.md b/docs/codex/skills/project-xplus/SKILL.md
 new file mode 100644
-index 0000000..5908fe5
+index 0000000..d3fe929
 --- /dev/null
 +++ b/docs/codex/skills/project-xplus/SKILL.md
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,81 @@
 +---
 +name: project-xplus
 +description: Use when working in the Project-XPlus / Project-X / Project-XS codebase, especially Cuper, TAPA, U55C, Vitis/Vivado, bitstream generation, tmux hardware builds, 395bitstream synchronization, demo bitstream testing, docs/bitstream_summaries version records, source.diff, testing.md, or code_reading_guide.md.
@@ -986,6 +1048,17 @@ index 0000000..5908fe5
 +- For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, `source.diff`, and, when useful, `code_reading_guide.md`.
 +- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
 +- Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
++
++## Current Goal
++
++- Current optimization target: make `CuperPcg` embedded SpMV approach standalone/native TAPA Cuper SpMV performance.
++- For this target, keep ongoing notes and source diffs in:
++
++```text
++docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
++```
++
++- Update that target directory for incremental SpMV optimization work instead of creating a new bitstream summary directory every time, unless the user explicitly asks for a new independent version record.
 +
 +## Common Commands
 +
@@ -1215,10 +1288,10 @@ index 0000000..33228c0
 +   `git apply --unidiff-zero docs/bitstream_summaries/<版本目录>/source.diff`。
 diff --git a/docs/codex/workflows/tapa_sources.md b/docs/codex/workflows/tapa_sources.md
 new file mode 100644
-index 0000000..4a36b02
+index 0000000..dceeca5
 --- /dev/null
 +++ b/docs/codex/workflows/tapa_sources.md
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,47 @@
 +# TAPA 源码组织与 SpMV 优化纪律
 +
 +## 1. 源码组织
@@ -1245,6 +1318,15 @@ index 0000000..4a36b02
 +优先看 `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported` 的
 +动态对比，而不是只看时钟频率或资源。
 +
++当前目标记录目录固定为：
++
++```text
++docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
++```
++
++围绕该目标的连续源码、demo bitstream、测试结论和 `source.diff` 更新都写进这个
++目录。只有当用户要求另起一条目标或该优化目标结束时，才新建其它版本目录。
++
 +优化时优先处理会把原 Cuper 16 路 SpMV 压成串行的周边路径：
 +
 +1. SpMV 输入向量应尽量保持 `float_v16` packed 形态，避免 controller 从
@@ -1259,10 +1341,10 @@ index 0000000..4a36b02
 +   还是 PCG controller 其它阶段。
 diff --git a/docs/codex/workflows/version_records.md b/docs/codex/workflows/version_records.md
 new file mode 100644
-index 0000000..0834473
+index 0000000..4445a6a
 --- /dev/null
 +++ b/docs/codex/workflows/version_records.md
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,108 @@
 +# 版本记录与阅读辅助纪律
 +
 +当一次改动已经进入“可能生成 demo bitstream 或影响主线行为”的程度，不能只把
@@ -1276,6 +1358,18 @@ index 0000000..0834473
 +```text
 +docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 +```
++
++当前正在推进的 `cuper-tapa-pcg` SpMV 性能目标例外：后续连续改动统一写入
++下面这个目标目录，避免每次 demo 都开一个新目录导致记录分散：
++
++```text
++docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
++```
++
++这个目标的定义是：把 `CuperPcg` 内嵌 SpMV 性能逐步优化到接近
++standalone/native TAPA Cuper SpMV。该目录内可以保留多个阶段的历史记录文件，
++但 `README.md`、`changes.md`、`testing.md`、`source.diff` 始终代表当前最新
++候选状态。
 +
 +目录内至少维护：
 +

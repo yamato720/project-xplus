@@ -12,6 +12,18 @@
 docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 ```
 
+当前正在推进的 `cuper-tapa-pcg` SpMV 性能目标例外：后续连续改动统一写入
+下面这个目标目录，避免每次 demo 都开一个新目录导致记录分散：
+
+```text
+docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+```
+
+这个目标的定义是：把 `CuperPcg` 内嵌 SpMV 性能逐步优化到接近
+standalone/native TAPA Cuper SpMV。该目录内可以保留多个阶段的历史记录文件，
+但 `README.md`、`changes.md`、`testing.md`、`source.diff` 始终代表当前最新
+候选状态。
+
 目录内至少维护：
 
 ```text

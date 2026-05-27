@@ -23,7 +23,7 @@ direct-register 运行后进入 `ctrl=0x0`。
 `debb634 Optimize TAPA PCG SpMV receive path`，需要回退源码时可以运行：
 
 ```bash
-git apply --unidiff-zero -R docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/source.diff
+git apply --unidiff-zero -R docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/receive_path_source.diff
 ```
 
 ## 构建产物

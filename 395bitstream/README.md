@@ -51,11 +51,12 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 最终 xclbin info 中 DATA clock 为 216 MHz，KERNEL clock 为 500 MHz，
 HBM clock 为 450 MHz。构建日志为
 `logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`，版本记录见
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-packed-feed-ap-demo/`。
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
 
 注意：这个文件名之前曾放过 receive-path demo
 `9474ef8e-571b-ae13-f898-890e3af8ae5e`。该旧 demo 的测试结论仍保存在
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-demo/` 和 HTML 报告中，
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`
+的历史记录和 HTML 报告中，
 但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 尚未上板完成
 standard-vs-demo 动态对比，因此尚未晋级为标准版。
 

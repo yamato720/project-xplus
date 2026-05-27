@@ -51,6 +51,17 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
 
+## Current Goal
+
+- Current optimization target: make `CuperPcg` embedded SpMV approach standalone/native TAPA Cuper SpMV performance.
+- For this target, keep ongoing notes and source diffs in:
+
+```text
+docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+```
+
+- Update that target directory for incremental SpMV optimization work instead of creating a new bitstream summary directory every time, unless the user explicitly asks for a new independent version record.
+
 ## Common Commands
 
 Host smoke:

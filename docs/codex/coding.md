@@ -66,8 +66,9 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 6. TAPA full-PCG 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
    `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；判断时优先看动态测试中的
    `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported`。
-7. 代码改动进入“可能生成 demo bitstream 或影响主线行为”的程度后，必须同步维护
-   `docs/bitstream_summaries/<版本>/`。
+7. 这个 SpMV 优化目标的连续改动统一维护在
+   `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`；
+   除非用户明确要求新建独立版本目录，否则不要每做一版 demo 就新增目录。
 8. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
 
 ## 4. 常用验证

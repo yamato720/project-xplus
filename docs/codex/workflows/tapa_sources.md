@@ -24,6 +24,15 @@
 优先看 `init_spmv`、`iter_spmv`、`controller_total` 和 `kernel_reported` 的
 动态对比，而不是只看时钟频率或资源。
 
+当前目标记录目录固定为：
+
+```text
+docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+```
+
+围绕该目标的连续源码、demo bitstream、测试结论和 `source.diff` 更新都写进这个
+目录。只有当用户要求另起一条目标或该优化目标结束时，才新建其它版本目录。
+
 优化时优先处理会把原 Cuper 16 路 SpMV 压成串行的周边路径：
 
 1. SpMV 输入向量应尽量保持 `float_v16` packed 形态，避免 controller 从

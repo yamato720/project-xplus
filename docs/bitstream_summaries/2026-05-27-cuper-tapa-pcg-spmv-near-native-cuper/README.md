@@ -4,8 +4,10 @@
 
 - 主线：`cuper-tapa-pcg`
 - 状态：demo bitstream 已生成并放入 `395bitstream/`，尚未替换当前标准版
-- 目标：把 `CuperPcg` 内嵌 SpMV 的输入/输出路径继续向 standalone
-  `cuper-tapa-spmv` 靠拢
+- 持续目标：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
+  TAPA Cuper SpMV
+- 记录策略：该目录是当前目标的唯一持续记录目录；后续围绕此目标的源码改动、
+  demo bitstream、测试结论和 `source.diff` 继续更新这里，不再每版新建目录
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
 - demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
 - demo UUID：`cc61e044-06f7-4726-8f18-773ac52ab1b2`
@@ -14,6 +16,17 @@
 - 构建目录：`cuper-tapa-pcg-packed-ap-build/`
 - tmux 会话：`project-xplus-cuper-tapa-pcg-packed-ap-hw`
 - 构建日志：`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`
+
+## 历史阶段
+
+本目录同时保留旧 receive-path demo 的历史记录：
+
+- `receive_path_demo.md`
+- `receive_path_changes.md`
+- `receive_path_source.diff`
+
+这些历史文件对应旧 demo UUID `9474ef8e-571b-ae13-f898-890e3af8ae5e`，不再对应
+当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`。
 
 ## 这一版做了什么
 
