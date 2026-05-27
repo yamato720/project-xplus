@@ -4,13 +4,17 @@
 
 ## 推荐阅读顺序
 
-1. [实现版本索引](design/implementation_versions_zh.md)
+0. [Codex 工作纪律](codex/coding.md)
+   - 新对话里的 Codex 先读这个。它约定四条 Cuper 主线、bitstream 归档、build 目录、测试和推送纪律。
+1. [Codex 测试纪律](codex/testing.md)
+   - 服务器侧核验 bitstream 前读这个。它按 `395bitstream/cuper_spmv_u55c_compare_20260524.html` 给出数据集、命令和预期结果。
+2. [实现版本索引](design/implementation_versions_zh.md)
    - 先看这个。它说明每个版本的 PCG 控制在哪里、SpMV 在哪里、用哪个 host/kernel、怎么构建和运行。
-2. [Jacobi-PCG 数学原理与 XRT 执行流程](design/jacobi_pcg_algorithm_flow_zh.md)
+3. [Jacobi-PCG 数学原理与 XRT 执行流程](design/jacobi_pcg_algorithm_flow_zh.md)
    - 说明 PCG 的数学递推、Jacobi 预条件、默认单 control-kernel 路径的 host/kernel 映射。
-3. [Project-XPlus HLS 路径源码解析](design/hls_source_walkthrough_zh.md)
+4. [Project-XPlus HLS 路径源码解析](design/hls_source_walkthrough_zh.md)
    - 从 Makefile、host、kernel、connectivity、报告脚本角度串起默认 XRT 路径。
-4. [Project-XPlus Jacobi-PCG HLS Design](design/hls.md)
+5. [Project-XPlus Jacobi-PCG HLS Design](design/hls.md)
    - HLS 设计入口和相关文档链接。
 
 ## Cuper / SpMV 相关
