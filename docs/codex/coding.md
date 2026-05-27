@@ -71,12 +71,17 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 
 4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
-5. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。不能只看 demo
-   单独能不能跑，也不能拿过期表格替代当前标准实测。
+5. demo 的测试数据必须和同主线当前标准 bitstream 动态对比。旧版跨主线基线
+   默认复用当前 HTML 和 `docs/bitstream_summaries/` 的记录，除非用户要求、
+   标准 bitstream/host 变化、或 demo 结果与旧记录矛盾。
 6. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
    归档，并把 demo 晋级为稳定标准文件名。
 7. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
    `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
+8. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
+   `logs/` 目录。
+9. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
+   留一份 Markdown 详细总结，并包含一个说明“这一版改了什么”的文档。
 
 替换后至少记录：
 
@@ -219,15 +224,27 @@ bitstream path / SHA256 / UUID
 ## 8. 报告纪律
 
 1. 面向同步/对比的 HTML 报告放 `395bitstream/`。
-2. 设计解释、失败分析、实现版本说明放 `docs/design/`。
-3. 旧版构建尝试、失败原因、routing 信息要写清楚日志路径，不要只贴最后一屏错误。
-4. 频率、资源、时序结论要注明来自哪个报告：
+2. bitstream 版本级详细总结放 `docs/bitstream_summaries/<版本目录>/`。
+   一个版本一个子文件夹，至少包含：
+   - `README.md`：测试摘要、关键结论、日志路径、是否建议晋级；
+   - `changes.md`：这一版相对上一标准版改了什么、预期收益、实际结果。
+   - `source.diff`：推荐放。记录这一版相对上一标准源码的可逆补丁，
+     不要把大段源码直接贴进 Markdown。
+3. demo 的数据必须同时写进 HTML 报告和对应 Markdown 总结。HTML 给同步查看，
+   Markdown 给详细追踪。
+4. 设计解释、失败分析、实现版本说明放 `docs/design/`。
+5. 旧版构建尝试、失败原因、routing 信息要写清楚日志路径，不要只贴最后一屏错误。
+6. 频率、资源、时序结论要注明来自哪个报告：
    - `.xclbin.info`
    - timing summary
    - implementation report
    - TAPA HLS report
    - Vitis system estimate
-5. `sw_emu` / HLS 资源估算不能当作 routed bitstream 的最终资源。
+7. `sw_emu` / HLS 资源估算不能当作 routed bitstream 的最终资源。
+8. 如果版本总结目录里有 `source.diff`，回退说明使用
+   `git apply --unidiff-zero -R docs/bitstream_summaries/<版本目录>/source.diff`；
+   复现说明使用
+   `git apply --unidiff-zero docs/bitstream_summaries/<版本目录>/source.diff`。
 
 ## 9. 提交与推送纪律
 

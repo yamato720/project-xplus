@@ -16,6 +16,10 @@
 
 - 这里测的是 Cuper 路线，不是默认 CSR/control-kernel 路线。
 - 有些 timeout / failed 是当前已知边界，不一定是新问题。
+- 旧基线数据默认复用当前 HTML 和 `docs/bitstream_summaries/` 已记录结果，
+  不要每次新 demo 都重跑全部历史 bitstream。
+- demo 的测试数据和结论必须写回 `395bitstream/` 下的 HTML 报告；不能只留在
+  `logs/` 目录里。
 - `Project-XS/data/README.md` 当前只说明 generated 数据目录；真正用于本轮对比的
   `thermal2` / `thermal2_n<N>` 数据按 `Project-XPlus/data/README.md` 和
   `scripts/download_suitesparse_data.py` 准备。
@@ -78,14 +82,31 @@ cuper-notapa-spmv
    `395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。
 2. 如果 demo 号称修复某个跨主线问题，还要加入相关基础版本作动态对照；
    例如 TAPA full-PCG demo 要同时参考 no-TAPA full-PCG 和 TAPA single SpMV。
-3. 对比时不能只复用旧 HTML 表格。旧表格只给预期边界；最终判断必须使用
-   当前 `395bitstream/` 里的标准 bitstream 重新实测。
-4. demo 的测试报告必须写清楚：
+3. 旧基线默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志里的数据，
+   不再每次重跑。只有下面情况才重跑旧基线：
+   - 用户明确要求重跑；
+   - 当前标准 bitstream 或 host 代码发生变化；
+   - demo 结果和旧基线预期矛盾，需要排除板卡/XRT/数据集状态问题；
+   - 要判断失败边界是否移动，且旧基线没有同口径记录。
+4. demo 的最低动态实测范围是同主线当前标准版加 demo 版；对 TAPA full-PCG
+   候选，至少跑 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+   `thermal2_n262144`、完整 `thermal2` 的 init-only 与 1iter。若数据异常，
+   再补中间规模。
+5. demo 的测试报告必须写清楚：
    - demo 路径、UUID、SHA256
    - 对应标准版路径、UUID、SHA256
    - 相同数据集、相同阈值、相同 timeout 下的结果差异
    - 哪些指标更好，哪些指标退化，哪些失败边界变化
-5. 只有用户明确表示结果满意，demo 才能按 `docs/codex/coding.md` 的归档流程
+6. demo 数据必须写入 `395bitstream/cuper_spmv_u55c_compare_20260524.html`
+   或当前对应 HTML 报告。至少包含：
+   - demo bitstream 信息；
+   - 标准版 vs demo 的退出边界；
+   - init / 1iter 关键时间和差值；
+   - 简短结论；
+   - 折线图或表格中的 demo 数据点。
+7. demo 的详细 Markdown 总结放入 `docs/bitstream_summaries/<版本目录>/`，
+   版本目录建议使用 `YYYY-MM-DD-<主线>-<简短说明>/`。
+8. 只有用户明确表示结果满意，demo 才能按 `docs/codex/coding.md` 的归档流程
    晋级并替换标准版。否则 demo 保持 demo 后缀，不能覆盖标准文件。
 
 ## 2. 数据集准备

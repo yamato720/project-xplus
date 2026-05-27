@@ -1,0 +1,83 @@
+diff --git a/DLC/Cuper/kernels/detail/pcg_common.hpp b/DLC/Cuper/kernels/detail/pcg_common.hpp
+index 76a2881..a00fcd0 100644
+--- a/DLC/Cuper/kernels/detail/pcg_common.hpp
++++ b/DLC/Cuper/kernels/detail/pcg_common.hpp
+@@ -33,5 +33,6 @@ static constexpr INDEX_TYPE kPcgStageIterSpmv = 2;
+-static constexpr INDEX_TYPE kPcgStageUpdateXr = 3;
+-static constexpr INDEX_TYPE kPcgStageUpdateZ = 4;
+-static constexpr INDEX_TYPE kPcgStageUpdateP = 5;
+-static constexpr INDEX_TYPE kPcgStageControllerTotal = 6;
+-static constexpr INDEX_TYPE kPcgStageCount = 7;
++static constexpr INDEX_TYPE kPcgStageDotPAp = 3;
++static constexpr INDEX_TYPE kPcgStageUpdateXr = 4;
++static constexpr INDEX_TYPE kPcgStageUpdateZ = 5;
++static constexpr INDEX_TYPE kPcgStageUpdateP = 6;
++static constexpr INDEX_TYPE kPcgStageControllerTotal = 7;
++static constexpr INDEX_TYPE kPcgStageCount = 8;
+diff --git a/DLC/Cuper/kernels/detail/pcg_controller.hpp b/DLC/Cuper/kernels/detail/pcg_controller.hpp
+index eaf2aee..214df2f 100644
+--- a/DLC/Cuper/kernels/detail/pcg_controller.hpp
++++ b/DLC/Cuper/kernels/detail/pcg_controller.hpp
+@@ -53,0 +54 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
++    unsigned long long dot_p_ap_ticks = 0;
+@@ -192 +193,2 @@ pcg_loop:
+-                    // 消费 AP，同时累计 p^T AP。AP 写回 HBM 便于调试和 host 检查。
++                    // 只消费 AP 并写回 HBM。p^T AP 放到后面的独立流水里做，
++                    // 避免 SpMV 回收路径同时承担 P 读取和 FP64 归约。
+@@ -196 +197,0 @@ pcg_loop:
+-                            const double p_value = P[index];
+@@ -199 +199,0 @@ pcg_loop:
+-                            p_ap += p_value * ap_value;
+@@ -206,0 +207,10 @@ pcg_loop:
++            pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageBegin);
++    dot_p_ap:
++            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
++#pragma HLS loop_tripcount min=1 max=8000000
++#pragma HLS pipeline II=4
++                p_ap += P[index] * AP[index];
++            }
++            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
++            pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageEnd);
++
+@@ -338 +348 @@ read_stage_timer_metrics:
+-                                      iter_spmv_ticks + update_xr_ticks +
++                                      iter_spmv_ticks + dot_p_ap_ticks + update_xr_ticks +
+@@ -341,0 +352 @@ read_stage_timer_metrics:
++    Metrics[14] = static_cast<double>(dot_p_ap_ticks);
+@@ -345,5 +356,6 @@ read_stage_timer_metrics:
+-    Metrics[19] = static_cast<double>(stage_cycles[kPcgStageUpdateXr].to_uint64());
+-    Metrics[20] = static_cast<double>(stage_cycles[kPcgStageUpdateZ].to_uint64());
+-    Metrics[21] = static_cast<double>(stage_cycles[kPcgStageUpdateP].to_uint64());
+-    Metrics[22] = static_cast<double>(stage_cycles[kPcgStageControllerTotal].to_uint64());
+-    Metrics[23] = static_cast<double>(stage_cycles[kPcgStageCount].to_uint64());
++    Metrics[19] = static_cast<double>(stage_cycles[kPcgStageDotPAp].to_uint64());
++    Metrics[20] = static_cast<double>(stage_cycles[kPcgStageUpdateXr].to_uint64());
++    Metrics[21] = static_cast<double>(stage_cycles[kPcgStageUpdateZ].to_uint64());
++    Metrics[22] = static_cast<double>(stage_cycles[kPcgStageUpdateP].to_uint64());
++    Metrics[23] = static_cast<double>(stage_cycles[kPcgStageControllerTotal].to_uint64());
++    Metrics[24] = static_cast<double>(stage_cycles[kPcgStageCount].to_uint64());
+diff --git a/host/cuper_tapa_pcg_fpga_main.cpp b/host/cuper_tapa_pcg_fpga_main.cpp
+index c95ce89..35e4d90 100644
+--- a/host/cuper_tapa_pcg_fpga_main.cpp
++++ b/host/cuper_tapa_pcg_fpga_main.cpp
+@@ -144 +144 @@ constexpr double kCuperTapaPcgKernelClockMhz = 1000.0 / kCuperTapaPcgKernelClock
+-constexpr std::array<PcgStageReport, 6> kPcgStageReports = {{
++constexpr std::array<PcgStageReport, 7> kPcgStageReports = {{
+@@ -148,3 +148,4 @@ constexpr std::array<PcgStageReport, 6> kPcgStageReports = {{
+-    {"update_xr", 8, 19},
+-    {"update_z", 9, 20},
+-    {"update_p", 10, 21},
++    {"dot_p_ap", 14, 19},
++    {"update_xr", 8, 20},
++    {"update_z", 9, 21},
++    {"update_p", 10, 22},
+@@ -655,2 +656,2 @@ int main(int argc, char** argv) {
+-        std::cout << " controller_total=" << metrics[22]
+-                  << " timer_total=" << metrics[23]
++        std::cout << " controller_total=" << metrics[23]
++                  << " timer_total=" << metrics[24]
+@@ -663,2 +664,2 @@ int main(int argc, char** argv) {
+-        std::cout << " controller_total=" << cycles_to_ms(metrics[22])
+-                  << " timer_total=" << cycles_to_ms(metrics[23])
++        std::cout << " controller_total=" << cycles_to_ms(metrics[23])
++                  << " timer_total=" << cycles_to_ms(metrics[24])
