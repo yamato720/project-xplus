@@ -141,13 +141,14 @@ double elapsed_ms(const std::chrono::steady_clock::time_point start,
 
 constexpr double kCuperTapaPcgKernelClockPeriodNs = 3.3;
 constexpr double kCuperTapaPcgKernelClockMhz = 1000.0 / kCuperTapaPcgKernelClockPeriodNs;
-constexpr std::array<PcgStageReport, 6> kPcgStageReports = {{
+constexpr std::array<PcgStageReport, 7> kPcgStageReports = {{
     {"init_spmv", 5, 16},
     {"init_zp", 6, 17},
     {"iter_spmv", 7, 18},
-    {"update_xr", 8, 19},
-    {"update_z", 9, 20},
-    {"update_p", 10, 21},
+    {"dot_p_ap", 14, 19},
+    {"update_xr", 8, 20},
+    {"update_z", 9, 21},
+    {"update_p", 10, 22},
 }};
 
 double cycles_to_ms(const double cycles) {
@@ -652,16 +653,16 @@ int main(int argc, char** argv) {
             std::cout << " " << stage.name << "=" << std::setprecision(0)
                       << metrics[stage.cycle_metric_index];
         }
-        std::cout << " controller_total=" << metrics[22]
-                  << " timer_total=" << metrics[23]
+        std::cout << " controller_total=" << metrics[23]
+                  << " timer_total=" << metrics[24]
                   << "\n";
         std::cout << std::scientific << std::setprecision(12);
         std::cout << "[stage-ms]";
         for (const PcgStageReport& stage : kPcgStageReports) {
             std::cout << " " << stage.name << "=" << cycles_to_ms(metrics[stage.cycle_metric_index]);
         }
-        std::cout << " controller_total=" << cycles_to_ms(metrics[22])
-                  << " timer_total=" << cycles_to_ms(metrics[23])
+        std::cout << " controller_total=" << cycles_to_ms(metrics[23])
+                  << " timer_total=" << cycles_to_ms(metrics[24])
                   << "\n";
 
         // Short benchmark runs intentionally use small MAX_ITERS values; max_iter

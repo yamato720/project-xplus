@@ -51,6 +51,7 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     unsigned long long init_spmv_ticks = 0;
     unsigned long long init_zp_ticks = 0;
     unsigned long long iter_spmv_ticks = 0;
+    unsigned long long dot_p_ap_ticks = 0;
     unsigned long long update_xr_ticks = 0;
     unsigned long long update_z_ticks = 0;
     unsigned long long update_p_ticks = 0;
@@ -189,20 +190,29 @@ pcg_loop:
                     float_v16 ap_packet;
                     Spmv_in.try_read(ap_packet);
             ap_lanes:
-                    // 消费 AP，同时累计 p^T AP。AP 写回 HBM 便于调试和 host 检查。
+                    // 只消费 AP 并写回 HBM。p^T AP 放到后面的独立流水里做，
+                    // 避免 SpMV 回收路径同时承担 P 读取和 FP64 归约。
                     for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
                         const INDEX_TYPE index = (packet << 4) + lane;
                         if (index < Row_num) {
-                            const double p_value = P[index];
                             const double ap_value = static_cast<double>(ap_packet[lane]);
                             AP[index] = ap_value;
-                            p_ap += p_value * ap_value;
                         }
                     }
                     ++received_packets;
                 }
             }
             pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageEnd);
+
+            pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageBegin);
+    dot_p_ap:
+            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
+#pragma HLS loop_tripcount min=1 max=8000000
+#pragma HLS pipeline II=4
+                p_ap += P[index] * AP[index];
+            }
+            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
+            pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageEnd);
 
             if (pcg_invalid(p_ap) || pcg_abs(p_ap) <= kPcgBreakdownEps ||
                 pcg_invalid(rz) || pcg_abs(rz) <= kPcgBreakdownEps) {
@@ -335,18 +345,20 @@ read_stage_timer_metrics:
     Metrics[9] = static_cast<double>(update_z_ticks);
     Metrics[10] = static_cast<double>(update_p_ticks);
     Metrics[11] = static_cast<double>(init_spmv_ticks + init_zp_ticks +
-                                      iter_spmv_ticks + update_xr_ticks +
+                                      iter_spmv_ticks + dot_p_ap_ticks + update_xr_ticks +
                                       update_z_ticks + update_p_ticks);
     Metrics[12] = static_cast<double>(Row_num);
     Metrics[13] = static_cast<double>(Max_iters);
+    Metrics[14] = static_cast<double>(dot_p_ap_ticks);
     Metrics[16] = static_cast<double>(stage_cycles[kPcgStageInitSpmv].to_uint64());
     Metrics[17] = static_cast<double>(stage_cycles[kPcgStageInitZp].to_uint64());
     Metrics[18] = static_cast<double>(stage_cycles[kPcgStageIterSpmv].to_uint64());
-    Metrics[19] = static_cast<double>(stage_cycles[kPcgStageUpdateXr].to_uint64());
-    Metrics[20] = static_cast<double>(stage_cycles[kPcgStageUpdateZ].to_uint64());
-    Metrics[21] = static_cast<double>(stage_cycles[kPcgStageUpdateP].to_uint64());
-    Metrics[22] = static_cast<double>(stage_cycles[kPcgStageControllerTotal].to_uint64());
-    Metrics[23] = static_cast<double>(stage_cycles[kPcgStageCount].to_uint64());
+    Metrics[19] = static_cast<double>(stage_cycles[kPcgStageDotPAp].to_uint64());
+    Metrics[20] = static_cast<double>(stage_cycles[kPcgStageUpdateXr].to_uint64());
+    Metrics[21] = static_cast<double>(stage_cycles[kPcgStageUpdateZ].to_uint64());
+    Metrics[22] = static_cast<double>(stage_cycles[kPcgStageUpdateP].to_uint64());
+    Metrics[23] = static_cast<double>(stage_cycles[kPcgStageControllerTotal].to_uint64());
+    Metrics[24] = static_cast<double>(stage_cycles[kPcgStageCount].to_uint64());
     Status[0] = status_code;
     Status[1] = iterations;
 }

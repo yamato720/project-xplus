@@ -30,11 +30,12 @@ static constexpr INDEX_TYPE kPcgStageStop = 2;
 static constexpr INDEX_TYPE kPcgStageInitSpmv = 0;
 static constexpr INDEX_TYPE kPcgStageInitZp = 1;
 static constexpr INDEX_TYPE kPcgStageIterSpmv = 2;
-static constexpr INDEX_TYPE kPcgStageUpdateXr = 3;
-static constexpr INDEX_TYPE kPcgStageUpdateZ = 4;
-static constexpr INDEX_TYPE kPcgStageUpdateP = 5;
-static constexpr INDEX_TYPE kPcgStageControllerTotal = 6;
-static constexpr INDEX_TYPE kPcgStageCount = 7;
+static constexpr INDEX_TYPE kPcgStageDotPAp = 3;
+static constexpr INDEX_TYPE kPcgStageUpdateXr = 4;
+static constexpr INDEX_TYPE kPcgStageUpdateZ = 5;
+static constexpr INDEX_TYPE kPcgStageUpdateP = 6;
+static constexpr INDEX_TYPE kPcgStageControllerTotal = 7;
+static constexpr INDEX_TYPE kPcgStageCount = 8;
 static constexpr double kPcgBreakdownEps = 1.0e-30;
 
 inline double pcg_abs(const double value) {
