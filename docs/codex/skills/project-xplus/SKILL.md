@@ -14,6 +14,7 @@ This skill is only an entry point. The repository documents are the source of tr
 1. Find the repo root. Prefer the current working directory if it contains `Project-XPlus`; otherwise check:
 
 ```bash
+/home/pyx/ProjectFS/Project-X/Project-XPlus
 /home/pyx/project-x/Project-XPlus
 ```
 
