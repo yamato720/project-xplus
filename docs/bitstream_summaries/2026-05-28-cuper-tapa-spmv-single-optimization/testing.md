@@ -215,3 +215,70 @@ Successfully reset Device[0000:01:00.1]
 或 CPU diff；因此停止 sweep，不跑 `thermal2_n65536`、`thermal2_n131072`、
 `thermal2_n262144` 和完整 `thermal2`。本轮没有性能提升，正式 `source.diff`
 不更新。
+
+## 2026-05-28 finite-exit 修复版验证
+
+修复意图：把 `CuperPcgSpmv` 单 SpMV demo 尾端从 stop-driven
+checker/sort 改成固定输出数量自然返回，避免上一版在 `ReadFromDevice`
+之后卡在 `Finish`。
+
+源码检查：
+
+```bash
+git diff --check
+```
+
+结果：通过。
+
+软件仿真：
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+关键输出：
+
+```text
+[xplus] dataset="data/suitesparse/Schmid/csr/thermal2_n16" mode=cuper-spmv-tapa spmv=tapa-cuper-pcg-service bitstream=<software-sim>
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+[timing-ms] plan=5.105500000000e-02 spmv_total=2.654200300000e+01 spmv_calls=1 spmv_avg=2.654200300000e+01 gflops=1.205636213665e-06
+```
+
+硬件构建：
+
+```bash
+make cuper-tapa-pcg-spmv-hw-tmux
+```
+
+构建状态：
+
+```text
+session: project-xplus-cuper-tapa-pcg-spmv-hw
+log: logs/cuper_tapa_pcg_spmv_hw_20260528_161221.log
+build_dir: cuper-tapa-spmv-u55c-20260528-demo-build/
+xclbin: cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
+```
+
+已过安全检查点：
+
+```text
+generated the v++ xo file at .../CuperPcgSpmv.xo
+patched .../CuperPcgSpmv.xo: initialized 64 FSM state regs, top defaults added 1, workdir_patched=True
+Run run_link: Step vpl: Started
+```
+
+待完成：
+
+- 等 VPL/implementation 生成新的 `CuperPcgSpmv.xclbin`；
+- 覆盖同步到 `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
+  和 `.info`；
+- demo-only 跑 `thermal2_n16`，确认上一版 `Finish` timeout 是否解除；
+- 若 `thermal2_n16` 返回并 diff 通过，再继续跑
+  `thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
+  `thermal2`。
+
+说明：当前只完成软件仿真和构建前半段，尚未得到板上性能或边界收益。因此正式
+`source.diff` 继续不更新。

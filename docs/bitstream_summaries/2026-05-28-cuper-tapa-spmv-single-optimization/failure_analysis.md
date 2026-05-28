@@ -148,3 +148,32 @@ standalone SpMV。`CuperPcgSpmv` 直接把 sort tree 输出写回 `Y_out`，它�
 
 本轮失败 demo 不更新正式 `source.diff`。后续只有修复后 demo-only 上板确认能返回并
 有性能/边界收益，才更新该目标目录的正式补丁。
+
+## 2026-05-28 修复尝试记录
+
+已按上面的第 3 条方向先做有限退出修复：单 SpMV demo 不再复用 full-PCG 的
+stop-driven checker/sort tree，而是新增固定包数版本。
+
+变化点：
+
+- `Pcg_Single_Vector_Checker`：消费一次 SpMV 中 accumulator 产生的完整对齐输出，
+  包括 padding，只转发有效 `Row_num` 对应的 `float_v2`；
+- `Pcg_Single_Mult_Sort_Tree`：固定输出 `ceil(Row_num/16)` 个 `float_v16` 后返回；
+- `Pcg_SingleSpmv_Controller`：不再给 checker/sort tree 发 stop，避免 writer done
+  抢跑 stop token。
+
+软件仿真已经在 `thermal2_n16` 上通过：
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08
+```
+
+新的硬件构建日志：
+
+```text
+logs/cuper_tapa_pcg_spmv_hw_20260528_161221.log
+```
+
+截至 2026-05-28 16:14，XO 已生成并 patch 成功，Vitis link 已进入 VPL。
+这个修复是否解决 `Finish` timeout 仍需等待新 bitstream 上板测试确认。

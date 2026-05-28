@@ -96,19 +96,15 @@ void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
-    tapa::streams<INDEX_TYPE, 8, 2>                         Checker_Stop_Stream("Checker_Stop_Stream");
-    tapa::stream<INDEX_TYPE, 2>                             Sort_Stop_Stream("Sort_Stop_Stream");
     tapa::stream<INDEX_TYPE, 2>                             Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
     tapa::stream<INDEX_TYPE, 2>                             Writer_Done_Stream("Writer_Done_Stream");
 
     tapa::task()
-        // 只发送一次 SpMV command；writer 写完 Y_out 后再统一广播 stop。
+        // 只发送一次 SpMV command；writer 写完 Y_out 后再关闭常驻 loader/core。
         .invoke(Pcg_SingleSpmv_Controller,
                 Iteration_num,
                 Command_Stream,
                 Matrix_Command_Stream,
-                Checker_Stop_Stream,
-                Sort_Stop_Stream,
                 Vector_Destroy_Stop_Stream,
                 Writer_Done_Stream)
         .invoke(Pcg_SpElement_list_ptr_Loader,
@@ -150,15 +146,16 @@ void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Vector_Y_Param,
                                              Matrix_Mult_Vector_Stream,
                                              Vector_Y_Stream)
-        .invoke<tapa::join, 8>(Pcg_Vector_Checker,
+        .invoke<tapa::join, 8>(Pcg_Single_Vector_Checker,
+                               Iteration_num,
                                Row_num,
                                Vector_Y_Stream,
-                               Vector_Y_Stream_Aftck,
-                               Checker_Stop_Stream)
-        .invoke(Pcg_Mult_Sort_Tree,
+                               Vector_Y_Stream_Aftck)
+        .invoke(Pcg_Single_Mult_Sort_Tree,
+                Iteration_num,
+                Row_num,
                 Vector_Y_Stream_Aftck,
-                Pcg_Spmv_Stream,
-                Sort_Stop_Stream)
+                Pcg_Spmv_Stream)
         .invoke(Pcg_Single_Vector_Writer,
                 Iteration_num,
                 Row_num,

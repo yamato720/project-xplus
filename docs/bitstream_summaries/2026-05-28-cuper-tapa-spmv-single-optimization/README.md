@@ -3,8 +3,10 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-spmv`
-- 状态：PCG service SpMV 抽出版 demo bitstream 已生成并放入 `395bitstream/`；
-  2026-05-28 demo-only 上板 smoke 在 `thermal2_n16` 两次 180s timeout，未晋级
+- 状态：PCG service SpMV 抽出版第一版 demo bitstream 已生成并放入
+  `395bitstream/`；2026-05-28 demo-only 上板 smoke 在 `thermal2_n16`
+  两次 180s timeout，未晋级。当前正在构建 finite-exit 修复版 demo，
+  结果未上板确认前不更新正式 `source.diff`
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
 - 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
@@ -105,6 +107,49 @@ make run-cuper-tapa-pcg-spmv TARGET=hw \
 ```text
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/failure_analysis.md
 ```
+
+## 2026-05-28 补充：finite-exit 修复尝试
+
+针对上一版 `Finish` timeout，当前源码只改 `CuperPcgSpmv` 单 SpMV demo 路径：
+
+- `CuperPcgSpmv(...)` 不再把单 SpMV 输出尾端接到 stop-driven
+  `Pcg_Vector_Checker` / `Pcg_Mult_Sort_Tree`；
+- 新增 `Pcg_Single_Vector_Checker`，按 `Row_num` 计算 Cuper 对齐后 PE 输出包数，
+  读完整个 padding 后只转发有效 `float_v2`；
+- 新增 `Pcg_Single_Mult_Sort_Tree`，只打包并输出 `ceil(Row_num/16)` 个
+  `float_v16` 包后自然返回；
+- `Pcg_SingleSpmv_Controller` 仍在 writer 写完 `Y_out` 后关闭 loader/core/destroy，
+  但不再异步抢停 checker/sort tree。
+
+软件级验证已通过：
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+关键输出：
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+[timing-ms] ... spmv_avg=2.654200300000e+01 ...
+```
+
+新的硬件构建已启动：
+
+```text
+session: project-xplus-cuper-tapa-pcg-spmv-hw
+log: logs/cuper_tapa_pcg_spmv_hw_20260528_161221.log
+build_dir: cuper-tapa-spmv-u55c-20260528-demo-build/
+xclbin: cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
+```
+
+截至 2026-05-28 16:14，XO 已生成并完成 FSM patch，Vitis link 已进入 VPL。
+该修复版是否真正解决板上 `Finish` timeout，必须等新 xclbin 生成后用
+demo-only `thermal2_n16` smoke 验证。验证前仍不建议晋级，也不更新正式
+`source.diff`。
 
 ## 当前基线
 

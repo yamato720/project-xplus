@@ -45,6 +45,58 @@ demo-only smoke。`thermal2_n16` 第一次运行和 retry 均在 180s timeout，
 最小数据集仍未闭合。它不是可晋级版本，也不是可覆盖正式 `source.diff` 的性能
 改进补丁。
 
+## 2026-05-28：finite-exit 修复尝试
+
+本次只处理 `CuperPcgSpmv` 单 SpMV demo 的有限退出问题，不改 standalone
+`Cuper(...)` 标准路径，也不改 full-PCG `CuperPcg(...)` 的服务协议。
+
+源码改动：
+
+- 在 `pcg_spmv_service.hpp` 中新增 `Pcg_Single_Vector_Checker`：
+  按一次 SpMV 的 `Row_num` 和 `Iteration_num` 计算上游 accumulator 会产生的
+  对齐输出包数，完整消费 padding，只把有效输出转发给下一段。
+- 在 `pcg_spmv_service.hpp` 中新增 `Pcg_Single_Mult_Sort_Tree`：
+  从 8 路 `float_v2` 收齐后打包成 `float_v16`，输出固定
+  `ceil(Row_num/16) * iteration_time` 包后自然返回。
+- 调整 `Pcg_SingleSpmv_Controller`：
+  不再向 checker/sort 发送 stop token；writer 完成后只负责关闭 loader/core
+  和 vector destroy 这类仍保持常驻服务语义的任务。
+- 调整 `cuper_top_graphs.hpp` 中的 `CuperPcgSpmv(...)` task graph：
+  单 SpMV 抽出版改接 `Pcg_Single_Vector_Checker` 和
+  `Pcg_Single_Mult_Sort_Tree`，full-PCG 仍使用原来的 stop-driven
+  `Pcg_Vector_Checker` / `Pcg_Mult_Sort_Tree`。
+
+预期收益：
+
+- 避免上一版 writer 写完 1 个有效 `Y_out` 包后立刻通知 controller 发 stop，
+  导致 checker/sort tree 或上游 padding 输出未 drain 完，进而让硬件
+  `Finish` 永久等待。
+- 让单 SpMV demo 的尾端更接近原始 `Cuper(...)` 一次性 task graph：固定数据量
+  结束，而不是依赖异步 stop 抢停。
+
+已完成验证：
+
+```bash
+git diff --check
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+软件仿真结果为 `status=ok`，`max_abs_diff=3.755767679081e-07`，
+`spmv_avg=26.542003 ms`。
+
+硬件构建已进入 VPL：
+
+```text
+session: project-xplus-cuper-tapa-pcg-spmv-hw
+log: logs/cuper_tapa_pcg_spmv_hw_20260528_161221.log
+```
+
+当前仍不更新正式 `source.diff`。只有新 xclbin 上板后确认至少
+`thermal2_n16` 能稳定返回，并继续完成 demo-only sweep 或明确证明边界改善时，
+才考虑把本补丁写入 `source.diff`。
+
 ## 优化对象
 
 只优化 single TAPA SpMV：

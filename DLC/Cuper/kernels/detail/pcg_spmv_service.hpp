@@ -555,17 +555,92 @@ void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
     }
 }
 
+// 单 SpMV demo 使用的 checker。
+//
+// full-PCG 服务版 checker 通过 stop stream 退出；单 SpMV demo 如果在 writer
+// 写完有效 y packet 后马上发 stop，checker 可能还没消费 Cuper 对齐产生的
+// padding 输出，导致上游 accumulator/core 无法完整 drain。这里按一次 SpMV 的
+// 固定输出数量自然结束，语义和原始 Cuper 的 Vector_Checker 更接近。
+void Pcg_Single_Vector_Checker(const INDEX_TYPE Iteration_num,
+                               const INDEX_TYPE Row_num,
+                               tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
+                               tapa::ostream<float_v2> &Vector_Y_Stream_Aftck) {
+    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE num_pe_output =
+        ((Row_num + HBM_CHANNEL_NUM_MULT_2 - 1) / HBM_CHANNEL_NUM_MULT_2) *
+        HBM_CHANNEL_NUM_DIV_8;
+    const INDEX_TYPE num_out = (Row_num + 15) >> 4;
+    const INDEX_TYPE total_pe_output = num_pe_output * iteration_time;
+
+out:
+    for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < total_pe_output;) {
+#pragma HLS loop_tripcount min=1 max=1800
+#pragma HLS pipeline II=1
+        if (!Vector_Y_Stream[c_idx].empty() && !Vector_Y_Stream_Aftck.full()) {
+            float_v2 tmp;
+            Vector_Y_Stream[c_idx].try_read(tmp);
+            if (o_idx < num_out) {
+                Vector_Y_Stream_Aftck.try_write(tmp);
+            }
+            ++i;
+            ++c_idx;
+            ++o_idx;
+            if (c_idx == HBM_CHANNEL_NUM_DIV_8) {
+                c_idx = 0;
+            }
+            if (o_idx == num_pe_output) {
+                o_idx = 0;
+            }
+        }
+    }
+}
+
+// 单 SpMV demo 使用的 sort tree。
+//
+// 只合成 Row_num 对应的有效 float_v16 包，全部写出后有限返回；这样 kernel
+// completion 不再依赖异步 stop 让 sort tree 退出。
+void Pcg_Single_Mult_Sort_Tree(const INDEX_TYPE Iteration_num,
+                               const INDEX_TYPE Row_num,
+                               tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
+                               tapa::ostream<float_v16> &Vector_Y_Stream_Ans) {
+    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE num_ite_y = (Row_num + 15) >> 4;
+    const INDEX_TYPE total_y = num_ite_y * iteration_time;
+
+pack_y:
+    for (INDEX_TYPE packet = 0; packet < total_y;) {
+#pragma HLS loop_tripcount min=1 max=500000
+#pragma HLS pipeline II=1
+        bool all_ready = true;
+        for (int i = 0; i < 8; ++i) {
+            if (Vector_Y_Stream_Aftck[i].empty()) {
+                all_ready = false;
+                break;
+            }
+        }
+
+        if (all_ready && !Vector_Y_Stream_Ans.full()) {
+            float_v16 tmpv16;
+            for (int i = 0; i < 8; ++i) {
+                float_v2 val;
+                Vector_Y_Stream_Aftck[i].try_read(val);
+                tmpv16[(i << 1)]     = val[0];
+                tmpv16[(i << 1) + 1] = val[1];
+            }
+            Vector_Y_Stream_Ans.try_write(tmpv16);
+            ++packet;
+        }
+    }
+}
+
 // 单 SpMV demo 的极简 controller。
 //
 // 它只发送一次普通 SpMV command，等待 writer 把所有 y packet 写回 HBM 后，
-// 再按 CuperPcg 的 stop 协议关闭所有常驻服务任务。这里不做 PCG dot/update，
-// 也不记录 full-PCG metrics，目的只是把当前 CuperPcg 内部 SpMV 流水单独综合成
-// 一个可测 bitstream。
+// 再关闭 loader/core 这类常驻服务任务。单 SpMV 版 checker/sort tree 按固定输出
+// 数量自然结束，不再由 controller 异步 stop，避免抢停 padding drain。
 void Pcg_SingleSpmv_Controller(const INDEX_TYPE Iteration_num,
                                tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                                tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
-                               tapa::ostreams<INDEX_TYPE, 8> &Checker_Stop_out,
-                               tapa::ostream<INDEX_TYPE> &Sort_Stop_out,
                                tapa::ostream<INDEX_TYPE> &Vector_Destroy_Stop_out,
                                tapa::istream<INDEX_TYPE> &Writer_Done_in) {
     CuperSpmvCommand command;
@@ -600,12 +675,6 @@ send_stop_matrix_command:
 #pragma HLS unroll
         Matrix_Command_out[index].write(command);
     }
-send_checker_stop:
-    for (INDEX_TYPE index = 0; index < 8; ++index) {
-#pragma HLS unroll
-        Checker_Stop_out[index].write(kPcgStopToken);
-    }
-    Sort_Stop_out.write(kPcgStopToken);
     Vector_Destroy_Stop_out.write(kPcgStopToken);
 }
 
