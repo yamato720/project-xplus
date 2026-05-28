@@ -162,3 +162,56 @@ thermal2
 - 和当前标准 bitstream / 既有 HTML 记录的差异；
 - 是否扩大成功边界，是否引入数值错误；
 - 是否建议作为 demo 保留或晋级。
+
+## 2026-05-28 demo-only 上板 smoke
+
+日志目录：
+
+```text
+logs/codex_spmv_demo_only_test_20260528_143556/
+```
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+kernel: CuperPcgSpmv
+UUID: 08f1f2dc-8c44-007f-a0a5-4dce1236ddd9
+SHA256: 0be3ed806febc39ad488ed833c063390978bb2911d4fa298c2056ef2e5ce6356
+DATA/KERNEL/HBM clock: 222 / 500 / 450 MHz
+```
+
+本轮按 demo-only 口径只跑当前 `PCG SpMV 抽出版` single SpMV demo，不重跑
+四个标准 bitstream。最低 smoke 命令：
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv TARGET=hw \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 DIFF_TOL=1e-1
+```
+
+结果：
+
+| 数据集 | 尝试 | 退出码 | 结果 | 日志 |
+| --- | --- | --- | --- | --- |
+| `thermal2_n16` | 第一次 | `124` | 180s timeout，停在 `after ReadFromDevice before Finish` | `tapa_pcg_spmv_demo_thermal2_n16.log` |
+| `thermal2_n16` | retry | `124` | 180s timeout，停在 `after ReadFromDevice before Finish` | `tapa_pcg_spmv_demo_thermal2_n16_retry.log` |
+
+第一次 timeout 后曾尝试直接运行 `xbutil reset`，但当前 shell PATH 中没有
+`xbutil`，该次 reset 返回 `127`。第二次 timeout 后使用绝对路径执行：
+
+```bash
+/opt/xilinx/xrt/bin/xbutil reset --device 0000:01:00.1 --force --batch
+```
+
+结果为：
+
+```text
+Successfully reset Device[0000:01:00.1]
+```
+
+结论：该 demo 在最小 `thermal2_n16` 上两次未完成，没有 `spmv_avg`、GFLOP/s
+或 CPU diff；因此停止 sweep，不跑 `thermal2_n65536`、`thermal2_n131072`、
+`thermal2_n262144` 和完整 `thermal2`。本轮没有性能提升，正式 `source.diff`
+不更新。

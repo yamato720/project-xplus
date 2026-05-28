@@ -313,15 +313,17 @@
         <code>cuper-notapa-spmv-u55c-20260524.xclbin</code> 的单次 SpMV 表现，并加入
         <code>cuper-notapa-pcg-fpga-u55c-20260522.xclbin</code> 的 full-PCG 初始 SpMV 代理结果，
         以及 timed-debug 版 <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code>
-        的 TAPA full-PCG 初始收敛代理、一次迭代代理和分段计时结果；2026-05-28 补充
-        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code> 当前候选版 demo-only 上板测试。
+        的 TAPA full-PCG 初始收敛代理、一次迭代代理和分段计时结果；2026-05-28 记录上一轮
+        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code> full-PCG demo-only 结果，
+        并补充当前 <code>cuper-tapa-spmv-u55c-20260528-demo.xclbin</code>
+        PCG SpMV 抽出版 demo smoke 结果。
       </div>
       <div class="meta">
         <span class="pill">日期 2026-05-24/28 CST</span>
         <span class="pill">设备 xilinx_u55c_gen3x16_xdma_base_3</span>
         <span class="pill">BDF 0000:01:00.1</span>
         <span class="pill">XRT 2.15.225</span>
-        <span class="pill">repo main / a1dcd85 demo-only test</span>
+        <span class="pill">repo main / 2026-05-28 SpMV demo smoke</span>
       </div>
     </div>
   </header>
@@ -340,11 +342,11 @@
         </div>
         <div class="metric">
           <strong>1,228,045</strong>
-          <span>当前 demo TAPA full-PCG 一次迭代正常返回的最大 N</span>
+          <span>上一 full-PCG demo 一次迭代正常返回的最大 N</span>
         </div>
         <div class="metric">
-          <strong>124.46 / 2.77 ms</strong>
-          <span>当前 demo 完整 thermal2 内部 init SpMV / iter recv 分段时间</span>
+          <strong>timeout @ n16</strong>
+          <span>当前 PCG SpMV 抽出版 demo smoke 结果</span>
         </div>
       </div>
       <p>
@@ -380,7 +382,7 @@
         真实差值为 <code>119.85 ms</code>。
       </p>
       <p>
-        当前 2026-05-27 demo 候选版 <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>
+        上一 2026-05-27 full-PCG demo 候选版 <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>
         已按用户要求只跑新上传 demo。<code>thermal2_n16</code>、<code>thermal2_n65536</code>、
         <code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整
         <code>thermal2</code> 的 init-only / 1iter 全部返回，完整规模也从启动前
@@ -389,6 +391,14 @@
         完整 <code>thermal2</code> 为 <code>1887.448 ms</code>，主要开销在
         <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>，
         暂不建议作为当前 SpMV 性能目标的标准替换版。
+      </p>
+      <p>
+        当前 2026-05-28 single SpMV demo
+        <code>cuper-tapa-spmv-u55c-20260528-demo.xclbin</code> 是从
+        <code>CuperPcg</code> 抽出的 <code>CuperPcgSpmv</code> 服务化 SpMV 链。本轮只跑该
+        demo，不重跑四个标准版；<code>thermal2_n16</code> 第一次和 retry 均在 180s
+        timeout，日志停在 <code>[tapa-invoke] after ReadFromDevice before Finish</code>。
+        因最小数据集未返回，本轮没有 <code>spmv_avg</code>、GFLOP/s 或 diff，不继续跑更大规模。
       </p>
     </section>
 
@@ -402,6 +412,7 @@
           <p>full-PCG 旧版没有 <code>--spmv-only</code>，使用 <code>TAU=1e100 MAX_ITERS=1</code> 让 kernel 完成初始 <code>A*x0</code> 与 r/z/p 初始化后立刻收敛返回。</p>
           <p>2026-05-26 timed-debug TAPA full-PCG build 使用 <code>MAX_ITERS=1</code>，即初始化 <code>A*x0</code> 后最多执行一次 PCG 迭代；这里近似作为 SpMV 成绩观察，但不是纯 SpMV。</p>
           <p>TAPA full-PCG init-only 监测使用 <code>TAU=1e100 MAX_ITERS=1</code>，同样让 TAPA controller 在初始化 <code>A*x0</code> 后以 <code>iter=0</code> 收敛返回。</p>
+          <p>2026-05-28 当前 <code>CuperPcgSpmv</code> demo 使用 <code>run-cuper-tapa-pcg-spmv</code> 跑 single SpMV；本轮只测该 demo，不重跑四个标准 bitstream。</p>
           <pre><code>make run-cuper-tapa-spmv TARGET=hw \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n65536 \
   BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin \
@@ -425,7 +436,12 @@ make run-cuper-pcg-tapa-fpga \
 make run-cuper-pcg-tapa-fpga \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n262144 \
   BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin \
-  MAX_ITERS=1 DIFF_TOL=1e-4</code></pre>
+  MAX_ITERS=1 DIFF_TOL=1e-4
+
+timeout 180s make run-cuper-tapa-pcg-spmv TARGET=hw \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 DIFF_TOL=1e-1</code></pre>
         </div>
         <div>
           <h3>计时含义</h3>
@@ -433,10 +449,12 @@ make run-cuper-pcg-tapa-fpga \
           <p>no-TAPA 的 <code>spmv_avg</code> 来自 host 端包住 <code>run.wait()</code> 的 wall time；<code>xrt_setup</code>、BO setup、H2D/D2H 单独列出。</p>
           <p>TAPA 的 <code>spmv_avg</code> 来自 <code>tapa::invoke</code> 返回的 kernel 时间；TAPA runtime 打印的 load/opencl 日志不直接计入这个值。</p>
           <p>full-PCG 代理的 <code>pcg_proxy_ms</code> 来自 <code>[timing-ms] kernel=...</code>，包含初始 Cuper packed SpMV 和向量初始化，不能和 single-SpMV 的 <code>spmv_avg</code> 当作完全同口径指标。</p>
-          <p>新 TAPA full-PCG 的 <code>tapa_pcg_init_ms</code> 和 <code>tapa_pcg_1iter_ms</code> 均来自 <code>[timing-ms] kernel_reported=...</code>；分段时间来自 <code>[stage-ms]</code>，本 demo 需要把 <code>iter recv</code> 和 <code>dot_p_ap</code> 合看为 <code>AP path</code>。host wall time 另含 xclbin load/runtime 同步开销，不用于总表。</p>
+          <p>新 TAPA full-PCG 的 <code>tapa_pcg_init_ms</code> 和 <code>tapa_pcg_1iter_ms</code> 均来自 <code>[timing-ms] kernel_reported=...</code>；分段时间来自 <code>[stage-ms]</code>，上一 full-PCG demo 需要把 <code>iter recv</code> 和 <code>dot_p_ap</code> 合看为 <code>AP path</code>。host wall time 另含 xclbin load/runtime 同步开销，不用于总表。</p>
+          <p>当前 <code>CuperPcgSpmv</code> demo 没有返回到 host 统计输出，因此没有 <code>spmv_avg</code>、GFLOP/s 或 diff；表格中只记录 timeout 边界。</p>
           <div class="callout">
             大数据 TAPA SpMV 未返回发生在 <code>--spmv-only</code> 路径，不是 host 端 PCG 全流程被砍掉后才进入的路径；本轮表现为 <code>thermal2_n262144</code> 和完整 <code>thermal2</code> 180s 超时。
             timed-debug 版 TAPA full-PCG 已能返回到 <code>thermal2_n262144</code>，且 stage counter 有效；完整 <code>thermal2</code> 两种 PCG 口径重测时控制寄存器都保持 <code>0x0</code> 未完成。
+            当前 PCG SpMV 抽出版 demo 在最小 <code>thermal2_n16</code> 即两次 timeout，本轮未跑 PCG，无 init/1iter 过程。
           </div>
         </div>
       </div>
@@ -502,6 +520,15 @@ make run-cuper-pcg-tapa-fpga \
               <td class="num">216 MHz</td>
               <td class="num">450 MHz</td>
               <td><code>add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb</code></td>
+            </tr>
+            <tr>
+              <td><span class="tag tapa">PCG SpMV 抽出版 demo</span></td>
+              <td><code>cuper-tapa-spmv-u55c-20260528-demo.xclbin</code></td>
+              <td><code>CuperPcgSpmv</code></td>
+              <td><code>08f1f2dc-8c44-007f-a0a5-4dce1236ddd9</code></td>
+              <td class="num">222 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>0be3ed806febc39ad488ed833c063390978bb2911d4fa298c2056ef2e5ce6356</code></td>
             </tr>
           </tbody>
         </table>
@@ -649,54 +676,51 @@ make run-cuper-pcg-tapa-fpga \
     <section>
       <h2>2026-05-28 Demo-Only 测试</h2>
       <p>
-        本节只记录当前新上传 demo 的实测结果，日志位于
-        <code>logs/codex_demo_only_test_20260528_005152/</code>。测试对象为
-        <code>cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>，UUID
-        <code>cc61e044-06f7-4726-8f18-773ac52ab1b2</code>。
-        本轮开始时曾误跑部分标准版，相关日志不作为本节结论。
+        本节只记录当前新上传 single SpMV demo 的实测结果，日志位于
+        <code>logs/codex_spmv_demo_only_test_20260528_143556/</code>。测试对象为
+        <code>cuper-tapa-spmv-u55c-20260528-demo.xclbin</code>，kernel 为
+        <code>CuperPcgSpmv</code>，UUID 为
+        <code>08f1f2dc-8c44-007f-a0a5-4dce1236ddd9</code>，SHA256 为
+        <code>0be3ed806febc39ad488ed833c063390978bb2911d4fa298c2056ef2e5ce6356</code>。
+        本轮为 demo-only 测试，只跑当前 PCG SpMV 抽出版，不重跑四个标准 bitstream。
+        本轮未跑 PCG，无 init/1iter 过程。
       </p>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Dataset</th>
-              <th>Mode</th>
-              <th class="num">demo kernel</th>
-              <th class="num">controller</th>
-              <th class="num">init SpMV</th>
-              <th class="num">iter recv</th>
-              <th class="num">dot_p_ap</th>
-              <th class="num">update_xr</th>
-              <th class="num">update_p</th>
+              <th>运行类型</th>
+              <th>尝试</th>
+              <th class="num">timeout</th>
+              <th class="num">退出码</th>
+              <th class="num">spmv_avg</th>
+              <th class="num">GFLOP/s</th>
+              <th class="num">CPU diff</th>
               <th>状态</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td>init</td><td class="num">14.7369</td><td class="num">0.0044</td><td class="num">0.0020</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
-            <tr><td><code>thermal2_n16</code></td><td>1iter</td><td class="num">11.1677</td><td class="num">0.0192</td><td class="num">0.0020</td><td class="num">0.0007</td><td class="num">0.0017</td><td class="num">0.0062</td><td class="num">0.0051</td><td><span class="tag oktag">ok</span> max_abs_diff 1.09e-08</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td>init</td><td class="num">32.3798</td><td class="num">15.1425</td><td class="num">6.6416</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td>1iter</td><td class="num">112.3167</td><td class="num">71.9071</td><td class="num">6.6408</td><td class="num">0.1465</td><td class="num">6.8470</td><td class="num">27.2012</td><td class="num">21.4884</td><td><span class="tag oktag">ok</span> max_abs_diff 7.50e-10</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td>init</td><td class="num">53.5494</td><td class="num">30.2821</td><td class="num">13.2807</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td>1iter</td><td class="num">213.5826</td><td class="num">143.8117</td><td class="num">13.2827</td><td class="num">0.2924</td><td class="num">13.6951</td><td class="num">54.4024</td><td class="num">42.9742</td><td><span class="tag oktag">ok</span> max_abs_diff 2.33e-10</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td>init</td><td class="num">97.0455</td><td class="num">60.5679</td><td class="num">26.5658</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td>1iter</td><td class="num">416.6492</td><td class="num">287.6244</td><td class="num">26.5681</td><td class="num">0.5862</td><td class="num">27.3892</td><td class="num">108.8046</td><td class="num">85.9482</td><td><span class="tag oktag">ok</span> max_abs_diff 5.40e-10</td></tr>
-            <tr><td><code>thermal2</code></td><td>init</td><td class="num">414.5353</td><td class="num">283.7481</td><td class="num">124.4632</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td><span class="tag oktag">ok</span> ctrl 0x4-&gt;0xe</td></tr>
-            <tr><td><code>thermal2</code></td><td>1iter</td><td class="num">1887.4481</td><td class="num">1329.0066</td><td class="num">124.4663</td><td class="num">2.7665</td><td class="num">132.7367</td><td class="num">486.8336</td><td class="num">402.6350</td><td><span class="tag oktag">ok</span> max_abs_diff 1.17e-09</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td>single SpMV</td><td>第一次</td><td class="num">180s</td><td class="num">124</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td><span class="tag warntag">timeout</span> 停在 <code>after ReadFromDevice before Finish</code></td></tr>
+            <tr><td><code>thermal2_n16</code></td><td>single SpMV</td><td>retry</td><td class="num">180s</td><td class="num">124</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td><span class="tag warntag">timeout</span> reset 后同一位置超时</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td>single SpMV</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">not run</td><td class="num">-</td><td class="num">-</td><td>最小数据集失败，停止 sweep</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td>single SpMV</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">not run</td><td class="num">-</td><td class="num">-</td><td>最小数据集失败，停止 sweep</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td>single SpMV</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">not run</td><td class="num">-</td><td class="num">-</td><td>最小数据集失败，停止 sweep</td></tr>
+            <tr><td><code>thermal2</code></td><td>single SpMV</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">not run</td><td class="num">-</td><td class="num">-</td><td>最小数据集失败，停止 sweep</td></tr>
           </tbody>
         </table>
       </div>
       <p>
-        结论：当前 demo 改变了完整 <code>thermal2</code> 的返回边界，init-only 和 1iter
-        均能完成并通过数值校验；但它不是性能胜出版本。大规模下主要耗时在
-        <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>。
-        表中的 <code>iter recv</code> 是 packed AP 接收/缓存段，不等同于完整 SpMV。
+        结论：当前 PCG SpMV 抽出版 demo 不是性能提升版，连最小
+        <code>thermal2_n16</code> 都没有返回。没有可用于折线图的实测数值点，也没有
+        CPU diff；正式 <code>source.diff</code> 不应因本轮失败 demo 更新。
       </p>
     </section>
 
     <section>
       <h2>趋势图</h2>
       <p>纵轴是 kernel 时间，采用 log10(ms) 便于把小矩阵和大矩阵放在同一张图里。full-PCG proxy 和 TAPA init-proxy 是初始 SpMV 代理，TAPA full-PCG 1iter 是一次迭代代理。</p>
-      <p>注意：这张趋势图画的是 2026-05-24 到 2026-05-26 已归档的标准/基线数据，不包含 2026-05-28 当前 demo-only 新测数据；当前 demo 结果以上方 Demo-Only 表为准。</p>
+      <p>注意：这张趋势图画的是 2026-05-24 到 2026-05-26 已归档的标准/基线数据，不包含当前 PCG SpMV 抽出版 demo-only 新测数据；当前 demo 在 <code>thermal2_n16</code> timeout，没有可画的 <code>spmv_avg</code> 数值点。</p>
       <div class="legend">
         <span><i style="background: var(--tapa);"></i>TAPA</span>
         <span><i style="background: var(--notapa);"></i>no-TAPA</span>
@@ -783,7 +807,8 @@ make run-cuper-pcg-tapa-fpga \
     <section>
       <h2>TAPA PCG 分段时间</h2>
       <p>
-        下表来自当前 demo-only 测试的 timed-debug <code>[stage-ms]</code>，数据源为
+        本轮为 single SpMV 测试，未跑 PCG，无 init/1iter 过程；本块保留上一轮
+        full-PCG demo-only 数据，数据源为
         <code>logs/codex_demo_only_test_20260528_005152/</code>。<code>kernel_reported</code>
         是 host 侧 direct-register 计到的 kernel 时间；<code>controller_total</code>
         是 FPGA controller 内部计时。两者差值主要来自 TAPA task graph service、启动/停止同步、
@@ -817,7 +842,7 @@ make run-cuper-pcg-tapa-fpga \
         </table>
       </div>
       <p>
-        注意：本 demo 改了分段边界，<code>iter recv</code> 只覆盖 packed
+        注意：上一 full-PCG demo 改了分段边界，<code>iter recv</code> 只覆盖 packed
         <code>AP</code> 接收/缓存，不等于旧标准版里的完整第二轮 SpMV 相关代价。
         同口径看第二轮 <code>A*p</code> 路径时，应至少把 <code>iter recv + dot_p_ap</code>
         合在一起看作 <code>AP path</code>。
@@ -827,7 +852,9 @@ make run-cuper-pcg-tapa-fpga \
     <section>
       <h2>Init 与 1iter 差值</h2>
       <p>
-        差值用当前 demo 的 <code>1iter kernel_reported - init-only kernel_reported</code>
+        本轮为 single SpMV 测试，未跑 PCG，无 init/1iter 过程；本块保留上一轮
+        full-PCG demo-only 数据。差值用上一轮 full-PCG demo 的
+        <code>1iter kernel_reported - init-only kernel_reported</code>
         计算。这个差值不是纯 SpMV，它包含第二次 <code>A*p</code>、<code>p^T A p</code>
         累加、<code>AP</code> 写回、<code>x/r/z/p</code> 更新、<code>rz/rr</code>
         归约和 controller 运行开销；但可作为一次迭代额外代价的真实上界。
@@ -855,7 +882,7 @@ make run-cuper-pcg-tapa-fpga \
         </table>
       </div>
       <p>
-        评价：raw <code>iter_spmv</code> 在本 demo 里只是 packed <code>AP</code>
+        评价：raw <code>iter_spmv</code> 在上一 full-PCG demo 里只是 packed <code>AP</code>
         接收/缓存段，不能单独拿来和标准版完整 <code>iter SpMV</code> 横比。
         完整 <code>thermal2</code> 上同口径 <code>AP path</code> 为
         <code>2.77 + 132.74 = 135.50 ms</code>；同时 controller 增量为
@@ -871,21 +898,21 @@ make run-cuper-pcg-tapa-fpga \
         standalone <code>cuper-tapa-spmv-u55c-20260522.xclbin</code>，也就是四条标准曲线里
         最低的 TAPA Cuper SpMV 曲线；一次迭代组的“标准”仍使用
         <code>cuper-tapa-pcg-fpga-u55c-20260525.xclbin</code> 的 full-PCG 1iter 记录。
-        上一 demo 是 receive-path demo <code>9474ef8e-571b-ae13-f898-890e3af8ae5e</code>；
-        本 demo 是 2026-05-28 demo-only 新测的 packed feed/AP 记录。折线图为 log10(ms)。
+        上一 demo 是 2026-05-27 full-PCG packed feed/AP 记录；本 demo 是 2026-05-28
+        PCG SpMV 抽出版 single SpMV 记录。折线图为 log10(ms)，timeout/未跑点只在表格中标注。
       </p>
 
-      <h3>SpMV / AP 路径对比</h3>
+      <h3>SpMV 对比</h3>
       <p>
         图中标准曲线是 standalone TAPA Cuper SpMV <code>spmv_avg</code>。上一 demo 使用
-        full-PCG 内嵌 <code>iter SpMV</code> 分段；本 demo 因分段边界改变，使用
-        <code>iter recv + dot_p_ap</code> 作为 <code>AP path</code>。raw
-        <code>iter recv</code> 仍在表中保留，但不能单独当作 SpMV 性能结论。
+        full-PCG 内嵌 AP path 记录作为历史参考；本 demo 是 <code>PCG SpMV 抽出版</code>
+        single SpMV，应该和标准曲线直接比较 <code>spmv_avg</code>。但本 demo 在
+        <code>thermal2_n16</code> 即 timeout，没有可画的成功数值点。
       </p>
       <div class="legend">
         <span><i style="background: var(--tapa);"></i>TAPA Cuper SpMV 标准</span>
-        <span><i style="background: var(--tapa-pcg-demo);"></i>上一 demo</span>
-        <span><i style="background: var(--ok);"></i>本 demo</span>
+        <span><i style="background: var(--tapa-pcg-demo);"></i>上一 full-PCG demo AP path</span>
+        <span><i style="background: var(--ok);"></i>本 demo：PCG SpMV 抽出版</span>
       </div>
       <div class="svg-wrap">
         <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="TAPA PCG AP path comparison">
@@ -908,8 +935,6 @@ make run-cuper-pcg-tapa-fpga \
 
           <polyline class="line-tapa" points="70,215 285,200 500,191"></polyline>
           <polyline class="line-prev-demo" points="70,295 285,121 500,107 715,93"></polyline>
-          <polyline class="line-current-demo" points="70,282 285,121 500,107 715,93 930,61"></polyline>
-
           <circle class="dot-tapa" cx="70" cy="215" r="4"></circle>
           <circle class="dot-tapa" cx="285" cy="200" r="4"></circle>
           <circle class="dot-tapa" cx="500" cy="191" r="4"></circle>
@@ -918,12 +943,6 @@ make run-cuper-pcg-tapa-fpga \
           <circle class="dot-prev-demo" cx="285" cy="121" r="4"></circle>
           <circle class="dot-prev-demo" cx="500" cy="107" r="4"></circle>
           <circle class="dot-prev-demo" cx="715" cy="93" r="4"></circle>
-
-          <circle class="dot-current-demo" cx="70" cy="282" r="4"></circle>
-          <circle class="dot-current-demo" cx="285" cy="121" r="4"></circle>
-          <circle class="dot-current-demo" cx="500" cy="107" r="4"></circle>
-          <circle class="dot-current-demo" cx="715" cy="93" r="4"></circle>
-          <circle class="dot-current-demo" cx="930" cy="61" r="4"></circle>
 
           <text x="52" y="325">16</text>
           <text x="257" y="325">65,536</text>
@@ -940,20 +959,18 @@ make run-cuper-pcg-tapa-fpga \
               <th class="num">TAPA Cuper SpMV 标准</th>
               <th class="num">上一 demo init SpMV</th>
               <th class="num">上一 demo iter SpMV</th>
-              <th class="num">本 demo init SpMV</th>
-              <th class="num">本 demo iter recv</th>
-              <th class="num">本 demo dot_p_ap</th>
-              <th class="num">本 demo AP path</th>
-              <th class="num">AP path / TAPA 标准</th>
+              <th class="num">上一 demo AP path</th>
+              <th class="num">本 demo SpMV</th>
+              <th class="num">本 demo / TAPA 标准</th>
               <th>备注</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">0.0670</td><td class="num">0.0028</td><td class="num">0.0013</td><td class="num">0.0020</td><td class="num">0.0007</td><td class="num">0.0017</td><td class="num">0.0024</td><td class="num">0.04x</td><td>小规模固定开销口径不稳定</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">0.1379</td><td class="num">8.7853</td><td class="num">6.7794</td><td class="num">6.6416</td><td class="num">0.1465</td><td class="num">6.8470</td><td class="num">6.9935</td><td class="num">50.71x</td><td>本 demo AP path 仍远慢于 standalone TAPA SpMV</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">0.2197</td><td class="num">17.5670</td><td class="num">13.5638</td><td class="num">13.2807</td><td class="num">0.2924</td><td class="num">13.6951</td><td class="num">13.9875</td><td class="num">63.67x</td><td>这是当前 SpMV 性能目标的主要差距</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">timeout</td><td class="num">35.1312</td><td class="num">27.1297</td><td class="num">26.5658</td><td class="num">0.5862</td><td class="num">27.3892</td><td class="num">27.9754</td><td class="num">-</td><td>TAPA Cuper SpMV 标准 180s 未返回</td></tr>
-            <tr><td><code>thermal2</code></td><td class="num">timeout</td><td class="num">failed</td><td class="num">failed</td><td class="num">124.4632</td><td class="num">2.7665</td><td class="num">132.7367</td><td class="num">135.5032</td><td class="num">-</td><td>只有本 demo 完整规模返回</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">0.0670</td><td class="num">0.0028</td><td class="num">0.0013</td><td class="num">0.0024</td><td class="num">timeout</td><td class="num">-</td><td>当前 single SpMV demo 180s 未返回</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">0.1379</td><td class="num">8.7853</td><td class="num">6.7794</td><td class="num">6.9935</td><td class="num">not run</td><td class="num">-</td><td>最小数据集失败，未继续 sweep</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">0.2197</td><td class="num">17.5670</td><td class="num">13.5638</td><td class="num">13.9875</td><td class="num">not run</td><td class="num">-</td><td>最小数据集失败，未继续 sweep</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">timeout</td><td class="num">35.1312</td><td class="num">27.1297</td><td class="num">27.9754</td><td class="num">not run</td><td class="num">-</td><td>TAPA Cuper SpMV 标准旧记录 180s 未返回；本 demo 未跑</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">timeout</td><td class="num">failed</td><td class="num">failed</td><td class="num">135.5032</td><td class="num">not run</td><td class="num">-</td><td>上一 full-PCG demo 可返回完整规模；当前 single SpMV demo 未跑到该点</td></tr>
           </tbody>
         </table>
       </div>
@@ -961,12 +978,14 @@ make run-cuper-pcg-tapa-fpga \
       <h3>一次迭代对比</h3>
       <p>
         本组比较 <code>MAX_ITERS=1</code> 的 <code>kernel_reported</code>。它是端到端一次迭代
-        代理，包含 SpMV、AP 写回、dot、向量更新和 controller/service 开销。
+        代理，包含 SpMV、AP 写回、dot、向量更新和 controller/service 开销。本轮为
+        single SpMV 测试，未跑 PCG，无一次迭代新数据；本组保留上一轮 full-PCG demo
+        记录，不把当前 single SpMV demo 填入一次迭代曲线。
       </p>
       <div class="legend">
         <span><i style="background: var(--tapa-pcg);"></i>标准版</span>
         <span><i style="background: var(--tapa-pcg-demo);"></i>上一 demo</span>
-        <span><i style="background: var(--ok);"></i>本 demo</span>
+        <span><i style="background: var(--ok);"></i>上一 full-PCG demo</span>
       </div>
       <div class="svg-wrap">
         <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="TAPA PCG 1iter comparison">
@@ -1019,17 +1038,17 @@ make run-cuper-pcg-tapa-fpga \
               <th>Dataset</th>
               <th class="num">标准 1iter</th>
               <th class="num">上一 demo 1iter</th>
-              <th class="num">本 demo 1iter</th>
-              <th class="num">本 demo / 标准</th>
+              <th class="num">上一 full-PCG demo 1iter</th>
+              <th class="num">上一 full-PCG demo / 标准</th>
               <th>备注</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">14.9905</td><td class="num">14.9260</td><td class="num">11.1677</td><td class="num">0.75x</td><td>小规模启动抖动占比高</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">54.5996</td><td class="num">54.4713</td><td class="num">112.3167</td><td class="num">2.06x</td><td>本 demo 总迭代变慢</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">99.8461</td><td class="num">96.5312</td><td class="num">213.5826</td><td class="num">2.14x</td><td>update/dot 开销放大</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">188.8202</td><td class="num">182.5644</td><td class="num">416.6492</td><td class="num">2.21x</td><td>上一 demo 较标准略快，本 demo 明显变慢</td></tr>
-            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">failed</td><td class="num">1887.4481</td><td class="num">-</td><td>本 demo 改善完整规模返回边界</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">14.9905</td><td class="num">14.9260</td><td class="num">11.1677</td><td class="num">0.75x</td><td>当前 single SpMV demo 未跑 PCG，无 1iter 新数据</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">54.5996</td><td class="num">54.4713</td><td class="num">112.3167</td><td class="num">2.06x</td><td>上一 full-PCG demo 总迭代变慢</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">99.8461</td><td class="num">96.5312</td><td class="num">213.5826</td><td class="num">2.14x</td><td>上一 full-PCG demo update/dot 开销放大</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">188.8202</td><td class="num">182.5644</td><td class="num">416.6492</td><td class="num">2.21x</td><td>上一 full-PCG demo 明显慢于标准</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">failed</td><td class="num">1887.4481</td><td class="num">-</td><td>上一 full-PCG demo 改善完整规模返回边界；当前 single SpMV demo 无 1iter 数据</td></tr>
           </tbody>
         </table>
       </div>
@@ -1062,6 +1081,10 @@ make run-cuper-pcg-tapa-fpga \
       <p>这版是 2026-05-27 新编译的 packed feed/AP 候选版，作为 demo 放在 <code>395bitstream/</code>，尚未替换当前标准版。它的 UUID 为 <code>cc61e044-06f7-4726-8f18-773ac52ab1b2</code>，DATA/HBM 频率为 <code>216/450 MHz</code>。</p>
       <p>2026-05-28 demo-only 测试显示：<code>thermal2_n16</code>、<code>thermal2_n65536</code>、<code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整 <code>thermal2</code> 的 init-only 与 1iter 都能返回，完整规模也是 <code>ctrl 0x4-&gt;0xe</code>。</p>
       <p>性能结论：这版更像 full-size 功能边界修复候选，不是当前 SpMV 性能目标的标准替换候选。<code>thermal2_n262144</code> 1iter 的 <code>kernel_reported=416.6492 ms</code>，完整 <code>thermal2</code> 为 <code>1887.4481 ms</code>；主要瓶颈在 <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>。</p>
+      <h3><span class="tag tapa">PCG SpMV 抽出版 demo</span> cuper-tapa-spmv-u55c-20260528-demo</h3>
+      <p>这版是 2026-05-28 新编译的 single SpMV demo，kernel 为 <code>CuperPcgSpmv</code>，把 <code>CuperPcg</code> 中的服务化 SpMV 链抽出来单测。它属于 <code>cuper-tapa-spmv</code> demo 槽，不替换 standalone TAPA Cuper SpMV 标准版。</p>
+      <p>demo-only smoke 只跑当前 demo：<code>thermal2_n16</code> 第一次和 retry 均在 180s timeout，退出码均为 <code>124</code>，日志停在 <code>[tapa-invoke] after ReadFromDevice before Finish</code>。因此没有 <code>spmv_avg</code>、GFLOP/s 或 CPU diff，也没有继续跑更大数据集。</p>
+      <p>性能结论：这版未通过最小 smoke，不建议晋级，也不应覆盖当前目标目录里的正式 <code>source.diff</code>。</p>
     </section>
 
     <section>
@@ -1089,12 +1112,18 @@ make run-cuper-pcg-tapa-fpga \
         当前失败阈值在 <code>N=131,072</code> 与 <code>N=262,144</code> 之间。
       </p>
       <p>
-        新 TAPA full-PCG 路线的当前 demo 已把可返回规模拉到完整
+        上一 TAPA full-PCG demo 已把可返回规模拉到完整
         <code>thermal2</code>；timed-debug 数据显示 full-PCG 内部 AP path
         不是唯一瓶颈。2026-05-28 demo-only 测试中，完整 <code>thermal2</code>
         1iter 的 <code>update_xr=486.83 ms</code>、<code>update_p=402.64 ms</code>、
         <code>dot_p_ap=132.74 ms</code>，下一步优先查 packed AP/P 后续消费路径和
         FP64 controller 更新路径。
+      </p>
+      <p>
+        当前 PCG SpMV 抽出版 single SpMV demo 的优先级是先修返回路径：
+        <code>thermal2_n16</code> 已能完成 H2D、Exec 和 D2H，但卡在
+        <code>ReadFromDevice</code> 后的 <code>Finish</code> 阶段。下一版应先确认
+        service stop/drain、writer 完成握手和 TAPA task 退出条件，再谈性能对比。
       </p>
       <p>
         no-TAPA 路线已能拉通百万级数据，可作为继续比较 PCG 全流程和端到端预处理开销的稳定基线。
@@ -1114,8 +1143,10 @@ make run-cuper-pcg-tapa-fpga \
     2026-05-26 21:04 TAPA full-PCG init-only 监测日志位于 <code>logs/tapa_pcg_init_proxy_20260526_210421/</code>。
     2026-05-26 22:57 timed-debug TAPA full-PCG 重跑日志位于 <code>logs/tapa_pcg_timed_debug_20260526_225713/</code>，
     旧 TAPA full-PCG bitstream 归档于 <code>bitstream_archive/2026-05-26-tapa-pcg-pre-timed-debug/</code>。
-    2026-05-28 当前 demo-only 测试日志位于 <code>logs/codex_demo_only_test_20260528_005152/</code>，
+    2026-05-28 上一 full-PCG demo-only 测试日志位于 <code>logs/codex_demo_only_test_20260528_005152/</code>，
     demo bitstream 为 <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin</code>。
+    2026-05-28 当前 single SpMV demo smoke 日志位于 <code>logs/codex_spmv_demo_only_test_20260528_143556/</code>，
+    demo bitstream 为 <code>395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin</code>。
     本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
   </footer>
 </body>

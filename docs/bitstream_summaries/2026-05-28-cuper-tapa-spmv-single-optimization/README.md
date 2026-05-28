@@ -3,8 +3,8 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-spmv`
-- 状态：PCG service SpMV 抽出版 demo bitstream 已生成并放入 `395bitstream/`，
-  尚未上板测试
+- 状态：PCG service SpMV 抽出版 demo bitstream 已生成并放入 `395bitstream/`；
+  2026-05-28 demo-only 上板 smoke 在 `thermal2_n16` 两次 180s timeout，未晋级
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
 - 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
@@ -70,6 +70,40 @@ cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
 
 ```text
 bitstream_archive/2026-05-28-tapa-pcg-packed-ap-demo-before-spmv-demo/
+```
+
+## 2026-05-28 上板 smoke 结论
+
+测试日志：
+
+```text
+logs/codex_spmv_demo_only_test_20260528_143556/
+```
+
+本轮只测试当前 demo，不重跑四个标准 bitstream。运行入口为：
+
+```bash
+make run-cuper-tapa-pcg-spmv TARGET=hw \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 DIFF_TOL=1e-1
+```
+
+结果：`thermal2_n16` 第一次和 reset 后重试均在 180s 外层 timeout
+终止，退出码均为 `124`。两次日志都停在：
+
+```text
+[tapa-invoke] after ReadFromDevice before Finish
+```
+
+因此没有产生 `spmv_avg`、GFLOP/s 或 CPU diff，本轮没有继续跑更大数据集。
+这版只是失败的 `cuper-tapa-spmv` demo 记录，不建议晋级，也不更新正式
+`source.diff`。
+
+失败原因分析记录见：
+
+```text
+docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/failure_analysis.md
 ```
 
 ## 当前基线

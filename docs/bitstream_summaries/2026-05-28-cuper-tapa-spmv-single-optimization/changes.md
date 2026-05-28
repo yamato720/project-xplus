@@ -32,7 +32,18 @@
 
 - 不调整 standalone `Cuper(...)` 和 `detail/cuper_spmv_tasks.hpp`；
 - 不优化 HBM 排布、FIFO 深度、core 链或 row 编码；
-- 不更新正式 `source.diff`，因为还没有板上性能结果。
+- 不更新正式 `source.diff`，因为 demo-only 上板 smoke 未通过，没有性能提升结果。
+
+## 2026-05-28 demo-only 结果补充
+
+`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 已做 single SpMV
+demo-only smoke。`thermal2_n16` 第一次运行和 retry 均在 180s timeout，日志都停在
+`[tapa-invoke] after ReadFromDevice before Finish`。本轮没有产生 `spmv_avg`
+或 diff，因此停止后续数据集 sweep。
+
+这说明当前抽出版可以生成 bitstream 并加载到 U55C，但 kernel/host 返回路径在
+最小数据集仍未闭合。它不是可晋级版本，也不是可覆盖正式 `source.diff` 的性能
+改进补丁。
 
 ## 优化对象
 
