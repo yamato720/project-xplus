@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch TAPA-generated control FSMs inside a CuperPcg XO.
+"""Patch TAPA-generated control FSMs inside a TAPA XO.
 
 The generated TAPA wrapper uses small control FSMs without register initial
 values. On hardware, a missing or too-short kernel reset can leave the top
@@ -18,8 +18,45 @@ import zipfile
 from pathlib import Path
 
 
-FSM_IN_XO = "ip_repo/tapa_xrtl_CuperPcg_1_0/src/CuperPcg_fsm.v"
-FSM_IN_WORKDIR = Path("hdl/CuperPcg_fsm.v")
+def find_fsm_in_xo(src: zipfile.ZipFile, xo_path: Path) -> str:
+    candidates = [
+        name
+        for name in src.namelist()
+        if name.startswith("ip_repo/tapa_xrtl_")
+        and "/src/" in name
+        and name.endswith("_fsm.v")
+    ]
+    if not candidates:
+        raise RuntimeError(f"{xo_path} does not contain a TAPA *_fsm.v file")
+
+    stem = xo_path.stem
+    preferred = [
+        name
+        for name in candidates
+        if name.endswith(f"/{stem}_fsm.v") or f"tapa_xrtl_{stem}_1_0" in name
+    ]
+    if len(preferred) == 1:
+        return preferred[0]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    raise RuntimeError(
+        f"{xo_path} contains multiple TAPA FSM files; candidates: {', '.join(candidates)}"
+    )
+
+
+def find_fsm_in_workdir(work_dir: Path, xo_path: Path) -> Path | None:
+    preferred = work_dir / "hdl" / f"{xo_path.stem}_fsm.v"
+    if preferred.exists():
+        return preferred
+
+    hdl_dir = work_dir / "hdl"
+    if not hdl_dir.exists():
+        return None
+    candidates = sorted(hdl_dir.glob("*_fsm.v"))
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def patch_fsm_text(text: str) -> tuple[str, int, int]:
@@ -49,19 +86,16 @@ def patch_fsm_text(text: str) -> tuple[str, int, int]:
 def patch_xo(xo_path: Path) -> tuple[int, int]:
     with zipfile.ZipFile(xo_path, "r") as src:
         infos = src.infolist()
-        try:
-            src.getinfo(FSM_IN_XO)
-        except KeyError as exc:
-            raise RuntimeError(f"{xo_path} does not contain {FSM_IN_XO}") from exc
+        fsm_in_xo = find_fsm_in_xo(src, xo_path)
 
-        original = src.read(FSM_IN_XO).decode("utf-8")
+        original = src.read(fsm_in_xo).decode("utf-8")
         patched, init_count, default_count = patch_fsm_text(original)
         already_initialized = "reg [1:0] tapa_state = 2'b00;" in patched
         already_has_default = "default: begin\n        tapa_state <= 2'b00;" in patched
         if init_count == 0 and not already_initialized:
-            raise RuntimeError(f"{FSM_IN_XO}: no uninitialized state registers found")
+            raise RuntimeError(f"{fsm_in_xo}: no uninitialized state registers found")
         if default_count == 0 and not already_has_default:
-            raise RuntimeError(f"{FSM_IN_XO}: failed to add top FSM default recovery")
+            raise RuntimeError(f"{fsm_in_xo}: failed to add top FSM default recovery")
 
         with tempfile.NamedTemporaryFile(
             dir=str(xo_path.parent), prefix=xo_path.name + ".", suffix=".tmp", delete=False
@@ -71,7 +105,7 @@ def patch_xo(xo_path: Path) -> tuple[int, int]:
         try:
             with zipfile.ZipFile(tmp_path, "w") as dst:
                 for info in infos:
-                    data = patched.encode("utf-8") if info.filename == FSM_IN_XO else src.read(info.filename)
+                    data = patched.encode("utf-8") if info.filename == fsm_in_xo else src.read(info.filename)
                     out_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
                     out_info.compress_type = info.compress_type
                     out_info.comment = info.comment
@@ -87,9 +121,9 @@ def patch_xo(xo_path: Path) -> tuple[int, int]:
     return init_count, default_count
 
 
-def patch_workdir(work_dir: Path) -> bool:
-    fsm_path = work_dir / FSM_IN_WORKDIR
-    if not fsm_path.exists():
+def patch_workdir(work_dir: Path, xo_path: Path) -> bool:
+    fsm_path = find_fsm_in_workdir(work_dir, xo_path)
+    if fsm_path is None:
         return False
     original = fsm_path.read_text(encoding="utf-8")
     patched, _, _ = patch_fsm_text(original)
@@ -105,7 +139,7 @@ def main() -> int:
     args = parser.parse_args()
 
     init_count, default_count = patch_xo(args.xo)
-    workdir_patched = patch_workdir(args.work_dir) if args.work_dir is not None else False
+    workdir_patched = patch_workdir(args.work_dir, args.xo) if args.work_dir is not None else False
     print(
         f"patched {args.xo}: initialized {init_count} FSM state regs, "
         f"top defaults added {default_count}, workdir_patched={workdir_patched}"

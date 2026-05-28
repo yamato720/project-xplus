@@ -12,22 +12,18 @@
 docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 ```
 
-当前正在推进的 SpMV 性能目标例外：虽然最终服务于 `cuper-tapa-pcg`，但当前 demo
-可能是从 `CuperPcg` 里抠出的 `cuper-tapa-spmv` 单 SpMV 形态。后续连续改动统一
-写入下面这个目标目录，避免每次 demo 都开一个新目录导致记录分散：
+当前正在推进的 single TAPA SpMV 性能目标例外：后续连续改动统一写入下面这个
+目标目录，避免每次 demo 都开一个新目录导致记录分散：
 
 ```text
-docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
-这个目标的定义是：把 `CuperPcg` 内嵌 SpMV 性能逐步优化到接近
-standalone/native TAPA Cuper SpMV。当前实现策略是先把 `CuperPcg` 的 PCG
-服务化 SpMV 抠出来做 `cuper-tapa-spmv` 单 SpMV demo，单独测 `spmv_avg`、
-失败边界和数值误差；确认有效后再替换回 full-PCG。该目录内可以保留多个阶段的
-历史记录文件。
-`README.md`、`changes.md`、`testing.md` 记录当前最新 demo/尝试状态；但
-`source.diff` 不是“每次尝试的草稿补丁”，只代表经过板上测试后确认有性能提升、
-值得继续保留或晋级的最新有效补丁。
+这个目标的定义是：优化 `Cuper(...)` + `detail/cuper_spmv_tasks.hpp` 这条
+standalone/native TAPA Cuper single-SpMV 路线。它不负责 full-PCG 的 controller、
+FP64 dot/update 或 `CuperPcg` service-path 指标。`README.md`、`changes.md`、
+`testing.md` 记录当前最新 demo/尝试状态；`source.diff` 不是“每次尝试的草稿
+补丁”，只代表经过板上测试后确认有性能提升、值得继续保留或晋级的最新有效补丁。
 
 目录内至少维护：
 

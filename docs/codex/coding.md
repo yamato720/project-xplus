@@ -62,26 +62,27 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
    `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
 4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
-5. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。
-6. TAPA SpMV 当前优化目标是让 `CuperPcg` 内嵌 SpMV 性能向
-   `cuper-tapa-spmv` / standalone TAPA Cuper 靠拢；当前 demo 应优先做
-   `cuper-tapa-spmv` 单 SpMV 形态，即把 `CuperPcg` 里的 PCG 服务化 SpMV 抠出来
-   单独测试，确认有效后再替换回 full-PCG。代码里要分清两套 SpMV：
-   `Cuper(...)` + `cuper_spmv_tasks.hpp` 是满血 Cuper SpMV 标准基准；
-   `CuperPcg(...)` + `pcg_spmv_service.hpp` 是为了 PCG 重复触发/编译约束调整过的
-   SpMV 服务路径。full-PCG demo 阶段再看 `init_spmv`、`iter_spmv`、
-   `controller_total` 和 `kernel_reported`，且不要跨 demo 盲比同名 stage。
-   若新 demo 改了分段语义，HTML 和结论必须按真实含义改名或合成同口径指标，例如
-   `AP path = iter recv + dot_p_ap`。
-7. 这个 SpMV 优化目标的连续改动统一维护在
-   `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`；
-   除非用户明确要求新建独立版本目录，否则不要每做一版 demo 就新增目录。
-8. 迭代优化时先测试、后写正式 `source.diff`。每轮 demo 必须更新
+5. 每次生成 `TARGET=hw` bitstream 前，必须先做同一 top/ABI 的软件级验证：
+   优先跑 `sw_emu` 或 TAPA software simulation；如果工具链限制导致不能跑，
+   至少跑对应 host/local smoke，并在版本记录或回复里写明原因。
+6. 长时间硬件构建用 tmux，并保留结束后的 shell，方便回看日志。启动 tmux 后
+   不能立刻离开：至少守到 XO 生成并完成必要 patch，且 Vitis link 已进入
+   `vpl` / synthesis / implementation 早期阶段；若本轮目标只是 XO，则守到 XO
+   文件存在、patch 通过、`make -q` 认为 XO target up-to-date。
+7. 当前新目标是 single TAPA SpMV 优化，只针对 `Cuper(...)` +
+   `detail/cuper_spmv_tasks.hpp` 和 `cuper-tapa-spmv` 主线；不要把 full-PCG
+   controller、FP64 dot/update、`init_spmv` / `iter_spmv` 当成本轮评价口径。
+   评价优先看 `spmv_avg`、GFLOP/s、成功/timeout 边界和 CPU diff。
+8. 这个 single TAPA SpMV 优化目标的连续改动统一维护在
+   `docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`；
+   旧的 `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/` 只作为 full-PCG
+   embedded-SpMV 历史目标记录保留。
+9. 迭代优化时先测试、后写正式 `source.diff`。每轮 demo 必须更新
    `README.md`、`changes.md`、`testing.md` 和 HTML 结论；但只有 demo-only
    上板测试确认核心性能提升，或用户明确要求保留功能边界修复补丁时，才更新版本目录
    的正式 `source.diff`。性能退步、测试失败或只是跑通更大规模时，不覆盖上一份
    已验证有效的 `source.diff`。
-9. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
+10. 中文源码和文档优先写中文注释；英文只用于代码符号、命令和固定术语。
 
 ## 4. 常用验证
 

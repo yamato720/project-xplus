@@ -70,6 +70,104 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     ;
 }
 
+// PCG 服务化 SpMV 抽出版顶层。
+//
+// 这个 top 是为了生成 single SpMV demo bitstream：外部 ABI 和 Cuper(...)
+// 一样，内部则复用 CuperPcg 的 Pcg_* 常驻服务流水。它不做 PCG 控制、FP64
+// dot/update 或 metrics，只把当前 full-PCG 版内嵌 SpMV 路径单独拉出来跑
+// y = A * x，方便和满血 standalone Cuper SpMV 比较。
+void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+                  tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+                  tapa::mmap<float_v16> X,
+                  tapa::mmap<float_v16> Y_out,
+                  const INDEX_TYPE Batch_num,
+                  const INDEX_TYPE Matrix_len,
+                  const INDEX_TYPE Row_num,
+                  const INDEX_TYPE Column_num,
+                  const INDEX_TYPE Iteration_num
+                 ) {
+    tapa::streams<CuperSpmvCommand, 2, 4>                   Command_Stream("Command_Stream");
+    tapa::streams<CuperSpmvCommand, HBM_CHANNEL_NUM, 4>     Matrix_Command_Stream("Matrix_Command_Stream");
+    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>     PE_Param("PE_Param");
+    tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 256>      Vector_X_Stream("Vector_X_Stream");
+    tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 64>        Matrix_A_Stream("Matrix_A_Stream");
+    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>          Vector_Y_Param("Vector_Y_Param");
+    tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 256>      Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
+    tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
+    tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
+    tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    tapa::streams<INDEX_TYPE, 8, 2>                         Checker_Stop_Stream("Checker_Stop_Stream");
+    tapa::stream<INDEX_TYPE, 2>                             Sort_Stop_Stream("Sort_Stop_Stream");
+    tapa::stream<INDEX_TYPE, 2>                             Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
+    tapa::stream<INDEX_TYPE, 2>                             Writer_Done_Stream("Writer_Done_Stream");
+
+    tapa::task()
+        // 只发送一次 SpMV command；writer 写完 Y_out 后再统一广播 stop。
+        .invoke(Pcg_SingleSpmv_Controller,
+                Iteration_num,
+                Command_Stream,
+                Matrix_Command_Stream,
+                Checker_Stop_Stream,
+                Sort_Stop_Stream,
+                Vector_Destroy_Stop_Stream,
+                Writer_Done_Stream)
+        .invoke(Pcg_SpElement_list_ptr_Loader,
+                Batch_num,
+                Row_num,
+                Column_num,
+                SpElement_list_ptr,
+                Command_Stream[0],
+                PE_Param[0])
+        .invoke(Pcg_Single_Vector_Loader,
+                Column_num,
+                X,
+                Command_Stream[1],
+                Vector_X_Stream[0])
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader,
+                                             Matrix_len,
+                                             Matrix_data,
+                                             Matrix_Command_Stream,
+                                             Matrix_A_Stream)
+        .invoke(Pcg_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
+        .invoke(Pcg_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
+        .invoke(Pcg_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
+        .invoke(Pcg_Core, PE_Param[3], Matrix_A_Stream[3], Vector_X_Stream[3], PE_Param[4], Vector_X_Stream[4], Vector_Y_Param[3], Matrix_Mult_Vector_Stream[3])
+        .invoke(Pcg_Core, PE_Param[4], Matrix_A_Stream[4], Vector_X_Stream[4], PE_Param[5], Vector_X_Stream[5], Vector_Y_Param[4], Matrix_Mult_Vector_Stream[4])
+        .invoke(Pcg_Core, PE_Param[5], Matrix_A_Stream[5], Vector_X_Stream[5], PE_Param[6], Vector_X_Stream[6], Vector_Y_Param[5], Matrix_Mult_Vector_Stream[5])
+        .invoke(Pcg_Core, PE_Param[6], Matrix_A_Stream[6], Vector_X_Stream[6], PE_Param[7], Vector_X_Stream[7], Vector_Y_Param[6], Matrix_Mult_Vector_Stream[6])
+        .invoke(Pcg_Core, PE_Param[7], Matrix_A_Stream[7], Vector_X_Stream[7], PE_Param[8], Vector_X_Stream[8], Vector_Y_Param[7], Matrix_Mult_Vector_Stream[7])
+        .invoke(Pcg_Core, PE_Param[8], Matrix_A_Stream[8], Vector_X_Stream[8], PE_Param[9], Vector_X_Stream[9], Vector_Y_Param[8], Matrix_Mult_Vector_Stream[8])
+        .invoke(Pcg_Core, PE_Param[9], Matrix_A_Stream[9], Vector_X_Stream[9], PE_Param[10], Vector_X_Stream[10], Vector_Y_Param[9], Matrix_Mult_Vector_Stream[9])
+        .invoke(Pcg_Core, PE_Param[10], Matrix_A_Stream[10], Vector_X_Stream[10], PE_Param[11], Vector_X_Stream[11], Vector_Y_Param[10], Matrix_Mult_Vector_Stream[10])
+        .invoke(Pcg_Core, PE_Param[11], Matrix_A_Stream[11], Vector_X_Stream[11], PE_Param[12], Vector_X_Stream[12], Vector_Y_Param[11], Matrix_Mult_Vector_Stream[11])
+        .invoke(Pcg_Core, PE_Param[12], Matrix_A_Stream[12], Vector_X_Stream[12], PE_Param[13], Vector_X_Stream[13], Vector_Y_Param[12], Matrix_Mult_Vector_Stream[12])
+        .invoke(Pcg_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
+        .invoke(Pcg_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
+        .invoke(Pcg_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+        .invoke(Pcg_Destroy_int, PE_Param[HBM_CHANNEL_NUM])
+        .invoke(Pcg_Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Accumulator,
+                                             Vector_Y_Param,
+                                             Matrix_Mult_Vector_Stream,
+                                             Vector_Y_Stream)
+        .invoke<tapa::join, 8>(Pcg_Vector_Checker,
+                               Row_num,
+                               Vector_Y_Stream,
+                               Vector_Y_Stream_Aftck,
+                               Checker_Stop_Stream)
+        .invoke(Pcg_Mult_Sort_Tree,
+                Vector_Y_Stream_Aftck,
+                Pcg_Spmv_Stream,
+                Sort_Stop_Stream)
+        .invoke(Pcg_Single_Vector_Writer,
+                Iteration_num,
+                Row_num,
+                Pcg_Spmv_Stream,
+                Y_out,
+                Writer_Done_Stream)
+    ;
+}
+
 // TAPA 端口类型速记：
 //   - tapa::mmap<T> 是一个连续全局内存端口，host 侧通常绑定一个 xrt::bo；
 //     kernel 内用 array[index] 形式访问 T 类型元素。

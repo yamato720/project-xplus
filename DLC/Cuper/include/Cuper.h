@@ -68,6 +68,25 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            const INDEX_TYPE Iteration_num
           );
 
+// 从 CuperPcg 内部抽出的 PCG 服务化 SpMV 单 kernel。
+//
+// ABI 刻意保持为 single SpMV 形态：
+//   Matrix_data + X -> Y_out
+// 这样 host 可以用和 Cuper(...) 相同的输入/输出缓冲做 demo-only 对比。
+// 区别在于内部不是调用 standalone 的 cuper_spmv_tasks.hpp，而是复用
+// CuperPcg 里的 pcg_spmv_service.hpp 常驻服务版 loader/core/accumulator/
+// checker/sort 链，用来单独观察 full-PCG 内嵌 SpMV 路径的性能。
+void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+                  tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+                  tapa::mmap<float_v16> X,
+                  tapa::mmap<float_v16> Y_out,
+                  const INDEX_TYPE Batch_num,
+                  const INDEX_TYPE Matrix_len,
+                  const INDEX_TYPE Row_num,
+                  const INDEX_TYPE Column_num,
+                  const INDEX_TYPE Iteration_num
+                 );
+
 // TAPA Cuper + FPGA-side Jacobi-PCG 顶层。
 //
 // 这个版本保留 Cuper 的 TAPA SpMV task graph，但不再让 host 每轮调用

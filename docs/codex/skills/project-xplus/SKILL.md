@@ -63,23 +63,28 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, and, when useful, `code_reading_guide.md`. Update official `source.diff` only after demo-only board testing confirms a performance improvement, or when the user explicitly asks to preserve a functional-boundary fix; do not overwrite the last effective `source.diff` for failed or slower demos.
 - Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
+- Before starting any `TARGET=hw` bitstream build, run the matching software-level
+  validation first (`sw_emu`, TAPA software simulation, or a documented host/local smoke
+  fallback). After launching a tmux hardware build, watch until the safe checkpoint in
+  `docs/codex/workflows/builds.md`: XO generated and patched, then Vitis link has entered
+  VPL/synthesis/implementation for full xclbin builds; for XO-only tasks, watch until the
+  XO target is up-to-date.
 
 ## Current Goal
 
-- Current optimization target: make `CuperPcg` embedded SpMV approach standalone/native
-  TAPA Cuper SpMV performance. The current demo path should be a `cuper-tapa-spmv`
-  single-SpMV bitstream extracted from the `CuperPcg` SpMV service path, so it can be
-  tested in isolation and then reused/replaced inside full-PCG after it improves.
-- Keep two SpMV forms distinct: full standalone `Cuper(...)` in `cuper_spmv_tasks.hpp`
-  is the baseline; the PCG-adjusted service path in `pcg_spmv_service.hpp` is the
-  optimization/demo target.
-- For this target, keep ongoing notes and source diffs in:
+- Current optimization target: optimize the standalone/native TAPA Cuper single-SpMV
+  route itself, i.e. `Cuper(...)` and `detail/cuper_spmv_tasks.hpp`.
+- Do not mix this target with full-PCG controller, FP64 dot/update, or `CuperPcg`
+  service-path metrics. Use `spmv_avg`, success/timeout boundary, GFLOP/s, and CPU diff
+  as the primary measurements.
+- For this target, keep ongoing notes in:
 
 ```text
-docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
-- Update that target directory for incremental SpMV optimization work instead of creating a new bitstream summary directory every time, unless the user explicitly asks for a new independent version record.
+- The previous `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/` directory remains
+  the historical full-PCG embedded-SpMV target record.
 
 ## Common Commands
 

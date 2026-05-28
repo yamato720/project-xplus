@@ -124,6 +124,45 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
     }
 }
 
+// PCG 服务化 SpMV 的单 kernel 向量 loader。
+//
+// CuperPcg 里 Pcg_Vector_Loader 需要在 X_spmv/P_spmv 两个 packed 输入之间切换。
+// 单 SpMV demo 只有一个输入向量 X；这里保留常驻 command/stop 语义和
+// float_v16 packed HBM 读取路径，只去掉 P_spmv 端口，便于用 Cuper(...) 相同 ABI
+// 做上板对比。
+void Pcg_Single_Vector_Loader(const INDEX_TYPE Column_num,
+                              tapa::async_mmap<float_v16> &X,
+                              tapa::istream<CuperSpmvCommand> &Command_in,
+                              tapa::ostream<float_v16> &Vector_X_Stream) {
+    const INDEX_TYPE batch_num_x = ((Column_num + 15) >> 4);
+
+    for (;;) {
+#pragma HLS loop_flatten off
+        const CuperSpmvCommand command = Command_in.read();
+        if (command.stop != 0) {
+            return;
+        }
+        const INDEX_TYPE iteration_time =
+            (command.iteration_num == 0) ? 1 : command.iteration_num;
+
+    iter:
+        for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=1
+        loader_x:
+            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
+#pragma HLS loop_tripcount min=1 max=500000
+#pragma HLS pipeline II=1
+                Async_Read(X,
+                           Vector_X_Stream,
+                           batch_num_x,
+                           i_request,
+                           i_response);
+            }
+        }
+    }
+}
+
 // 16 路矩阵 HBM loader 的 PCG 服务版。
 //
 // 每个 HBM channel 一个实例。收到 controller 发来的命令后，从对应
@@ -514,4 +553,97 @@ void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
             Vector_Y_Stream_Ans.try_write(tmpv16);
         }
     }
+}
+
+// 单 SpMV demo 的极简 controller。
+//
+// 它只发送一次普通 SpMV command，等待 writer 把所有 y packet 写回 HBM 后，
+// 再按 CuperPcg 的 stop 协议关闭所有常驻服务任务。这里不做 PCG dot/update，
+// 也不记录 full-PCG metrics，目的只是把当前 CuperPcg 内部 SpMV 流水单独综合成
+// 一个可测 bitstream。
+void Pcg_SingleSpmv_Controller(const INDEX_TYPE Iteration_num,
+                               tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+                               tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
+                               tapa::ostreams<INDEX_TYPE, 8> &Checker_Stop_out,
+                               tapa::ostream<INDEX_TYPE> &Sort_Stop_out,
+                               tapa::ostream<INDEX_TYPE> &Vector_Destroy_Stop_out,
+                               tapa::istream<INDEX_TYPE> &Writer_Done_in) {
+    CuperSpmvCommand command;
+    command.iteration_num = Iteration_num;
+    command.stop = 0;
+    command.vector_source = kPcgVectorSourceX;
+
+send_command:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        Command_out[index].write(command);
+    }
+send_matrix_command:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(command);
+    }
+
+    const INDEX_TYPE done = Writer_Done_in.read();
+    (void)done;
+
+    command.iteration_num = 0;
+    command.stop = 1;
+
+send_stop_command:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        Command_out[index].write(command);
+    }
+send_stop_matrix_command:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(command);
+    }
+send_checker_stop:
+    for (INDEX_TYPE index = 0; index < 8; ++index) {
+#pragma HLS unroll
+        Checker_Stop_out[index].write(kPcgStopToken);
+    }
+    Sort_Stop_out.write(kPcgStopToken);
+    Vector_Destroy_Stop_out.write(kPcgStopToken);
+}
+
+// 单 SpMV demo 的 HBM writer。
+//
+// 输出 packet 数和 standalone Cuper 的 Vector_Writer 一致：Row_num 个 FP32
+// 结果按 float_v16 写回 Y_out。完成全部 Iteration_num 轮后给 controller 一个
+// done token，controller 才发送 stop，避免 checker/sort 在结果还没排空时退出。
+void Pcg_Single_Vector_Writer(const INDEX_TYPE Iteration_num,
+                              const INDEX_TYPE Row_num,
+                              tapa::istream<float_v16> &Vector_Y_Stream_Ans,
+                              tapa::async_mmap<float_v16> &Y_out,
+                              tapa::ostream<INDEX_TYPE> &Writer_Done_out) {
+    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE num_ite_y = (Row_num + 15) >> 4;
+
+iter:
+    for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+    write_y:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < num_ite_y;) {
+#pragma HLS loop_tripcount min=1 max=500000
+#pragma HLS pipeline II=1
+            if ((i_request < num_ite_y) && !Vector_Y_Stream_Ans.empty() &&
+                !Y_out.write_addr.full() && !Y_out.write_data.full()) {
+                Y_out.write_addr.try_write(i_request);
+                float_v16 tmpv16;
+                Vector_Y_Stream_Ans.try_read(tmpv16);
+                Y_out.write_data.try_write(tmpv16);
+                ++i_request;
+            }
+            uint8_t n_resp;
+            if (Y_out.write_resp.try_read(n_resp)) {
+                i_response += static_cast<INDEX_TYPE>(n_resp) + 1;
+            }
+        }
+    }
+
+    Writer_Done_out.write(1);
 }

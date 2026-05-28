@@ -21,8 +21,10 @@
 
 ## Cuper / SpMV 相关
 
-- [TAPA full-PCG SpMV 接近原生 Cuper 性能目标记录](bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/README.md)
-  - 记录当前 demo bitstream、历史 receive-path demo、测试边界、性能差值和是否建议晋级。
+- [TAPA single SpMV 优化目标记录](bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/README.md)
+  - 当前新目标：优化 `Cuper(...)` / `cuper_spmv_tasks.hpp` single SpMV 路线。
+- [TAPA full-PCG SpMV 接近原生 Cuper 历史目标记录](bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/README.md)
+  - 记录 full-PCG embedded-SpMV 相关 demo、历史 receive-path demo、测试边界和性能差值。
 - [Cuper 大矩阵拆分运行方案](design/cuper_large_matrix_split_zh.md)
   - 说明 `DLC/Cuper` 的 slice/window 限制，以及大矩阵按 tile 拆给 Cuper 的方案。
 - [Cuper / CuperPcg 比特流构建尝试记录](design/cuper_tapa_pcg_bitstream_attempts_zh.md)

@@ -59,6 +59,7 @@ TAPA_ROOT ?= $(strip $(shell \
 ROOT_DIR := $(abspath .)
 BUILD_DIR ?= $(ROOT_DIR)/build
 CUPER_TAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-build
+CUPER_TAPA_PCG_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-u55c-20260528-demo-build
 CUPER_NOTAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-build
 CUPER_NOTAPA_SPMV_4CH_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-4ch-build
 CUPER_TAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-fpga-u55c-20260525-build
@@ -86,6 +87,7 @@ CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
 CUPER_SPMV_4CH_CFG := $(CFG_DIR)/connectivity_cuper_spmv_4ch_u55c.cfg
 CUPER_TAPA_PCG_CFG := $(CFG_DIR)/connectivity_cuper_tapa_pcg_u55c.cfg
+CUPER_TAPA_PCG_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_tapa_pcg_spmv_u55c.cfg
 VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
 VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
 ANALYSIS_TARGET ?= hw
@@ -164,6 +166,8 @@ CUPER_SPMV_4CH_XO := $(TARGET_BUILD_DIR)/cuper_packed_spmv_4ch_kernel.xo
 CUPER_SPMV_4CH_XCLBIN := $(TARGET_BUILD_DIR)/cuper_packed_spmv_4ch_kernel.xclbin
 CUPER_TAPA_PCG_XO := $(TARGET_BUILD_DIR)/CuperPcg.xo
 CUPER_TAPA_PCG_XCLBIN := $(TARGET_BUILD_DIR)/CuperPcg.xclbin
+CUPER_TAPA_PCG_SPMV_XO := $(TARGET_BUILD_DIR)/CuperPcgSpmv.xo
+CUPER_TAPA_PCG_SPMV_XCLBIN := $(TARGET_BUILD_DIR)/CuperPcgSpmv.xclbin
 EMCONFIG := $(TARGET_BUILD_DIR)/emconfig.json
 
 XRT_CXXFLAGS := $(CXXFLAGS) -Wall -Wextra -I$(XILINX_XRT)/include
@@ -217,7 +221,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
 
 all: run-local
 
@@ -423,6 +427,10 @@ $(CUPER_TAPA_PCG_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_TAPA_KERNEL_HEADERS
 	cd "$(CUPER_DIR)" && source scripts/env_u55c.sh && tapa -w "$(TARGET_BUILD_DIR)/tapa_CuperPcg" compile -f kernels/Cuper.cpp -t CuperPcg -p "$(DEVICE)" --clock-period "$(CUPER_TAPA_PCG_CLOCK_PERIOD)" -j "$${JOBS:-$$(nproc)}" --enable-synth-util -c "-I$(CUPER_DIR)/include" -o "$(CUPER_TAPA_PCG_XO)"
 	$(PYTHON) "$(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py" "$(CUPER_TAPA_PCG_XO)" --work-dir "$(TARGET_BUILD_DIR)/tapa_CuperPcg"
 
+$(CUPER_TAPA_PCG_SPMV_XO): $(CUPER_DIR)/kernels/Cuper.cpp $(CUPER_TAPA_KERNEL_HEADERS) $(CUPER_DIR)/include/Cuper.h $(CUPER_DIR)/include/Cuper_common.h $(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py | $(TARGET_BUILD_DIR) tapa-env
+	cd "$(CUPER_DIR)" && source scripts/env_u55c.sh && tapa -w "$(TARGET_BUILD_DIR)/tapa_CuperPcgSpmv" compile -f kernels/Cuper.cpp -t CuperPcgSpmv -p "$(DEVICE)" --clock-period "$(CUPER_TAPA_PCG_CLOCK_PERIOD)" -j "$${JOBS:-$$(nproc)}" --enable-synth-util -c "-I$(CUPER_DIR)/include" -o "$(CUPER_TAPA_PCG_SPMV_XO)"
+	$(PYTHON) "$(SCRIPT_DIR)/patch_tapa_xo_control_fsm.py" "$(CUPER_TAPA_PCG_SPMV_XO)" --work-dir "$(TARGET_BUILD_DIR)/tapa_CuperPcgSpmv"
+
 $(XCLBIN): $(XOS) $(ARCHIVED_CFG_DIR)/connectivity_u55c.cfg | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) $(VPP_LDFLAGS) -o $@ $(XOS)
 
@@ -437,6 +445,9 @@ $(CUPER_SPMV_4CH_XCLBIN): $(CUPER_SPMV_4CH_XO) $(CUPER_SPMV_4CH_CFG) | $(TARGET_
 
 $(CUPER_TAPA_PCG_XCLBIN): $(CUPER_TAPA_PCG_XO) $(CUPER_TAPA_PCG_CFG) | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_CFG) -o $@ $(CUPER_TAPA_PCG_XO)
+
+$(CUPER_TAPA_PCG_SPMV_XCLBIN): $(CUPER_TAPA_PCG_SPMV_XO) $(CUPER_TAPA_PCG_SPMV_CFG) | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_SPMV_CFG) -o $@ $(CUPER_TAPA_PCG_SPMV_XO)
 
 $(EMCONFIG): | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(EMCONFIGUTIL) --platform $(XPLATFORM) --od .
@@ -491,6 +502,17 @@ build-cuper-tapa-pcg:
 
 build-cuper-tapa-pcg-hw:
 	$(MAKE) build-cuper-tapa-pcg TARGET=hw
+
+_build-cuper-tapa-pcg-spmv: $(CUPER_TAPA_PCG_SPMV_XCLBIN)
+
+build-cuper-tapa-pcg-spmv:
+	$(MAKE) _build-cuper-tapa-pcg-spmv TARGET=$(TARGET) BUILD_DIR="$(CUPER_TAPA_PCG_SPMV_BUILD_DIR)"
+
+build-cuper-tapa-pcg-spmv-sw:
+	$(MAKE) build-cuper-tapa-pcg-spmv TARGET=sw_emu
+
+build-cuper-tapa-pcg-spmv-hw:
+	$(MAKE) build-cuper-tapa-pcg-spmv TARGET=hw
 
 cuper-pcg-notapa-hw-tmux:
 	@mkdir -p "$(LOG_DIR)"
@@ -578,6 +600,24 @@ cuper-tapa-pcg-hw-tmux:
 	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-hw"; \
 	echo "tail: tail -f $$log"
 
+cuper-tapa-pcg-spmv-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-tapa-pcg-spmv-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-tapa-pcg-spmv-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-spmv-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_tapa_pcg_spmv_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-tapa-pcg-spmv-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) build-cuper-tapa-pcg-spmv-hw 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-tapa-pcg-spmv-hw"; \
+	echo "log: $$log"; \
+	echo "build_dir: $(CUPER_TAPA_PCG_SPMV_BUILD_DIR)"; \
+	echo "xclbin: $(CUPER_TAPA_PCG_SPMV_BUILD_DIR)/hw/CuperPcgSpmv.xclbin"; \
+	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-spmv-hw"; \
+	echo "tail: tail -f $$log"
+
 run: run-local
 
 run-local: $(LOCAL_HOST)
@@ -591,6 +631,9 @@ run-cuper-pcg-tapa: $(CUPER_TAPA_PCG_HOST)
 
 run-cuper-tapa-spmv: $(CUPER_TAPA_PCG_HOST)
 	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" --spmv-only $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
+
+run-cuper-tapa-pcg-spmv: $(CUPER_TAPA_PCG_HOST)
+	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" --spmv-only --pcg-spmv-service $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 
 run-cuper-pcg-tapa-fpga: $(CUPER_TAPA_PCG_FPGA_HOST)
 	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL)) $(if $(LEGACY_ABI),--legacy-abi)

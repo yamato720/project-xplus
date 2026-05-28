@@ -47,13 +47,16 @@ struct CliOptions {
     double diff_tol = 1.0e-3;
     // true 时只测一次或多次 Cuper SpMV，不进入 host-side PCG 主循环。
     bool spmv_only = false;
+    // true 时调用从 CuperPcg 内部抽出的服务化 SpMV 顶层 CuperPcgSpmv。
+    bool pcg_spmv_service = false;
     int spmv_repeats = 1;
 };
 
 void usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
               << " [dataset_dir] [--bitstream path] [--tau value] [--max-iters value]"
-              << " [--diff-tol value] [--spmv-only] [--spmv-repeats value]\n";
+              << " [--diff-tol value] [--spmv-only] [--pcg-spmv-service]"
+              << " [--spmv-repeats value]\n";
 }
 
 std::string env_or_empty(const char* name) {
@@ -95,6 +98,8 @@ CliOptions parse_args(int argc, char** argv) {
             options.diff_tol = std::stod(argv[++index]);
         } else if (arg == "--spmv-only") {
             options.spmv_only = true;
+        } else if (arg == "--pcg-spmv-service") {
+            options.pcg_spmv_service = true;
         } else if (arg == "--spmv-repeats") {
             if (index + 1 >= argc) {
                 throw std::runtime_error("--spmv-repeats requires a value");
@@ -137,8 +142,10 @@ int round_up(const int value, const int align) {
 // 它们在 host/cuper_pcg_solver.hpp 的 run_cuper_pcg_solver_with_backend 中。
 class CuperTapaSpmv {
   public:
-    CuperTapaSpmv(const Dataset& dataset, std::string bitstream)
-        : n_(dataset.n()), bitstream_(std::move(bitstream)) {
+    CuperTapaSpmv(const Dataset& dataset, std::string bitstream, bool pcg_spmv_service)
+        : n_(dataset.n()),
+          bitstream_(std::move(bitstream)),
+          pcg_spmv_service_(pcg_spmv_service) {
         const auto start = std::chrono::steady_clock::now();
         build_matrix(dataset);
         allocate_vectors();
@@ -148,8 +155,11 @@ class CuperTapaSpmv {
 
     CuperPcgBackendInfo backend_info() const {
         return CuperPcgBackendInfo{
-            bitstream_.empty() ? "tapa-cuper-sw-sim-fp32-spmv+fp64-pcg"
-                               : "tapa-cuper-hw-fp32-spmv+fp64-pcg",
+            pcg_spmv_service_
+                ? (bitstream_.empty() ? "tapa-cuper-pcg-service-sw-sim-fp32-spmv+fp64-pcg"
+                                      : "tapa-cuper-pcg-service-hw-fp32-spmv+fp64-pcg")
+                : (bitstream_.empty() ? "tapa-cuper-sw-sim-fp32-spmv+fp64-pcg"
+                                      : "tapa-cuper-hw-fp32-spmv+fp64-pcg"),
             Slice_WIDTH,
             static_cast<std::size_t>(batch_num_),
         };
@@ -171,19 +181,34 @@ class CuperTapaSpmv {
         // 每次 operator() 对应 host-side PCG 的一次 SpMV 调用。
         // Iteration_num 固定传 1，避免把 Cuper kernel 内部的性能重复计数
         // 和 PCG 迭代次数混在一起。
-        const double kernel_ns = tapa::invoke(
-            Cuper,
-            bitstream_,
-            tapa::read_only_mmap<INDEX_TYPE>(sp_element_list_ptr_fpga_),
-            tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(matrix_fpga_data_)
-                .reinterpret<ap_uint<512>>(),
-            tapa::read_only_mmap<float>(x_fpga_data_).reinterpret<float_v16>(),
-            tapa::write_only_mmap<float>(y_fpga_data_out_).reinterpret<float_v16>(),
-            batch_num_,
-            matrix_len_,
-            n_,
-            n_,
-            1);
+        const double kernel_ns =
+            pcg_spmv_service_
+                ? tapa::invoke(
+                      CuperPcgSpmv,
+                      bitstream_,
+                      tapa::read_only_mmap<INDEX_TYPE>(sp_element_list_ptr_fpga_),
+                      tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(matrix_fpga_data_)
+                          .reinterpret<ap_uint<512>>(),
+                      tapa::read_only_mmap<float>(x_fpga_data_).reinterpret<float_v16>(),
+                      tapa::write_only_mmap<float>(y_fpga_data_out_).reinterpret<float_v16>(),
+                      batch_num_,
+                      matrix_len_,
+                      n_,
+                      n_,
+                      1)
+                : tapa::invoke(
+                      Cuper,
+                      bitstream_,
+                      tapa::read_only_mmap<INDEX_TYPE>(sp_element_list_ptr_fpga_),
+                      tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(matrix_fpga_data_)
+                          .reinterpret<ap_uint<512>>(),
+                      tapa::read_only_mmap<float>(x_fpga_data_).reinterpret<float_v16>(),
+                      tapa::write_only_mmap<float>(y_fpga_data_out_).reinterpret<float_v16>(),
+                      batch_num_,
+                      matrix_len_,
+                      n_,
+                      n_,
+                      1);
 
         output.assign(static_cast<std::size_t>(n_), 0.0);
         for (int index = 0; index < n_; ++index) {
@@ -272,6 +297,7 @@ class CuperTapaSpmv {
 
     int n_ = 0;
     std::string bitstream_;
+    bool pcg_spmv_service_ = false;
     double plan_ms_ = 0.0;
     INDEX_TYPE batch_num_ = 0;
     INDEX_TYPE matrix_len_ = 0;
@@ -294,11 +320,13 @@ int main(int argc, char** argv) {
 
         std::cout << "[xplus] dataset=" << options.dataset_dir
                   << " mode=" << (options.spmv_only ? "cuper-spmv-tapa" : "cuper-pcg-tapa")
-                  << " spmv=tapa-cuper"
+                  << " spmv="
+                  << (options.pcg_spmv_service ? "tapa-cuper-pcg-service"
+                                               : "tapa-cuper")
                   << " bitstream=" << (options.bitstream.empty() ? "<software-sim>" : options.bitstream)
                   << "\n";
 
-        CuperTapaSpmv spmv(dataset, options.bitstream);
+        CuperTapaSpmv spmv(dataset, options.bitstream, options.pcg_spmv_service);
         if (options.spmv_only) {
             // 主线入口：TAPA Cuper single SpMV。
             //

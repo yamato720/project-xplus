@@ -14,12 +14,17 @@ YYYY-MM-DD-<主线>-<简短说明>/
 例如：
 
 ```text
-2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
 ## 已有版本记录
 
-- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：当前持续目标目录。
+- `2026-05-28-cuper-tapa-spmv-single-optimization/`：当前持续目标目录。
+  目标是优化 `Cuper(...)` + `detail/cuper_spmv_tasks.hpp` 这条
+  standalone/native TAPA Cuper single-SpMV 路线。后续 single TAPA SpMV 的源码
+  改动说明、demo bitstream 和测试结论都继续写入该目录。
+- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：历史 full-PCG
+  embedded-SpMV 目标目录。
   目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
   Cuper SpMV。当前 demo 策略是先把 `CuperPcg` 里的 PCG 服务化 SpMV 抠出来，
   做成 `cuper-tapa-spmv` 单 SpMV demo 单独测试；确认有效后再回填 full-PCG。

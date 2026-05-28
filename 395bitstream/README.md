@@ -17,8 +17,8 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | 文件 | 主线 | PCG 主循环 | SpMV 实现 | 状态 |
 | --- | --- | --- | --- | --- |
 | `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
+| `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV | 不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | 当前 demo 槽：PCG service SpMV 抽出版，待上板测试 |
 | `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
-| `cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 当前 demo 槽：packed feed/AP 候选版，demo-only 已跑完整 thermal2，未替换当前标准 |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 
@@ -37,40 +37,33 @@ UUID 为 `51132100-b217-df93-f4dd-05bfc169f820`，SHA256 为
 HBM clock 为 437 MHz。替换前版本已归档到
 `bitstream_archive/2026-05-26-tapa-pcg-pre-timed-debug/`。
 
-TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
+TAPA Cuper / single SpMV 当前 demo 候选文件：
 
 ```text
-cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
+cuper-tapa-spmv-u55c-20260528-demo.xclbin
 ```
 
-这版仍是 `CuperPcg`，来自 2026-05-27 的 TAPA full-PCG packed feed/AP
-优化构建。它只作为 demo 候选保留在 `395bitstream/` 中，当前标准版仍是
-`cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。demo xclbin UUID 为
-`cc61e044-06f7-4726-8f18-773ac52ab1b2`，SHA256 为
-`add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb`。
-最终 xclbin info 中 DATA clock 为 216 MHz，KERNEL clock 为 500 MHz，
+这版是 `CuperPcgSpmv`，来自 2026-05-28 的 PCG service SpMV 抽出版构建。
+它属于 `cuper-tapa-spmv` demo 候选，不替换当前标准
+`cuper-tapa-spmv-u55c-20260522.xclbin`。demo xclbin UUID 为
+`08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，SHA256 为
+`0be3ed806febc39ad488ed833c063390978bb2911d4fa298c2056ef2e5ce6356`。
+最终 xclbin info 中 DATA clock 为 222 MHz，KERNEL clock 为 500 MHz，
 HBM clock 为 450 MHz。构建日志为
-`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`，版本记录见
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+`logs/cuper_tapa_pcg_spmv_hw_20260528_023906.log`，版本记录见
+`docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`。
 
-注意：这个文件名之前曾放过 receive-path demo
-`9474ef8e-571b-ae13-f898-890e3af8ae5e`。该旧 demo 的测试结论仍保存在
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`
-的历史记录和 HTML 报告中，
-但不再对应当前 `-demo.xclbin` 文件。当前 packed feed/AP demo 已在
-2026-05-28 按用户要求完成 demo-only 上板测试；日志位于
-`logs/codex_demo_only_test_20260528_005152/`。结果是
-`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
-和完整 `thermal2` 的 init-only / 1iter 全部返回，完整 `thermal2` 为
-`ctrl 0x4 -> 0xe`。但大规模 1iter 性能明显慢于当前标准既有记录，因此尚未晋级
-为标准版。
+这个 demo 只把 `CuperPcg` 中
+`DLC/Cuper/kernels/detail/pcg_spmv_service.hpp` 的服务化 SpMV 链抽出来单测，
+用于和满血 `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` 对应的
+`cuper-tapa-spmv-u55c-20260522.xclbin` 标准曲线比较 `spmv_avg`、timeout 边界
+和 diff。当前尚未上板测试，不能按标准版使用。
 
-当前 SpMV 优化的下一步 demo 不应继续直接做 full-PCG bitstream。应先生成
-`cuper-tapa-spmv` 单 SpMV demo：把 `CuperPcg` 中
-`DLC/Cuper/kernels/detail/pcg_spmv_service.hpp` 的 PCG 服务化 SpMV 路径抠出来
-单测，和满血 `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` 对应的
-`cuper-tapa-spmv-u55c-20260522.xclbin` 标准曲线比较 `spmv_avg`、timeout 边界和
-diff。该单 SpMV demo 确认有效后，再回填到 full-PCG。
+被移出当前 demo 槽的旧 full-PCG packed feed/AP demo 已本地归档到：
+
+```text
+bitstream_archive/2026-05-28-tapa-pcg-packed-ap-demo-before-spmv-demo/
+```
 
 ## 运行入口
 
@@ -82,6 +75,18 @@ make run-cuper-tapa-spmv \
   TARGET=hw \
   DATASET=/path/to/dataset \
   BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin
+```
+
+TAPA PCG service single SpMV demo：
+
+```bash
+make cuper-tapa-pcg-host
+make run-cuper-tapa-pcg-spmv \
+  TARGET=hw \
+  DATASET=/path/to/dataset \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 \
+  DIFF_TOL=1e-1
 ```
 
 no-TAPA Cuper / single SpMV：

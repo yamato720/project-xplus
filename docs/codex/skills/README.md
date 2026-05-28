@@ -56,15 +56,13 @@ Project-XPlus/docs/codex/testing.md
 Project-XPlus/395bitstream/README.md
 ```
 
-当前 skill 目标是：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
-TAPA Cuper SpMV。当前 demo 路线应优先做 `cuper-tapa-spmv` 单 SpMV 形态：
-从 `CuperPcg` 的 PCG 服务化 SpMV 路径抠出来单测，确认有效后再回填 full-PCG。
-注意区分满血 `Cuper(...)` / `cuper_spmv_tasks.hpp` 标准基准，以及
-`CuperPcg(...)` / `pcg_spmv_service.hpp` 里的编译适配版 SpMV。围绕该目标的连续
-修改记录统一维护在：
+当前 skill 目标是：优化 `Cuper(...)` / `cuper_spmv_tasks.hpp` 这条
+standalone/native TAPA Cuper single-SpMV 路线。不要把 full-PCG controller、
+FP64 dot/update 或 `CuperPcg(...)` / `pcg_spmv_service.hpp` 的服务化 SpMV 指标
+混进本目标。围绕该目标的连续修改记录统一维护在：
 
 ```text
-Project-XPlus/docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+Project-XPlus/docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
 其中 `coding.md` 是入口页，细分流程放在：
