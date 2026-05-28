@@ -53,11 +53,11 @@ demo-only smoke。`thermal2_n16` 第一次运行和 retry 均在 180s timeout，
 源码改动：
 
 - 在 `pcg_spmv_service.hpp` 中新增 `Pcg_Single_Vector_Checker`：
-  按一次 SpMV 的 `Row_num` 和 `Iteration_num` 计算上游 accumulator 会产生的
-  对齐输出包数，完整消费 padding，只把有效输出转发给下一段。
+  按一次 SpMV 的 `Row_num` 计算上游 accumulator 会产生的对齐输出包数，完整
+  消费 padding，只把有效输出转发给下一段。
 - 在 `pcg_spmv_service.hpp` 中新增 `Pcg_Single_Mult_Sort_Tree`：
   从 8 路 `float_v2` 收齐后打包成 `float_v16`，输出固定
-  `ceil(Row_num/16) * iteration_time` 包后自然返回。
+  `ceil(Row_num/16)` 包后自然返回。
 - 调整 `Pcg_SingleSpmv_Controller`：
   不再向 checker/sort 发送 stop token；writer 完成后只负责关闭 loader/core
   和 vector destroy 这类仍保持常驻服务语义的任务。
@@ -96,6 +96,51 @@ log: logs/cuper_tapa_pcg_spmv_hw_20260528_161221.log
 当前仍不更新正式 `source.diff`。只有新 xclbin 上板后确认至少
 `thermal2_n16` 能稳定返回，并继续完成 demo-only sweep 或明确证明边界改善时，
 才考虑把本补丁写入 `source.diff`。
+
+## 2026-05-28：service 内部去掉 Iteration_num
+
+本次按用户要求，把单 SpMV 抽出版和 full `CuperPcg` 共同使用的
+`pcg_spmv_service.hpp` 统一为“一条 command 只执行一次 SpMV”。PCG 的多轮迭代
+由 controller 多次发送 command 表示，不再把 `Iteration_num` 塞进 command 让
+service 内部循环。
+
+源码改动：
+
+- `pcg_common.hpp`：`CuperSpmvCommand` 删除 `iteration_num`，只保留
+  `stop` 和 `vector_source`；
+- `pcg_controller.hpp`：init 阶段和每轮 A*p 阶段发送普通 command，不再写
+  `command.iteration_num`；
+- `pcg_spmv_service.hpp`：
+  - ptr/vector/matrix loader 收到一条 command 后只发/读一次 SpMV 所需数据；
+  - `Pcg_Core`、`Pcg_Accumulator` 不再读取或转发 `Iteration_num`；
+  - `Pcg_Single_Vector_Checker`、`Pcg_Single_Mult_Sort_Tree`、
+    `Pcg_Single_Vector_Writer` 都只按一次 SpMV 的固定输出量返回；
+- `cuper_top_graphs.hpp`：`CuperPcgSpmv(...)` 仍保留 ABI 参数 `Iteration_num`，
+  但内部 `(void)Iteration_num`，不再把它传给 service task。
+
+保留不变：
+
+- standalone `Cuper(...)` 仍使用 `Iteration_num` 作为 benchmark 重复次数；
+- full `CuperPcg(...)` 的 PCG 迭代次数仍由 `Max_iters` 控制；
+- 本轮不启动新的硬件构建，不更新正式 `source.diff`。
+
+本次软件验证：
+
+```bash
+make download-suitesparse-data DATASETS="thermal2_n4096 thermal2_n16384 thermal2_n65536 thermal2_n131072 thermal2_n262144 thermal2"
+git diff --check
+make cuper-tapa-pcg-host
+make cuper-tapa-pcg-fpga-host
+timeout 180s make run-cuper-tapa-pcg-spmv DATASET=data/suitesparse/Schmid/csr/thermal2_n16 SPMV_REPEATS=1 DIFF_TOL=1e-1
+timeout 180s make run-cuper-pcg-tapa-fpga DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 DIFF_TOL=1e-1
+timeout 240s make run-cuper-tapa-pcg-spmv DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 SPMV_REPEATS=1 DIFF_TOL=1e-1
+timeout 240s make run-cuper-pcg-tapa-fpga DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 MAX_ITERS=1 DIFF_TOL=1e-1
+timeout 300s make run-cuper-tapa-pcg-spmv DATASET=data/suitesparse/Schmid/csr/thermal2_n4096 SPMV_REPEATS=1 DIFF_TOL=1e-1
+timeout 300s make run-cuper-pcg-tapa-fpga DATASET=data/suitesparse/Schmid/csr/thermal2_n4096 MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+结果：`CuperPcgSpmv` service single SpMV 在 `n16/n1024/n4096` 均 `status=ok`；
+full `CuperPcg` 软件仿真在 `n16` 收敛，在 `n1024/n4096` 与 CPU 1iter 结果对齐。
 
 ## 优化对象
 

@@ -32,40 +32,81 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            const INDEX_TYPE Iteration_num
           ) {
 
-    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>    PE_Param("PE_Param");                          
-    tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 1024>     Vector_X_Stream("Vector_X_Stream");                            
-    tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 512>      Matrix_A_Stream("Matrix_A_Stream");                  
-    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>         Vector_Y_Param("Vector_Y_Param");                            
-    tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 1024>     Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");    
-    tapa::streams<float_v2, HBM_CHANNEL_NUM, 1024>          Vector_Y_Stream("Vector_Y_Stream");                      
+    // Cuper(...) 是一次性 SpMV task graph，不需要 command/stop stream：
+    // 每个 task 按 Iteration_num 固定跑完后自然结束。
+    //
+    // 参数串接链：ptr loader 写 PE_Param[0]，Core0..Core15 逐级转发到
+    // PE_Param[16]，最后由 Destroy_int 消费链尾。
+    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>    PE_Param("PE_Param");
+    // 向量串接链：Vector_Loader 写 Vector_X_Stream[0]，16 个 core 逐级转发同一份
+    // packed X 到 Vector_X_Stream[16]，最后由 Destroy_float_v16 消费链尾。
+    tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 1024>     Vector_X_Stream("Vector_X_Stream");
+    // 16 路矩阵输入，每一路对应一个 HBM channel 和一个 Core。
+    tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 512>      Matrix_A_Stream("Matrix_A_Stream");
+    // Core 写给 accumulator 的批次/行边界参数；每个 HBM channel 一路。
+    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>         Vector_Y_Param("Vector_Y_Param");
+    // 16 个 Core 的局部乘积输出，进入 16 个 Accumulator。
+    tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 1024>     Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
+    // 16 个 Accumulator 输出的 float_v2 部分结果。
+    tapa::streams<float_v2, HBM_CHANNEL_NUM, 1024>          Vector_Y_Stream("Vector_Y_Stream");
+    // Vector_Checker 将 16 路 accumulator 输出压到 8 路有效 float_v2 流。
+    // FIFO_DEPTH 来自 Cuper.h，当前实际深度为 2。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
-    tapa::stream<float_v16, FIFO_DEPTH>                    Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");                      
-    
+    // Mult_Sort_Tree 拼出的最终 float_v16 输出，Vector_Writer 写回 Y_out。
+    // FIFO_DEPTH 来自 Cuper.h，当前实际深度为 2。
+    tapa::stream<float_v16, FIFO_DEPTH>                    Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");
+
     tapa::task()
+        // 读取 Cuper 预处理后的 SpElement 边界表，把 Batch/Row/Iter/Column 和
+        // 每个 batch 的 start/end 写入 PE_Param[0]。
         .invoke(SpElement_list_ptr_Loader, Batch_num, Row_num, Iteration_num, Column_num, SpElement_list_ptr, PE_Param[0])
+        // 从 HBM 读取 packed FP32 输入向量 X，写入向量广播链首端。
         .invoke(Vector_Loader, Iteration_num, Column_num, X, Vector_X_Stream[0])
+        // 启动 16 个矩阵 loader，每个 loader 读取一个 Matrix_data HBM channel。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Matrix_Loader, Iteration_num, Matrix_len, Matrix_data, Matrix_A_Stream)
+        // Core0：消费 HBM[0] 的矩阵分片，同时转发参数和 X 向量到 Core1。
         .invoke(Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
+        // Core1：消费 HBM[1] 的矩阵分片，同时转发参数和 X 向量到 Core2。
         .invoke(Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
+        // Core2：消费 HBM[2] 的矩阵分片，同时转发参数和 X 向量到 Core3。
         .invoke(Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
+        // Core3：消费 HBM[3] 的矩阵分片，同时转发参数和 X 向量到 Core4。
         .invoke(Core, PE_Param[3], Matrix_A_Stream[3], Vector_X_Stream[3], PE_Param[4], Vector_X_Stream[4], Vector_Y_Param[3], Matrix_Mult_Vector_Stream[3])
+        // Core4：消费 HBM[4] 的矩阵分片，同时转发参数和 X 向量到 Core5。
         .invoke(Core, PE_Param[4], Matrix_A_Stream[4], Vector_X_Stream[4], PE_Param[5], Vector_X_Stream[5], Vector_Y_Param[4], Matrix_Mult_Vector_Stream[4])
+        // Core5：消费 HBM[5] 的矩阵分片，同时转发参数和 X 向量到 Core6。
         .invoke(Core, PE_Param[5], Matrix_A_Stream[5], Vector_X_Stream[5], PE_Param[6], Vector_X_Stream[6], Vector_Y_Param[5], Matrix_Mult_Vector_Stream[5])
+        // Core6：消费 HBM[6] 的矩阵分片，同时转发参数和 X 向量到 Core7。
         .invoke(Core, PE_Param[6], Matrix_A_Stream[6], Vector_X_Stream[6], PE_Param[7], Vector_X_Stream[7], Vector_Y_Param[6], Matrix_Mult_Vector_Stream[6])
+        // Core7：消费 HBM[7] 的矩阵分片，同时转发参数和 X 向量到 Core8。
         .invoke(Core, PE_Param[7], Matrix_A_Stream[7], Vector_X_Stream[7], PE_Param[8], Vector_X_Stream[8], Vector_Y_Param[7], Matrix_Mult_Vector_Stream[7])
+        // Core8：消费 HBM[8] 的矩阵分片，同时转发参数和 X 向量到 Core9。
         .invoke(Core, PE_Param[8], Matrix_A_Stream[8], Vector_X_Stream[8], PE_Param[9], Vector_X_Stream[9], Vector_Y_Param[8], Matrix_Mult_Vector_Stream[8])
+        // Core9：消费 HBM[9] 的矩阵分片，同时转发参数和 X 向量到 Core10。
         .invoke(Core, PE_Param[9], Matrix_A_Stream[9], Vector_X_Stream[9], PE_Param[10], Vector_X_Stream[10], Vector_Y_Param[9], Matrix_Mult_Vector_Stream[9])
+        // Core10：消费 HBM[10] 的矩阵分片，同时转发参数和 X 向量到 Core11。
         .invoke(Core, PE_Param[10], Matrix_A_Stream[10], Vector_X_Stream[10], PE_Param[11], Vector_X_Stream[11], Vector_Y_Param[10], Matrix_Mult_Vector_Stream[10])
+        // Core11：消费 HBM[11] 的矩阵分片，同时转发参数和 X 向量到 Core12。
         .invoke(Core, PE_Param[11], Matrix_A_Stream[11], Vector_X_Stream[11], PE_Param[12], Vector_X_Stream[12], Vector_Y_Param[11], Matrix_Mult_Vector_Stream[11])
+        // Core12：消费 HBM[12] 的矩阵分片，同时转发参数和 X 向量到 Core13。
         .invoke(Core, PE_Param[12], Matrix_A_Stream[12], Vector_X_Stream[12], PE_Param[13], Vector_X_Stream[13], Vector_Y_Param[12], Matrix_Mult_Vector_Stream[12])
+        // Core13：消费 HBM[13] 的矩阵分片，同时转发参数和 X 向量到 Core14。
         .invoke(Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
+        // Core14：消费 HBM[14] 的矩阵分片，同时转发参数和 X 向量到 Core15。
         .invoke(Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
+        // Core15：消费 HBM[15] 的矩阵分片，并把参数/X 链尾交给 Destroy_*。
         .invoke(Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+        // 消费 PE_Param[16] 链尾，防止最后一级 core 写满参数 FIFO。
         .invoke<tapa::detach>(Destroy_int, PE_Param[HBM_CHANNEL_NUM])
+        // 消费 Vector_X_Stream[16] 链尾，防止最后一级 core 写满向量 FIFO。
         .invoke<tapa::detach>(Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM])
+        // 16 路 accumulator 累加各 core 的局部乘积，输出 float_v2 部分结果。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
+        // 8 路 checker 过滤 Cuper 对齐产生的 padding，只保留 Row_num 有效输出。
         .invoke<tapa::join, 8>(Vector_Checker, Iteration_num, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck)
+        // sort tree 把 8 路 float_v2 重新拼成单路 float_v16 输出。
         .invoke<tapa::detach>(Mult_Sort_Tree, Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans)
+        // 最终 writer 把 float_v16 结果写回 Y_out HBM。
         .invoke(Vector_Writer, Iteration_num, Row_num, Vector_Y_Stream_Ans, Y_out)
     ;
 }
@@ -86,27 +127,51 @@ void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                   const INDEX_TYPE Column_num,
                   const INDEX_TYPE Iteration_num
                  ) {
+    (void)Iteration_num;  // service SpMV 固定“一条 command 一次 SpMV”，该 ABI 参数仅保留兼容 host。
+    // CuperPcgSpmv(...) 比 Cuper(...) 多了 service 命令/退出相关 stream。
+    // 原因是它复用 CuperPcg 的常驻 SpMV 服务任务：loader/core 可以等待
+    // CuperSpmvCommand 被多次触发，最后再用 stop token 有限退出。
+    //
+    // 两路通用命令：Command_Stream[0] 给 ptr loader，Command_Stream[1] 给 vector loader。
     tapa::streams<CuperSpmvCommand, 2, 4>                   Command_Stream("Command_Stream");
+    // 16 路矩阵命令：每个 HBM channel 的 Pcg_Matrix_Loader 各收一条 command/stop。
     tapa::streams<CuperSpmvCommand, HBM_CHANNEL_NUM, 4>     Matrix_Command_Stream("Matrix_Command_Stream");
+    // 下面这些数据流形态和 Cuper(...) 基本对应，但 FIFO 深度更小，因为这是
+    // service 抽出版的 demo，不是原始满血 Cuper 的标准 task graph。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>     PE_Param("PE_Param");
     tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 256>      Vector_X_Stream("Vector_X_Stream");
     tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 64>        Matrix_A_Stream("Matrix_A_Stream");
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>          Vector_Y_Param("Vector_Y_Param");
     tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 256>      Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
+    // FIFO_DEPTH 来自 Cuper.h，当前实际深度为 2；三条 top 里这个宏值相同。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
+    // PCG service 原本把 sort tree 输出送回 Pcg_Controller；单 SpMV demo 改为
+    // 送到 Pcg_Single_Vector_Writer，再写回 Y_out。
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    // Vector_X_Stream[16] 的链尾 destroy 没有 CuperSpmvCommand 输入，所以单独用
+    // 这个 stop stream 通知它退出。
     tapa::stream<INDEX_TYPE, 2>                             Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
+    // writer 写完全部有效 Y_out 并收到 HBM write response 后，通过这个 done
+    // stream 告诉 controller 可以给常驻 loader/core 发 stop。
     tapa::stream<INDEX_TYPE, 2>                             Writer_Done_Stream("Writer_Done_Stream");
 
     tapa::task()
         // 只发送一次 SpMV command；writer 写完 Y_out 后再关闭常驻 loader/core。
+        // 注意这里和 CuperPcg full-PCG 的 service graph 不同：
+        //   - ptr/vector/matrix loader、core、destroy 仍然是常驻服务，用 stop
+        //     token 退出；
+        //   - checker、sort tree、writer 在单 SpMV demo 中按固定输出包数自然
+        //     返回，不再接收异步 stop。这样可以保证 accumulator 产生的
+        //     padding 输出被 checker 读空，避免 writer 刚写完有效 y 就抢停
+        //     下游而把上游反压住。
         .invoke(Pcg_SingleSpmv_Controller,
-                Iteration_num,
                 Command_Stream,
                 Matrix_Command_Stream,
                 Vector_Destroy_Stop_Stream,
                 Writer_Done_Stream)
+        // 常驻 ptr loader：收到 command 后把 SpElement 边界表写入 PE_Param[0]；
+        // 收到 stop command 后通过 PE_Param 链向 core/destroy 传递退出令牌。
         .invoke(Pcg_SpElement_list_ptr_Loader,
                 Batch_num,
                 Row_num,
@@ -114,50 +179,76 @@ void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 SpElement_list_ptr,
                 Command_Stream[0],
                 PE_Param[0])
+        // 单 SpMV 向量 loader：收到 command 后从 X 读 packed FP32，写入
+        // Vector_X_Stream[0]；收到 stop command 后退出。
         .invoke(Pcg_Single_Vector_Loader,
                 Column_num,
                 X,
                 Command_Stream[1],
                 Vector_X_Stream[0])
+        // 16 个常驻矩阵 loader：每路等待自己的 Matrix_Command_Stream，
+        // 读取对应 HBM channel 的 Matrix_data。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader,
                                              Matrix_len,
                                              Matrix_data,
                                              Matrix_Command_Stream,
                                              Matrix_A_Stream)
+        // Pcg_Core0：service 版 Core，消费 HBM[0] 分片并转发参数/X 到 Pcg_Core1。
         .invoke(Pcg_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
+        // Pcg_Core1：service 版 Core，消费 HBM[1] 分片并转发参数/X 到 Pcg_Core2。
         .invoke(Pcg_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
+        // Pcg_Core2：service 版 Core，消费 HBM[2] 分片并转发参数/X 到 Pcg_Core3。
         .invoke(Pcg_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
+        // Pcg_Core3：service 版 Core，消费 HBM[3] 分片并转发参数/X 到 Pcg_Core4。
         .invoke(Pcg_Core, PE_Param[3], Matrix_A_Stream[3], Vector_X_Stream[3], PE_Param[4], Vector_X_Stream[4], Vector_Y_Param[3], Matrix_Mult_Vector_Stream[3])
+        // Pcg_Core4：service 版 Core，消费 HBM[4] 分片并转发参数/X 到 Pcg_Core5。
         .invoke(Pcg_Core, PE_Param[4], Matrix_A_Stream[4], Vector_X_Stream[4], PE_Param[5], Vector_X_Stream[5], Vector_Y_Param[4], Matrix_Mult_Vector_Stream[4])
+        // Pcg_Core5：service 版 Core，消费 HBM[5] 分片并转发参数/X 到 Pcg_Core6。
         .invoke(Pcg_Core, PE_Param[5], Matrix_A_Stream[5], Vector_X_Stream[5], PE_Param[6], Vector_X_Stream[6], Vector_Y_Param[5], Matrix_Mult_Vector_Stream[5])
+        // Pcg_Core6：service 版 Core，消费 HBM[6] 分片并转发参数/X 到 Pcg_Core7。
         .invoke(Pcg_Core, PE_Param[6], Matrix_A_Stream[6], Vector_X_Stream[6], PE_Param[7], Vector_X_Stream[7], Vector_Y_Param[6], Matrix_Mult_Vector_Stream[6])
+        // Pcg_Core7：service 版 Core，消费 HBM[7] 分片并转发参数/X 到 Pcg_Core8。
         .invoke(Pcg_Core, PE_Param[7], Matrix_A_Stream[7], Vector_X_Stream[7], PE_Param[8], Vector_X_Stream[8], Vector_Y_Param[7], Matrix_Mult_Vector_Stream[7])
+        // Pcg_Core8：service 版 Core，消费 HBM[8] 分片并转发参数/X 到 Pcg_Core9。
         .invoke(Pcg_Core, PE_Param[8], Matrix_A_Stream[8], Vector_X_Stream[8], PE_Param[9], Vector_X_Stream[9], Vector_Y_Param[8], Matrix_Mult_Vector_Stream[8])
+        // Pcg_Core9：service 版 Core，消费 HBM[9] 分片并转发参数/X 到 Pcg_Core10。
         .invoke(Pcg_Core, PE_Param[9], Matrix_A_Stream[9], Vector_X_Stream[9], PE_Param[10], Vector_X_Stream[10], Vector_Y_Param[9], Matrix_Mult_Vector_Stream[9])
+        // Pcg_Core10：service 版 Core，消费 HBM[10] 分片并转发参数/X 到 Pcg_Core11。
         .invoke(Pcg_Core, PE_Param[10], Matrix_A_Stream[10], Vector_X_Stream[10], PE_Param[11], Vector_X_Stream[11], Vector_Y_Param[10], Matrix_Mult_Vector_Stream[10])
+        // Pcg_Core11：service 版 Core，消费 HBM[11] 分片并转发参数/X 到 Pcg_Core12。
         .invoke(Pcg_Core, PE_Param[11], Matrix_A_Stream[11], Vector_X_Stream[11], PE_Param[12], Vector_X_Stream[12], Vector_Y_Param[11], Matrix_Mult_Vector_Stream[11])
+        // Pcg_Core12：service 版 Core，消费 HBM[12] 分片并转发参数/X 到 Pcg_Core13。
         .invoke(Pcg_Core, PE_Param[12], Matrix_A_Stream[12], Vector_X_Stream[12], PE_Param[13], Vector_X_Stream[13], Vector_Y_Param[12], Matrix_Mult_Vector_Stream[12])
+        // Pcg_Core13：service 版 Core，消费 HBM[13] 分片并转发参数/X 到 Pcg_Core14。
         .invoke(Pcg_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
+        // Pcg_Core14：service 版 Core，消费 HBM[14] 分片并转发参数/X 到 Pcg_Core15。
         .invoke(Pcg_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
+        // Pcg_Core15：service 版 Core，消费 HBM[15] 分片，并把参数/X 链尾送到 destroy。
         .invoke(Pcg_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+        // 消费 PE_Param[16] 链尾；stop token 也通过这里完成参数链退出。
         .invoke(Pcg_Destroy_int, PE_Param[HBM_CHANNEL_NUM])
+        // 消费 Vector_X_Stream[16] 链尾；单独监听 Vector_Destroy_Stop_Stream 退出。
         .invoke(Pcg_Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
+        // 16 路 service accumulator：累加 Pcg_Core 输出的局部乘积。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Accumulator,
                                              Vector_Y_Param,
                                              Matrix_Mult_Vector_Stream,
                                              Vector_Y_Stream)
+        // 单 SpMV 专用有限 checker：消费完整 num_pe_output，包括最后一包
+        // 对齐 padding；只把 Row_num 对应的有效 float_v2 继续送给 sort tree。
         .invoke<tapa::join, 8>(Pcg_Single_Vector_Checker,
-                               Iteration_num,
                                Row_num,
                                Vector_Y_Stream,
                                Vector_Y_Stream_Aftck)
+        // 单 SpMV 专用有限 sort tree：等待 8 路 float_v2 齐备后拼成
+        // float_v16，写够 Row_num/16 个有效输出包后返回。
         .invoke(Pcg_Single_Mult_Sort_Tree,
-                Iteration_num,
                 Row_num,
                 Vector_Y_Stream_Aftck,
                 Pcg_Spmv_Stream)
+        // writer 是单 SpMV demo 的完成边界：它收到全部有效 y 包并完成 HBM
+        // write response 后，通知 controller 发送 stop 给常驻服务任务。
         .invoke(Pcg_Single_Vector_Writer,
-                Iteration_num,
                 Row_num,
                 Pcg_Spmv_Stream,
                 Y_out,
@@ -271,8 +362,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     // 16 路矩阵数据流：每一路对应一个 HBM channel。ap_uint<512>
     // 是一个 512-bit HBM beat，内部打包 8 个 64-bit SpElement。
     tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 64>        Matrix_A_Stream("Matrix_A_Stream");
-    // 16 路 accumulator 参数流：每个 core 给对应 accumulator 传 Row_num、
-    // Iteration_num 以及每个 batch 的矩阵边界。
+    // 16 路 accumulator 参数流：每个 core 给对应 accumulator 传 Row_num
+    // 以及每个 batch 的矩阵边界。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>          Vector_Y_Param("Vector_Y_Param");
     // 16 路局部乘积流：每个 core 输出自己 HBM 分片产生的 val * x[col]
     // 及对应的 Cuper 内部 row 编码。
@@ -282,6 +373,7 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
     // checker 后的 8 路输出流：过滤 padding 后交给 Mult_Sort_Tree，
     // 最终重新拼成 float_v16 送回 Pcg_Controller。
+    // FIFO_DEPTH 来自 Cuper.h，当前实际深度为 2；和 Cuper/CuperPcgSpmv 相同。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
     // 直接把 Cuper 的 float_v16 SpMV 结果接回 controller。
     // 之前额外的 packetizer task 只包装一个未使用的 last 位；板上调试时

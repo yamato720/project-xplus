@@ -11,10 +11,10 @@
 struct CuperSpmvCommand {
     // 传给 Cuper SpMV 服务流水的一次运行命令。
     // 在 CuperPcg 中每次 PCG 需要 A*x0 或 A*p 时，controller 都发送一次。
-    // iteration_num 目前通常为 1：表示本次命令只跑一轮 SpMV。
+    // 一条 command 固定只触发一次 SpMV；PCG 的多轮迭代由 controller
+    // 多次发送 command 表达，不再让 service 内部重复跑同一个 SpMV。
     // stop 非 0 表示退出常驻服务任务；各 loader/core/checker 收到后要有限返回。
     // vector_source 决定向量 loader 本轮从 X_spmv 还是 P_spmv 读 packed 输入。
-    INDEX_TYPE iteration_num;
     INDEX_TYPE stop;
     INDEX_TYPE vector_source;
 };

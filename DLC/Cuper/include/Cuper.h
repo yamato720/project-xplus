@@ -28,6 +28,8 @@ constexpr INDEX_TYPE BATCH_SIZE             = 8192 / Slice_SIZE;
 constexpr INDEX_TYPE WINDOWS                = 10;
 constexpr INDEX_TYPE X_PARTITION_FACTOR     = 8;
 constexpr INDEX_TYPE URAM_DEPTH             = (48 / HBM_CHANNEL_NUM) * 4096 / 2;
+// TAPA stream 模板参数里的 FIFO 深度，当前值为 2。
+// Cuper(...)、CuperPcgSpmv(...) 和 CuperPcg(...) 引用的是同一个常量。
 constexpr INDEX_TYPE FIFO_DEPTH             = 2;
 constexpr INDEX_TYPE X_BRAM_DEPTH           = 4;
 constexpr INDEX_TYPE X_TABLE_DEPTH          = 200;

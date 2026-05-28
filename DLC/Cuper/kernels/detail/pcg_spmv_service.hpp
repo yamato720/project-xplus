@@ -26,7 +26,7 @@
 // 原始 Cuper 顶层只启动一次，所以 loader 读固定参数后顺序跑完。
 // CuperPcg 里 SpMV 会被 PCG controller 多次触发，因此 loader 作为
 // 常驻服务任务，收到一条 CuperSpmvCommand 就向 PE_Param 重新广播
-// Batch/Row/Iteration/Column 和每个 batch 的 SpElement 边界。
+// Batch/Row/Column 和每个 batch 的 SpElement 边界。
 void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
                                    const INDEX_TYPE Row_num,
                                    const INDEX_TYPE Column_num,
@@ -42,31 +42,22 @@ void Pcg_SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
             PE_Param.write(kPcgStopToken);
             return;
         }
-        const INDEX_TYPE iteration_time =
-            (command.iteration_num == 0) ? 1 : command.iteration_num;
-
         PE_Param.write(Batch_num);
         PE_Param.write(Row_num);
-        PE_Param.write(command.iteration_num);
         PE_Param.write(Column_num);
 
         const INDEX_TYPE batch_num_plus_1 = Batch_num + 1;
-    iter:
-        for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-        read_ptr:
-            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_plus_1;) {
+    read_ptr:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_plus_1;) {
 #pragma HLS loop_tripcount min=1 max=800
 #pragma HLS pipeline II=1
-                // Async_Read 用 request/response 两个计数器隐藏 HBM 读延迟；
-                // 输出顺序仍保持 SpElement_list_ptr[0..Batch_num]。
-                Async_Read(SpElement_list_ptr,
-                           PE_Param,
-                           batch_num_plus_1,
-                           i_request,
-                           i_response);
-            }
+            // Async_Read 用 request/response 两个计数器隐藏 HBM 读延迟；
+            // 输出顺序仍保持 SpElement_list_ptr[0..Batch_num]。
+            Async_Read(SpElement_list_ptr,
+                       PE_Param,
+                       batch_num_plus_1,
+                       i_request,
+                       i_response);
         }
     }
 }
@@ -93,32 +84,25 @@ void Pcg_Vector_Loader(const INDEX_TYPE Column_num,
         if (command.stop != 0) {
             return;
         }
-        const INDEX_TYPE iteration_time =
-            (command.iteration_num == 0) ? 1 : command.iteration_num;
 
-    iter:
-        for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-        loader_x:
-            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
+    loader_x:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
-                // 初始化 A*x0 读 X_spmv；迭代 A*p 读 P_spmv。这样 SpMV 输入
-                // 不再经过 controller 的逐元素 double->float_v16 打包路径。
-                if (command.vector_source == kPcgVectorSourceP) {
-                    Async_Read(P_spmv,
-                               Vector_X_Stream,
-                               batch_num_x,
-                               i_request,
-                               i_response);
-                } else {
-                    Async_Read(X_spmv,
-                               Vector_X_Stream,
-                               batch_num_x,
-                               i_request,
-                               i_response);
-                }
+            // 初始化 A*x0 读 X_spmv；迭代 A*p 读 P_spmv。这样 SpMV 输入
+            // 不再经过 controller 的逐元素 double->float_v16 打包路径。
+            if (command.vector_source == kPcgVectorSourceP) {
+                Async_Read(P_spmv,
+                           Vector_X_Stream,
+                           batch_num_x,
+                           i_request,
+                           i_response);
+            } else {
+                Async_Read(X_spmv,
+                           Vector_X_Stream,
+                           batch_num_x,
+                           i_request,
+                           i_response);
             }
         }
     }
@@ -142,23 +126,16 @@ void Pcg_Single_Vector_Loader(const INDEX_TYPE Column_num,
         if (command.stop != 0) {
             return;
         }
-        const INDEX_TYPE iteration_time =
-            (command.iteration_num == 0) ? 1 : command.iteration_num;
 
-    iter:
-        for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-        loader_x:
-            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
+    loader_x:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_x;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
-                Async_Read(X,
-                           Vector_X_Stream,
-                           batch_num_x,
-                           i_request,
-                           i_response);
-            }
+            Async_Read(X,
+                       Vector_X_Stream,
+                       batch_num_x,
+                       i_request,
+                       i_response);
         }
     }
 }
@@ -178,26 +155,19 @@ void Pcg_Matrix_Loader(const INDEX_TYPE Matrix_len,
         if (command.stop != 0) {
             return;
         }
-        const INDEX_TYPE iteration_time =
-            (command.iteration_num == 0) ? 1 : command.iteration_num;
 
-    iter:
-        for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-        load_a:
-            for (INDEX_TYPE i_request = 0, i_response = 0; i_response < Matrix_len;) {
+    load_a:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < Matrix_len;) {
 #pragma HLS loop_tripcount min=1 max=10000
 #pragma HLS pipeline II=1
-                // 每个 Matrix_Loader 只读自己的 Matrix_data[channel]。
-                // 16 个实例并行读 16 个 HBM bank，Matrix_len 是每个 channel
-                // 的 512-bit word 数。
-                Async_Read(Matrix_data,
-                           Matrix_A_Stream,
-                           Matrix_len,
-                           i_request,
-                           i_response);
-            }
+            // 每个 Matrix_Loader 只读自己的 Matrix_data[channel]。
+            // 16 个实例并行读 16 个 HBM bank，Matrix_len 是每个 channel
+            // 的 512-bit word 数。
+            Async_Read(Matrix_data,
+                       Matrix_A_Stream,
+                       Matrix_len,
+                       i_request,
+                       i_response);
         }
     }
 }
@@ -226,118 +196,108 @@ void Pcg_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
             return;
         }
         const INDEX_TYPE Row_num = PE_Param_in.read();
-        const INDEX_TYPE Iteration_num = PE_Param_in.read();
         const INDEX_TYPE Column_num = PE_Param_in.read();
-
-        const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
 
         PE_Param_out.write(Batch_num);
         PE_Param_out.write(Row_num);
-        PE_Param_out.write(Iteration_num);
         PE_Param_out.write(Column_num);
 
         Vector_Y_Param.write(Batch_num);
         Vector_Y_Param.write(Row_num);
-        Vector_Y_Param.write(Iteration_num);
 
-    iter:
-        for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-            VALUE_TYPE local_X[X_BRAM_DEPTH][Slice_WIDTH];
+        VALUE_TYPE local_X[X_BRAM_DEPTH][Slice_WIDTH];
 
 #pragma HLS bind_storage variable=local_X latency=2
 #pragma HLS array_partition variable=local_X complete dim=1
 #pragma HLS array_partition variable=local_X cyclic factor=X_PARTITION_FACTOR dim=2
 
-            INDEX_TYPE start_32 = PE_Param_in.read();
-            PE_Param_out.write(start_32);
-            Vector_Y_Param.write(start_32);
+        INDEX_TYPE start_32 = PE_Param_in.read();
+        PE_Param_out.write(start_32);
+        Vector_Y_Param.write(start_32);
 
-        main:
-            for (INDEX_TYPE i = 0; i < Batch_num; ++i) {
+    main:
+        for (INDEX_TYPE i = 0; i < Batch_num; ++i) {
 #pragma HLS loop_tripcount min=1 max=49
-                // 每个 batch 对应一个 slice window。core 先把本 batch 需要的
-                // x[col] 范围载入本地 BRAM，再解码本 channel 的矩阵元素。
-                const INDEX_TYPE total_vector_packets = (Column_num + 15) >> 4;
-                const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
-                const INDEX_TYPE end_idx = std::min(start_idx + Slice_WIDTH_DIV_16,
-                                               total_vector_packets);
+            // 每个 batch 对应一个 slice window。core 先把本 batch 需要的
+            // x[col] 范围载入本地 BRAM，再解码本 channel 的矩阵元素。
+            const INDEX_TYPE total_vector_packets = (Column_num + 15) >> 4;
+            const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
+            const INDEX_TYPE end_idx = std::min(start_idx + Slice_WIDTH_DIV_16,
+                                           total_vector_packets);
 
-            load_vector:
-                for (INDEX_TYPE j = start_idx; j < end_idx;) {
+        load_vector:
+            for (INDEX_TYPE j = start_idx; j < end_idx;) {
 #pragma HLS loop_tripcount min=1 max=512
 #pragma HLS pipeline II=1
-                    if (!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
-                        float_v16 x;
-                        Vector_X_Stream_in.try_read(x);
-                        // 向量包在 core 链上逐级转发；每个 core 都看到同一份
-                        // packed X/P，但只消费自己矩阵分片需要的列值。
-                        Vector_X_Stream_out.try_write(x);
+                if (!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
+                    float_v16 x;
+                    Vector_X_Stream_in.try_read(x);
+                    // 向量包在 core 链上逐级转发；每个 core 都看到同一份
+                    // packed X/P，但只消费自己矩阵分片需要的列值。
+                    Vector_X_Stream_out.try_write(x);
 
-                        for (INDEX_TYPE k = 0; k < 16; ++k) {
-                            for (INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
-                                local_X[l][((j - start_idx) << 4) + k] = x[k];
-                            }
+                    for (INDEX_TYPE k = 0; k < 16; ++k) {
+                        for (INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
+                            local_X[l][((j - start_idx) << 4) + k] = x[k];
                         }
-                        ++j;
                     }
+                    ++j;
                 }
+            }
 
-                const INDEX_TYPE end_32 = PE_Param_in.read();
-                PE_Param_out.write(end_32);
-                Vector_Y_Param.write(end_32);
+            const INDEX_TYPE end_32 = PE_Param_in.read();
+            PE_Param_out.write(end_32);
+            Vector_Y_Param.write(end_32);
 
-            decode:
-                for (INDEX_TYPE j = start_32; j < end_32;) {
+        decode:
+            for (INDEX_TYPE j = start_32; j < end_32;) {
 #pragma HLS loop_tripcount min=1 max=200
 #pragma HLS pipeline II=1
-                    if (!Matrix_A_Stream.empty()) {
-                        ap_uint<512> spelement;
-                        Matrix_A_Stream.try_read(spelement);
-                        Matrix_Mult_X matmultx;
+                if (!Matrix_A_Stream.empty()) {
+                    ap_uint<512> spelement;
+                    Matrix_A_Stream.try_read(spelement);
+                    Matrix_Mult_X matmultx;
 
 #ifdef FLEX_REUSE
-                        ap_uint<14> col_old = 0x3FFF;
-                        VALUE_TYPE val_old = 0.0;
+                    ap_uint<14> col_old = 0x3FFF;
+                    VALUE_TYPE val_old = 0.0;
 #endif
-                        for (INDEX_TYPE p = 0; p < 8; ++p) {
-                            // 一个 512-bit beat 打包 8 个 SpElement，每个元素：
-                            //   col[13:0], row[17:0], value_bits[31:0]
-                            // row 是 Cuper 内部重排编码，不是原始全局行号。
-                            ap_uint<64> a = spelement(63 + p * 64, p * 64);
-                            ap_uint<14> a_col = a(63, 50);
-                            ap_uint<18> a_row = a(49, 32);
-                            ap_uint<32> a_val = a(31, 0);
+                    for (INDEX_TYPE p = 0; p < 8; ++p) {
+                        // 一个 512-bit beat 打包 8 个 SpElement，每个元素：
+                        //   col[13:0], row[17:0], value_bits[31:0]
+                        // row 是 Cuper 内部重排编码，不是原始全局行号。
+                        ap_uint<64> a = spelement(63 + p * 64, p * 64);
+                        ap_uint<14> a_col = a(63, 50);
+                        ap_uint<18> a_row = a(49, 32);
+                        ap_uint<32> a_val = a(31, 0);
 
-                            matmultx.row[p] = a_row;
-                            if (a_row[17] == 0) {
+                        matmultx.row[p] = a_row;
+                        if (a_row[17] == 0) {
 #ifdef FLEX_REUSE
-                                VALUE_TYPE val;
-                                // FLEX_REUSE 是原 Cuper 的小优化：连续元素可能复用
-                                // 上一个 value，减少 bit_cast/寄存器切换。
-                                if ((col_old & a_col) == 0x3FFF) {
-                                    val = val_old;
-                                } else {
-                                    val = tapa::bit_cast<VALUE_TYPE>(a_val);
-                                }
-#else
-                                VALUE_TYPE val = tapa::bit_cast<VALUE_TYPE>(a_val);
-#endif
-                                matmultx.val[p] =
-                                    val * local_X[p / (8 / X_BRAM_DEPTH)][a_col];
-#ifdef FLEX_REUSE
-                                col_old = a_col;
-                                val_old = val;
-#endif
+                            VALUE_TYPE val;
+                            // FLEX_REUSE 是原 Cuper 的小优化：连续元素可能复用
+                            // 上一个 value，减少 bit_cast/寄存器切换。
+                            if ((col_old & a_col) == 0x3FFF) {
+                                val = val_old;
+                            } else {
+                                val = tapa::bit_cast<VALUE_TYPE>(a_val);
                             }
+#else
+                            VALUE_TYPE val = tapa::bit_cast<VALUE_TYPE>(a_val);
+#endif
+                            matmultx.val[p] =
+                                val * local_X[p / (8 / X_BRAM_DEPTH)][a_col];
+#ifdef FLEX_REUSE
+                            col_old = a_col;
+                            val_old = val;
+#endif
                         }
-                        Matrix_Mult_Vector_Stream.write(matmultx);
-                        ++j;
                     }
+                    Matrix_Mult_Vector_Stream.write(matmultx);
+                    ++j;
                 }
-                start_32 = end_32;
             }
+            start_32 = end_32;
         }
     }
 }
@@ -373,95 +333,88 @@ void Pcg_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
             return;
         }
         const INDEX_TYPE Row_num = Vector_Y_Param.read();
-        const INDEX_TYPE Iteration_num = Vector_Y_Param.read();
-        const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
         const INDEX_TYPE num_v_init =
             (Row_num + HBM_CHANNEL_NUM_MULT_16 - 1) / HBM_CHANNEL_NUM_MULT_16;
         const INDEX_TYPE num_v_out =
             (Row_num + HBM_CHANNEL_NUM_MULT_2 - 1) / HBM_CHANNEL_NUM_MULT_2;
 
-    iter:
-        for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=1
-        local_part_Y:
-            for (int i = 0; i < num_v_init; ++i) {
+    local_part_Y:
+        for (int i = 0; i < num_v_init; ++i) {
 #pragma HLS loop_tripcount min=1 max=800
 #pragma HLS pipeline II=1
-                // 每次 SpMV 前清空本 accumulator 的局部部分和。num_v_init
-                // 按 16 HBM * 16 float 对齐，而不是简单 Row_num/16。
-                for (int p = 0; p < 8; ++p) {
-                    local_part_Y_ping[p][i] = 0;
+            // 每次 SpMV 前清空本 accumulator 的局部部分和。num_v_init
+            // 按 16 HBM * 16 float 对齐，而不是简单 Row_num/16。
+            for (int p = 0; p < 8; ++p) {
+                local_part_Y_ping[p][i] = 0;
 #ifdef PINGPONG
-                    local_part_Y_pong[p][i] = 0;
+                local_part_Y_pong[p][i] = 0;
 #endif
-                }
             }
+        }
 
-            INDEX_TYPE start_32 = Vector_Y_Param.read();
+        INDEX_TYPE start_32 = Vector_Y_Param.read();
 
-        main:
-            for (int i = 0; i < Batch_num; ++i) {
+    main:
+        for (int i = 0; i < Batch_num; ++i) {
 #pragma HLS loop_tripcount min=1 max=49
-                const INDEX_TYPE end_32 = Vector_Y_Param.read();
+            const INDEX_TYPE end_32 = Vector_Y_Param.read();
 
-            accumulate:
-                for (INDEX_TYPE j = start_32; j < end_32;) {
+        accumulate:
+            for (INDEX_TYPE j = start_32; j < end_32;) {
 #pragma HLS loop_tripcount min=1 max=200
 #pragma HLS pipeline II=1
 #pragma HLS dependence true variable=local_part_Y_ping distance=WINDOWS
 #ifdef PINGPONG
 #pragma HLS dependence true variable=local_part_Y_pong distance=WINDOWS
 #endif
-                    if (!Matrix_Mult_Vector_Stream.empty()) {
-                        Matrix_Mult_X matmultx;
-                        Matrix_Mult_Vector_Stream.try_read(matmultx);
+                if (!Matrix_Mult_Vector_Stream.empty()) {
+                    Matrix_Mult_X matmultx;
+                    Matrix_Mult_Vector_Stream.try_read(matmultx);
 
-                        for (int p = 0; p < 8; ++p) {
-                            ap_uint<18> a_row = matmultx.row[p];
+                    for (int p = 0; p < 8; ++p) {
+                        ap_uint<18> a_row = matmultx.row[p];
 #ifdef PINGPONG
-                            // a_row[17] 为 1 是 padding/空元素；有效元素按
-                            // a_row[0] 分流到 ping/pong，地址使用 a_row(17,1)。
-                            // 所以这里的 18-bit row 不是 0..Row_num-1 的全局行号。
-                            if (a_row[17] == 0 && a_row[0] == 0)
-                                Adder_p(a_row(17, 1), matmultx.val[p], local_part_Y_ping[p]);
-                            if (a_row[17] == 0 && a_row[0] == 1)
-                                Adder_p(a_row(17, 1), matmultx.val[p], local_part_Y_pong[p]);
+                        // a_row[17] 为 1 是 padding/空元素；有效元素按
+                        // a_row[0] 分流到 ping/pong，地址使用 a_row(17,1)。
+                        // 所以这里的 18-bit row 不是 0..Row_num-1 的全局行号。
+                        if (a_row[17] == 0 && a_row[0] == 0)
+                            Adder_p(a_row(17, 1), matmultx.val[p], local_part_Y_ping[p]);
+                        if (a_row[17] == 0 && a_row[0] == 1)
+                            Adder_p(a_row(17, 1), matmultx.val[p], local_part_Y_pong[p]);
 #else
-                            if (a_row[17] == 0)
-                                Adder(a_row, matmultx.val[p], local_part_Y_ping[p]);
+                        if (a_row[17] == 0)
+                            Adder(a_row, matmultx.val[p], local_part_Y_ping[p]);
 #endif
-                        }
-                        ++j;
                     }
+                    ++j;
                 }
-                start_32 = end_32;
             }
+            start_32 = end_32;
+        }
 
-        writer:
-            for (INDEX_TYPE i = 0, c_idx = 0; i < num_v_out; ++i) {
+    writer:
+        for (INDEX_TYPE i = 0, c_idx = 0; i < num_v_out; ++i) {
 #pragma HLS loop_tripcount min=1 max=1800
 #pragma HLS pipeline II=1
-                float_v2 out_v;
+            float_v2 out_v;
 #ifdef PINGPONG
-                ap_uint<32> u_32_0 = local_part_Y_ping[c_idx][i >> 3];
-                ap_uint<32> u_32_1 = local_part_Y_pong[c_idx][i >> 3];
-                out_v[0] = tapa::bit_cast<VALUE_TYPE>(u_32_0);
-                out_v[1] = tapa::bit_cast<VALUE_TYPE>(u_32_1);
+            ap_uint<32> u_32_0 = local_part_Y_ping[c_idx][i >> 3];
+            ap_uint<32> u_32_1 = local_part_Y_pong[c_idx][i >> 3];
+            out_v[0] = tapa::bit_cast<VALUE_TYPE>(u_32_0);
+            out_v[1] = tapa::bit_cast<VALUE_TYPE>(u_32_1);
 #else
-                ap_uint<64> u_64 = local_part_Y_ping[c_idx][i >> 3];
-                for (INDEX_TYPE d = 0; d < 2; ++d) {
-                    ap_uint<32> u_32_d = u_64(31 + 32 * d, 32 * d);
-                    out_v[d] = tapa::bit_cast<VALUE_TYPE>(u_32_d);
-                }
+            ap_uint<64> u_64 = local_part_Y_ping[c_idx][i >> 3];
+            for (INDEX_TYPE d = 0; d < 2; ++d) {
+                ap_uint<32> u_32_d = u_64(31 + 32 * d, 32 * d);
+                out_v[d] = tapa::bit_cast<VALUE_TYPE>(u_32_d);
+            }
 #endif
-                Vector_Y_Stream.write(out_v);
-                // c_idx 在 8 个 lane/PE accumulator bank 间轮转，配合后面的
-                // checker/sort tree 重新组装成 float_v16。
-                ++c_idx;
-                if (c_idx == 8) {
-                    c_idx = 0;
-                }
+            Vector_Y_Stream.write(out_v);
+            // c_idx 在 8 个 lane/PE accumulator bank 间轮转，配合后面的
+            // checker/sort tree 重新组装成 float_v16。
+            ++c_idx;
+            if (c_idx == 8) {
+                c_idx = 0;
             }
         }
     }
@@ -561,24 +514,25 @@ void Pcg_Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
 // 写完有效 y packet 后马上发 stop，checker 可能还没消费 Cuper 对齐产生的
 // padding 输出，导致上游 accumulator/core 无法完整 drain。这里按一次 SpMV 的
 // 固定输出数量自然结束，语义和原始 Cuper 的 Vector_Checker 更接近。
-void Pcg_Single_Vector_Checker(const INDEX_TYPE Iteration_num,
-                               const INDEX_TYPE Row_num,
+void Pcg_Single_Vector_Checker(const INDEX_TYPE Row_num,
                                tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
                                tapa::ostream<float_v2> &Vector_Y_Stream_Aftck) {
-    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_pe_output =
         ((Row_num + HBM_CHANNEL_NUM_MULT_2 - 1) / HBM_CHANNEL_NUM_MULT_2) *
         HBM_CHANNEL_NUM_DIV_8;
     const INDEX_TYPE num_out = (Row_num + 15) >> 4;
-    const INDEX_TYPE total_pe_output = num_pe_output * iteration_time;
 
 out:
-    for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < total_pe_output;) {
+    for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < num_pe_output;) {
 #pragma HLS loop_tripcount min=1 max=1800
 #pragma HLS pipeline II=1
         if (!Vector_Y_Stream[c_idx].empty() && !Vector_Y_Stream_Aftck.full()) {
             float_v2 tmp;
             Vector_Y_Stream[c_idx].try_read(tmp);
+            // num_pe_output 是 Cuper accumulator 为每轮 SpMV 产生的完整
+            // 对齐输出数；num_out 是真实 Row_num 对应的有效输出数。
+            // 即使 o_idx >= num_out，也必须继续从 Vector_Y_Stream 读掉
+            // padding，否则 accumulator 的写端会被堵住。
             if (o_idx < num_out) {
                 Vector_Y_Stream_Aftck.try_write(tmp);
             }
@@ -599,18 +553,17 @@ out:
 //
 // 只合成 Row_num 对应的有效 float_v16 包，全部写出后有限返回；这样 kernel
 // completion 不再依赖异步 stop 让 sort tree 退出。
-void Pcg_Single_Mult_Sort_Tree(const INDEX_TYPE Iteration_num,
-                               const INDEX_TYPE Row_num,
+void Pcg_Single_Mult_Sort_Tree(const INDEX_TYPE Row_num,
                                tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
                                tapa::ostream<float_v16> &Vector_Y_Stream_Ans) {
-    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_ite_y = (Row_num + 15) >> 4;
-    const INDEX_TYPE total_y = num_ite_y * iteration_time;
 
 pack_y:
-    for (INDEX_TYPE packet = 0; packet < total_y;) {
+    for (INDEX_TYPE packet = 0; packet < num_ite_y;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
+        // checker 已经过滤掉 padding，因此这里每次必须同时等齐 8 路
+        // float_v2，才能拼出一个连续的 float_v16 输出包。
         bool all_ready = true;
         for (int i = 0; i < 8; ++i) {
             if (Vector_Y_Stream_Aftck[i].empty()) {
@@ -624,6 +577,8 @@ pack_y:
             for (int i = 0; i < 8; ++i) {
                 float_v2 val;
                 Vector_Y_Stream_Aftck[i].try_read(val);
+                // 第 i 路 float_v2 对应 float_v16 的两个相邻 lane：
+                // i=0 -> lane 0/1, i=1 -> lane 2/3, ... i=7 -> lane 14/15。
                 tmpv16[(i << 1)]     = val[0];
                 tmpv16[(i << 1) + 1] = val[1];
             }
@@ -638,13 +593,11 @@ pack_y:
 // 它只发送一次普通 SpMV command，等待 writer 把所有 y packet 写回 HBM 后，
 // 再关闭 loader/core 这类常驻服务任务。单 SpMV 版 checker/sort tree 按固定输出
 // 数量自然结束，不再由 controller 异步 stop，避免抢停 padding drain。
-void Pcg_SingleSpmv_Controller(const INDEX_TYPE Iteration_num,
-                               tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+void Pcg_SingleSpmv_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                                tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
                                tapa::ostream<INDEX_TYPE> &Vector_Destroy_Stop_out,
                                tapa::istream<INDEX_TYPE> &Writer_Done_in) {
     CuperSpmvCommand command;
-    command.iteration_num = Iteration_num;
     command.stop = 0;
     command.vector_source = kPcgVectorSourceX;
 
@@ -659,10 +612,12 @@ send_matrix_command:
         Matrix_Command_out[index].write(command);
     }
 
+    // writer 收到并写回应有的全部有效 y 包后才会给 done。这个 done 是
+    // 单 SpMV demo 的 drain 屏障：它保证 checker/sort/writer 的有效数据路径
+    // 已经完成，然后 controller 才能给仍然常驻的 loader/core 发送 stop。
     const INDEX_TYPE done = Writer_Done_in.read();
     (void)done;
 
-    command.iteration_num = 0;
     command.stop = 1;
 
 send_stop_command:
@@ -675,42 +630,41 @@ send_stop_matrix_command:
 #pragma HLS unroll
         Matrix_Command_out[index].write(command);
     }
+    // Vector_X_Stream 链尾 destroy 不接收 CuperSpmvCommand，所以单独给它一个
+    // stop token。PE_Param 链尾 destroy 则通过 ptr loader -> core 链转发的
+    // kPcgStopToken 退出。
     Vector_Destroy_Stop_out.write(kPcgStopToken);
 }
 
 // 单 SpMV demo 的 HBM writer。
 //
 // 输出 packet 数和 standalone Cuper 的 Vector_Writer 一致：Row_num 个 FP32
-// 结果按 float_v16 写回 Y_out。完成全部 Iteration_num 轮后给 controller 一个
+// 结果按 float_v16 写回 Y_out。完成这一条 SpMV command 后给 controller 一个
 // done token，controller 才发送 stop，避免 checker/sort 在结果还没排空时退出。
-void Pcg_Single_Vector_Writer(const INDEX_TYPE Iteration_num,
-                              const INDEX_TYPE Row_num,
+void Pcg_Single_Vector_Writer(const INDEX_TYPE Row_num,
                               tapa::istream<float_v16> &Vector_Y_Stream_Ans,
                               tapa::async_mmap<float_v16> &Y_out,
                               tapa::ostream<INDEX_TYPE> &Writer_Done_out) {
-    const INDEX_TYPE iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_ite_y = (Row_num + 15) >> 4;
 
-iter:
-    for (INDEX_TYPE iter = 0; iter < iteration_time; ++iter) {
-#pragma HLS loop_flatten off
-#pragma HLS loop_tripcount min=1 max=16
-    write_y:
-        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < num_ite_y;) {
+write_y:
+    for (INDEX_TYPE i_request = 0, i_response = 0; i_response < num_ite_y;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
-            if ((i_request < num_ite_y) && !Vector_Y_Stream_Ans.empty() &&
-                !Y_out.write_addr.full() && !Y_out.write_data.full()) {
-                Y_out.write_addr.try_write(i_request);
-                float_v16 tmpv16;
-                Vector_Y_Stream_Ans.try_read(tmpv16);
-                Y_out.write_data.try_write(tmpv16);
-                ++i_request;
-            }
-            uint8_t n_resp;
-            if (Y_out.write_resp.try_read(n_resp)) {
-                i_response += static_cast<INDEX_TYPE>(n_resp) + 1;
-            }
+        if ((i_request < num_ite_y) && !Vector_Y_Stream_Ans.empty() &&
+            !Y_out.write_addr.full() && !Y_out.write_data.full()) {
+            Y_out.write_addr.try_write(i_request);
+            float_v16 tmpv16;
+            Vector_Y_Stream_Ans.try_read(tmpv16);
+            Y_out.write_data.try_write(tmpv16);
+            ++i_request;
+        }
+        uint8_t n_resp;
+        if (Y_out.write_resp.try_read(n_resp)) {
+            // TAPA async mmap 的 write_resp 可能一次确认多个 beat；
+            // n_resp 的语义是“额外完成数”，所以实际完成数要 +1。
+            // writer 等 response 全部回来后才向 controller 发 done。
+            i_response += static_cast<INDEX_TYPE>(n_resp) + 1;
         }
     }
 

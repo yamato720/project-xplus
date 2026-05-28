@@ -63,7 +63,6 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     unsigned long long update_z_ticks = 0;
     unsigned long long update_p_ticks = 0;
     CuperSpmvCommand command;
-    command.iteration_num = 1;
     command.stop = 0;
     command.vector_source = kPcgVectorSourceX;
     // controller_total 覆盖从参数检查到 stop 广播、metrics 写回前的主体时间。
@@ -314,7 +313,6 @@ pcg_loop:
     }
 
     CuperSpmvCommand stop_command;
-    stop_command.iteration_num = 0;
     stop_command.stop = 1;
     stop_command.vector_source = kPcgVectorSourceX;
 send_stop_command:

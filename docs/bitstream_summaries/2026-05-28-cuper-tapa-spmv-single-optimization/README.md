@@ -5,8 +5,9 @@
 - 主线：`cuper-tapa-spmv`
 - 状态：PCG service SpMV 抽出版第一版 demo bitstream 已生成并放入
   `395bitstream/`；2026-05-28 demo-only 上板 smoke 在 `thermal2_n16`
-  两次 180s timeout，未晋级。当前正在构建 finite-exit 修复版 demo，
-  结果未上板确认前不更新正式 `source.diff`
+  两次 180s timeout，未晋级。之后已做 finite-exit 修复尝试；本轮进一步
+  清理 PCG service 内部 `Iteration_num` 重复语义，软件仿真已通过，尚未
+  启动新的硬件构建，正式 `source.diff` 不更新
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
 - 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
@@ -108,6 +109,12 @@ make run-cuper-tapa-pcg-spmv TARGET=hw \
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/failure_analysis.md
 ```
 
+本版代码阅读指南见：
+
+```text
+docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/code_reading_guide.md
+```
+
 ## 2026-05-28 补充：finite-exit 修复尝试
 
 针对上一版 `Finish` timeout，当前源码只改 `CuperPcgSpmv` 单 SpMV demo 路径：
@@ -150,6 +157,44 @@ xclbin: cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
 该修复版是否真正解决板上 `Finish` timeout，必须等新 xclbin 生成后用
 demo-only `thermal2_n16` smoke 验证。验证前仍不建议晋级，也不更新正式
 `source.diff`。
+
+## 2026-05-28 补充：去掉 service 内部 Iteration_num
+
+本轮按用户要求把 `CuperPcgSpmv` 单 SpMV 抽出版和 full `CuperPcg`
+共享的 PCG service SpMV 协议统一成：
+
+```text
+一条 CuperSpmvCommand == 一次 SpMV
+```
+
+具体变化：
+
+- `CuperSpmvCommand` 删除 `iteration_num` 字段；
+- `Pcg_Controller` 在 init 和每轮 PCG 迭代各发送一条 command，不再让 SpMV
+  service 内部重复跑同一个命令；
+- `Pcg_SpElement_list_ptr_Loader`、`Pcg_Vector_Loader`、`Pcg_Matrix_Loader`、
+  `Pcg_Core`、`Pcg_Accumulator` 以及单 SpMV 尾端 checker/sort/writer 都按
+  一条 command 处理一次 SpMV；
+- `CuperPcgSpmv(...)` 顶层 ABI 仍保留 `Iteration_num` 参数以兼容 host/脚本，
+  但内部显式忽略该参数；
+- standalone `Cuper(...)` 的 `Iteration_num` 没改，它仍是原生 single SpMV
+  benchmark 的重复次数。
+
+本轮只做软件验证，没有启动 `TARGET=hw` 构建。已补齐 HTML 报告使用的
+`thermal2` 系列数据，并挑选 `thermal2_n16`、`thermal2_n1024`、
+`thermal2_n4096` 做两条路径验证：
+
+| 路径 | 数据集 | 结果 | 关键误差 |
+| --- | --- | --- | --- |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n16` | `status=ok` | `max_abs_diff=3.7558e-07` |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n1024` | `status=ok` | `max_abs_diff=1.3506e-06` |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n4096` | `status=ok` | `max_abs_diff=2.3366e-06` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n16` | `converged` | `max_abs_diff=1.0868e-08` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n1024` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=9.2782e-10` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n4096` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=4.0935e-09` |
+
+`n1024` 和 `n4096` 的 full-PCG 测试使用 `MAX_ITERS=1`，所以 `status=max_iter`
+是预期结果；这里看的是 FPGA-PCG 软件模型和 CPU 同口径 1 次迭代是否一致。
 
 ## 当前基线
 
