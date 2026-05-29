@@ -71,18 +71,19 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
    不能立刻离开：至少守到 XO 生成并完成必要 patch，且 Vitis link 已进入
    `vpl` / synthesis / implementation 早期阶段；若本轮目标只是 XO，则守到 XO
    文件存在、patch 通过、`make -q` 认为 XO target up-to-date。
-7. 当前新边界：single SpMV demo 不承载 PCG 控制优化。`CuperPcgSpmv(...)`
-   只保留历史 kernel 名和 demo 构建入口，内部应采用和满血 `Cuper(...)` 一样的
-   one-shot Cuper SpMV task graph；不要再把 `Pcg_Single*` controller/command/
-   stop/writer-done 壳作为优化目标。PCG service/control 优化只在 full
-   `CuperPcg(...)` 路径处理，核心文件是 `detail/pcg_spmv_service.hpp`、
-   `detail/pcg_controller.hpp` 和相关 drain/timer 代码。若要证明某个 SpMV 改动
-   会同步进入 PCG，必须改 full `CuperPcg(...)` 实际使用的 service 路径，并补跑
-   full-PCG 软件或硬件验证；不能只凭 single SpMV demo 结论判断。
-8. 这个 single SpMV 与 full-PCG 控制拆分目标的连续改动统一维护在
+7. 当前优化目标已从 single SpMV 本体切到 full-PCG controller/dot/update 路径。
+   2026-05-29 one-shot `CuperPcgSpmv(...)` demo 已能跑完整 `thermal2`，共同成功点
+   接近满血 `Cuper(...)`，后续主要作为 single-SpMV 回归基线和边界检查使用；
+   不要再把 `Pcg_Single*` controller/command/stop/writer-done 壳作为 single
+   SpMV 优化目标。full-PCG 性能优化只在 `CuperPcg(...)` 路径处理，优先看
+   `detail/pcg_controller.hpp` 的 `dot_p_ap`、`update_xr`、`update_p`、
+   `P_spmv` / `AP_spmv` 消费、HBM 访问模式、stage timer 和 service drain/stop
+   开销。若要证明性能提升，必须跑 full-PCG 软件或硬件验证；不能只凭 single
+   SpMV demo 结论判断。
+8. single SpMV baseline/回归记录维护在
    `docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`；
-   旧的 `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/` 只作为 full-PCG
-   embedded-SpMV 历史目标记录保留。
+   full-PCG controller/dot/update 优化记录维护在
+   `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
 9. 迭代优化时先测试、后写正式 `source.diff`。每轮 demo 必须更新
    `README.md`、`changes.md`、`testing.md` 和 HTML 结论；但只有 demo-only
    上板测试确认核心性能提升，或用户明确要求保留功能边界修复补丁时，才更新版本目录

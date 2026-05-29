@@ -11,10 +11,10 @@
 这会让 full-PCG 内嵌 SpMV 明显慢于 standalone `cuper-tapa-spmv`，也是当前优化
 目标优先处理的周边路径。
 
-当前后续方向已经调整：不要继续直接把每个 SpMV 改动塞进 full-PCG demo 里测。
-先把 `CuperPcg` 内部的 PCG 服务化 SpMV 路径抠出来，做成 `cuper-tapa-spmv`
-单 SpMV demo 单独测试。这样可以把 SpMV 本体、vector feed、AP 回收和
-controller/dot/update 开销拆开看。
+当前后续方向再次调整：2026-05-29 one-shot `CuperPcgSpmv` single SpMV demo 已经
+接近满血 `Cuper(...)` 并跑通完整 `thermal2`，后续不再把 single SpMV 本体作为主
+优化目标。single SpMV demo 继续作为回归基线；full-PCG 性能优化转向
+controller/dot/update 路径。
 
 2026-05-29 已额外生成一个当前源码下的 full-PCG `CuperPcg` demo bitstream，
 放入 `395bitstream/` 的第二个 demo 槽。它用于确认 full-PCG 路径仍可完成
@@ -22,12 +22,12 @@ controller/dot/update 开销拆开看。
 init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准版或上一 demo，
 因此不改变下面 2026-05-27 packed feed/AP demo 的“性能未达标”结论。
 
-代码里要明确区分两套 SpMV：
+代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
 | 形态 | 入口/文件 | 作用 |
 | --- | --- | --- |
 | 满血 Cuper SpMV | `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` | 当前 standalone TAPA Cuper SpMV 标准基准 |
-| PCG 服务化 SpMV | `CuperPcg(...)` / `detail/pcg_spmv_service.hpp` | 为 PCG 重复触发、stop token、stage 计时和 TAPA 编译约束调整过的路径，当前要抽出来做单 SpMV demo |
+| full-PCG controller/update | `CuperPcg(...)` / `detail/pcg_controller.hpp` + `detail/pcg_spmv_service.hpp` | 当前性能优化对象，重点是 `dot_p_ap`、`update_xr`、`update_p` 和 service/timer 开销 |
 
 ## 代码改动
 
@@ -63,11 +63,13 @@ init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准�
 
 ## 预期影响
 
-预期改善：
+当前后续预期改善：
 
-- 降低 `iter_spmv` 的 AP 回收和 P 向量 feed 开销；
-- 减少 controller 在 SpMV 热路径上的逐元素 HBM 访问；
-- 让 full-PCG 内嵌 SpMV 更接近 standalone TAPA Cuper 的 `float_v16` 数据粒度。
+- 降低 `1iter kernel_reported`；
+- 降低 `controller_total`；
+- 降低 `dot_p_ap`、`update_xr`、`update_p` 这几个大头阶段；
+- 保持 `AP path = iter recv + dot_p_ap` 不恶化；
+- 保持完整 `thermal2` 可返回和数值 diff 通过。
 
 潜在代价：
 
@@ -116,13 +118,10 @@ init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准�
 
 仍需完成：
 
-1. 先做 PCG 抽出版 `cuper-tapa-spmv` 单 SpMV demo，跑 single SpMV 数据集，
-   和满血 `cuper-tapa-spmv-u55c-20260522.xclbin` 的 `spmv_avg`、timeout 边界和
-   diff 对比。
-2. 若单 SpMV demo 确认接近或优于满血 Cuper，再把这条路径回填 `CuperPcg`，
-   重新跑 full-PCG init/1iter。
-3. 回填后再分析 `dot_p_ap`、`update_xr`、`update_p` 的大规模退化；不要用这些
-   controller 阶段开销掩盖 SpMV 本体结论。
-4. 若要继续 full-PCG 性能优化，需要先从 controller/update/dot 路径拆分开销；
+1. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
+   破坏 SpMV 成功边界和 diff。
+2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
+   退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
+3. 若要继续 full-PCG 性能优化，需要先从 controller/update/dot 路径拆分开销；
    当前 2026-05-29 full-PCG demo 只能作为功能边界返回点和对比点，不能作为
    性能提升补丁依据。

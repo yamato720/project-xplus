@@ -72,23 +72,31 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 
 ## Current Goal
 
-- Current boundary: single-SpMV demo must not carry PCG service/control optimization.
-  `CuperPcgSpmv(...)` keeps the historical kernel name and demo build entry, but should
-  use a one-shot Cuper-style SpMV graph like `Cuper(...)`.
-- Treat full/native `Cuper(...)` plus `detail/cuper_spmv_tasks.hpp` as the single-SpMV
-  baseline and shape reference. Keep PCG-specific control work out of this route.
-- PCG service/control optimization belongs in full `CuperPcg(...)`, primarily
-  `detail/pcg_spmv_service.hpp`, `detail/pcg_controller.hpp`, and related drain/timer
-  code. To claim an SpMV change affects PCG, modify the full-PCG service path and run
-  full-PCG software or hardware validation; a single-SpMV demo result alone is not enough.
-- For this target, keep ongoing notes in:
+- Current measured boundary: the one-shot `CuperPcgSpmv(...)` single-SpMV demo now returns
+  through full `thermal2` and is close to full/native `Cuper(...)` on shared successful points.
+  Treat it as the single-SpMV regression baseline and boundary check, not the primary
+  optimization target.
+- The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
+  update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,
+  `update_p`, `P_spmv` / `AP_spmv` consumption, controller HBM access patterns, stage
+  timers, and service drain/stop overhead. The 2026-05-29 data shows raw SpMV/AP receive is
+  no longer the dominant 1iter cost.
+- Keep `CuperPcgSpmv(...)` as a Cuper-compatible one-shot graph. Do not reintroduce
+  `Pcg_Single*` command/stop/writer-done control shells into the single-SpMV demo.
+- To claim a full-PCG performance improvement, modify the full `CuperPcg(...)` path and run
+  full-PCG software or hardware validation. A single-SpMV demo result alone is only a SpMV
+  regression/boundary result.
+- For ongoing notes, keep single-SpMV baseline records in:
 
 ```text
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
-- The previous `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/` directory remains
-  the historical full-PCG embedded-SpMV target record.
+- Keep full-PCG controller/update optimization records in:
+
+```text
+docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
+```
 
 ## Common Commands
 

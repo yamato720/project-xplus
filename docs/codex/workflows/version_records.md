@@ -12,19 +12,20 @@
 docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 ```
 
-当前正在推进的 single TAPA SpMV 性能目标例外：后续连续改动统一写入下面这个
-目标目录，避免每次 demo 都开一个新目录导致记录分散：
+当前 single TAPA SpMV 已从主优化目标降为回归基线和边界检查。相关连续记录仍写入
+下面这个目录，避免每次 demo 都开一个新目录导致记录分散：
 
 ```text
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
-这个目标的最新定义是：single SpMV demo 不承载 PCG service/control 优化。
-`CuperPcgSpmv(...)` 保留历史 kernel 名和 demo 构建入口，但内部应走和
-`Cuper(...)` 一样的 one-shot Cuper SpMV task graph；PCG service/control 优化只在
-full `CuperPcg(...)` 路径记录和验证。`README.md`、`changes.md`、`testing.md`
-记录当前最新 demo/尝试状态；`source.diff` 不是“每次尝试的草稿补丁”，只代表
-经过板上测试后确认有性能提升、值得继续保留或晋级的最新有效补丁。
+这个目录的最新定义是：`CuperPcgSpmv(...)` 保留历史 kernel 名和 demo 构建入口，
+内部走和 `Cuper(...)` 一样的 one-shot Cuper SpMV task graph，用于 single SpMV
+回归和边界检查。当前主优化目标是 full `CuperPcg(...)` 的 controller/dot/update
+路径，记录在 `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。`README.md`、
+`changes.md`、`testing.md` 记录当前最新 demo/尝试状态；`source.diff` 不是
+“每次尝试的草稿补丁”，只代表经过板上测试后确认有性能提升、值得继续保留或晋级的
+最新有效补丁。
 
 目录内至少维护：
 
@@ -70,10 +71,12 @@ code_reading_guide.md
 
 1. 已完成对应 demo-only 上板测试，并把结果写入 HTML 和 `testing.md`。
 2. 对当前优化目标的核心性能指标有提升：
-   - single SpMV demo 阶段，对比 Cuper-compatible demo 和 standalone TAPA
-     Cuper SpMV 的 `spmv_avg`、成功/timeout 边界和数值误差；
-   - PCG service/control 优化必须位于 full `CuperPcg(...)` 实际使用的
-     `pcg_spmv_service.hpp`、`pcg_controller.hpp` 或相关 drain/timer 路径；
+   - single SpMV demo 现在主要作为回归基线，对比 Cuper-compatible demo 和
+     standalone TAPA Cuper SpMV 的 `spmv_avg`、成功/timeout 边界和数值误差；
+   - full-PCG 性能优化必须位于 full `CuperPcg(...)` 实际使用的
+     `pcg_controller.hpp`、`pcg_spmv_service.hpp` 或相关 drain/timer 路径；
+   - 当前 full-PCG 优先指标是 `1iter kernel_reported`、`controller_total`、
+     `dot_p_ap`、`update_xr` 和 `update_p`；
    - 只改 `CuperPcgSpmv(...)` one-shot demo 不能算“同步进 PCG”的性能优化；
    - full-PCG 同步验证使用 TAPA full-PCG 标准版、上一 demo 和当前 demo 的
      同口径记录；

@@ -4,13 +4,12 @@
 
 - 主线：`cuper-tapa-pcg`
 - 状态：demo bitstream 已生成并放入 `395bitstream/`，尚未替换当前标准版
-- 持续目标：把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native
-  TAPA Cuper SpMV
-- 当前 demo 方向：先做 `cuper-tapa-spmv` 单 SpMV demo，把 `CuperPcg` 里的 PCG
-  服务化 SpMV 抠出来单独测试；它确认有效后再回填 full-PCG。代码里同时保留两套
-  SpMV：满血 `Cuper(...)` / `cuper_spmv_tasks.hpp` 作为标准基准，和
-  `CuperPcg(...)` / `pcg_spmv_service.hpp` 中为了 PCG 重复触发与 TAPA 编译约束
-  调整过的服务化 SpMV。
+- 持续目标：优化 full `CuperPcg(...)` 的 controller/dot/update 路径，降低
+  `1iter kernel_reported` 和 `controller_total`
+- 当前 demo 方向：single SpMV one-shot demo 已接近满血 `Cuper(...)` 并能跑完整
+  `thermal2`，后续作为回归基线；主优化转向 full-PCG 中的 `dot_p_ap`、
+  `update_xr`、`update_p`、`P_spmv` / `AP_spmv` 消费、HBM 访问和 service
+  drain/stop 开销。
 - 记录策略：该目录是当前目标的唯一持续记录目录；后续围绕此目标的源码改动、
   demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
   只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
@@ -57,16 +56,19 @@ demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，并已完成 demo
 
 ## 预期收益
 
-目标收益应该首先体现在 `iter_spmv`，其次才可能反映到 `controller_total` 和
-`kernel_reported`。这版不预期直接解决完整 `thermal2` 的 `ctrl=0x0` 边界问题。
+历史 packed feed/AP 目标收益曾首先看 `iter_spmv`，其次才看
+`controller_total` 和 `kernel_reported`。2026-05-29 single SpMV demo 已显示
+SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG 的
+`controller_total`、`dot_p_ap`、`update_xr`、`update_p` 和
+`1iter kernel_reported`。
 
 如果板上实测有效，合理表现应是：
 
-- `iter_spmv` 明显下降；
-- `init_spmv` 有小幅下降或基本持平；
-- full-PCG 1iter 总时间下降幅度小于 `iter_spmv`，因为 FP64 dot/update 仍在
-  controller 路径里；
-- `cuper-tapa-spmv` standalone 仍应作为 SpMV 性能上限。
+- `1iter kernel_reported` 下降；
+- `controller_total` 下降；
+- `dot_p_ap`、`update_xr`、`update_p` 至少一个大头阶段明显下降；
+- `AP path = iter recv + dot_p_ap` 不应恶化；
+- 完整 `thermal2` 仍能返回，数值 diff 仍通过。
 
 ## 当前验证结论
 
@@ -116,12 +118,9 @@ demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，并已完成 demo
 - 结论：它仍更像“full-size 功能边界修复候选”，不是当前 SpMV 性能优化目标的
   标准替换候选。
 
-下一步不要继续直接做 full-PCG 性能 demo；应先把当前 PCG 服务化 SpMV 路径抽成
-`cuper-tapa-spmv` 单 SpMV demo，和满血 TAPA Cuper SpMV 标准曲线对比
-`spmv_avg`、成功/timeout 边界和数值误差。只有单 SpMV 路径确认有效后，再回填
-full-PCG 并重新看 `init_spmv`、`iter_spmv`、`controller_total` 和
-`kernel_reported`。
-
-更新 HTML 时，single SpMV demo 的新增数据只写入 SpMV/demo-only 区域；PCG 分段、
-`Init 与 1iter 差值` 和一次迭代区域保留当前 full-PCG 数据，但必须标注“本轮未跑
-PCG，无 init/1iter 过程/无一次迭代新数据”。
+下一步不要继续把主要精力放在 single SpMV 本体上；它作为回归基线保留。full-PCG
+优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径，先拆
+`dot_p_ap`、`update_xr`、`update_p` 的 HBM 读写和 lane 内 FP64 计算，再看
+controller/service 收尾同步。更新 HTML 时，`TAPA PCG 分段时间` 和
+`Init 与 1iter 差值` 必须展示当前 full-PCG demo-only 数据；single SpMV demo 只进入
+SpMV/demo-only 和 SpMV 对比区域。

@@ -256,17 +256,16 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
 - 当前 demo 能跑完整 `thermal2` 的 init-only 和 1iter，旧记录中的
   `ctrl=0x0` 边界在本轮 demo-only 测试中没有复现。
 - 数值校验通过；1iter 的最大误差远低于 `DIFF_TOL=1e-4`。
-- 性能不满足当前“内嵌 SpMV 接近 standalone TAPA Cuper”的目标：
+- 性能不满足当前 full-PCG controller/dot/update 优化目标：
   `thermal2_n262144` 的 1iter `kernel_reported=416.6492 ms`，完整
   `thermal2` 为 `1887.4481 ms`，主要开销在 `update_xr`、`update_p` 和
   `dot_p_ap`，不是 `iter_spmv` 本身。
 - 暂不建议按性能目标晋级为标准版；可以把它作为 full-size 功能边界修复候选记录。
-- 下一步测试目标改为 PCG 抽出版 `cuper-tapa-spmv` 单 SpMV demo：只跑该 demo 的
-  single SpMV 数据集，和满血 TAPA Cuper SpMV 标准记录静态对比 `spmv_avg`、
-  timeout 边界和 diff；确认有效后再回填 full-PCG。
-- 下一次更新 HTML 时，single SpMV 结果只进入 SpMV/demo-only 区域；PCG 分段、
-  `Init 与 1iter 差值` 和一次迭代区域保留本轮 full-PCG 数据，并标注“本轮未跑
-  PCG，无 init/1iter 过程/无一次迭代新数据”。
+- 后续 single SpMV demo 只作为回归基线；主要优化目标转向 full `CuperPcg(...)`
+  的 `dot_p_ap`、`update_xr`、`update_p`、controller HBM 访问和 service
+  drain/stop 开销。
+- 更新 HTML 时，PCG 分段、`Init 与 1iter 差值` 和一次迭代区域必须展示当前
+  full-PCG demo 数据；single SpMV 结果只进入 SpMV/demo-only 和 SpMV 对比区域。
 
 ## 2026-05-29 当前 full-PCG demo-only 上板测试
 

@@ -30,20 +30,21 @@
 
 ## 目标
 
-本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**。
-最新结论是：单 SpMV demo 不再承载 PCG 控制优化。
+本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**，
+并作为后续 single SpMV 回归基线记录。最新结论是：单 SpMV demo 不再承载 PCG
+控制优化；2026-05-29 one-shot demo 已能跑完整 `thermal2`，共同成功点接近但
+略慢于满血 `Cuper(...)` 标准。
 
 当前目标：
 
-1. 保持或提升当前小中规模 `spmv_avg` 性能；
-2. 优先排查大规模矩阵的 timeout、边界和数据正确性问题；
+1. 将 `CuperPcgSpmv(...)` one-shot demo 作为 single SpMV 回归基线和边界检查；
+2. 保持完整 `thermal2` 可返回、diff 通过，并监控共同成功点不要明显退化；
 3. `CuperPcgSpmv(...)` 只做 Cuper 风格 one-shot single SpMV，不引入
    `Pcg_Single*` controller/command/stop/writer-done；
-4. PCG service/control 优化只在 full `CuperPcg(...)` 路径处理，主要看
-   `detail/pcg_spmv_service.hpp`、`detail/pcg_controller.hpp` 和相关
-   drain/timer 代码；
-5. 若要证明某个优化会同步进 PCG，必须修改 full `CuperPcg(...)` 实际使用的
-   service 路径，并补 full-PCG 软件或硬件验证；不能只凭 single SpMV demo 结论判断。
+4. 主优化目标已切到 full `CuperPcg(...)` 的 controller/dot/update 路径，记录在
+   `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`；
+5. 若要证明 full-PCG 性能提升，必须修改 full `CuperPcg(...)` 实际路径，并补
+   full-PCG 软件或硬件验证；不能只凭 single SpMV demo 结论判断。
 
 ## 和旧目标的区别
 
@@ -353,9 +354,9 @@ loader/core/destroy 常驻服务链。统一范围只限 command 构造和广播
 | full `CuperPcg` FPGA-PCG software sim | `thermal2_n16` | `converged` | `max_abs_diff=1.0868e-08` |
 | full `CuperPcg` FPGA-PCG software sim | `thermal2_n1024` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=9.2782e-10` |
 
-注意：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史生成的
-`CuperPcgSpmv` service 抽出版 demo，不代表当前 one-shot 源码。当前源码尚未启动
-新的硬件构建；若要上板测试当前 one-shot 版本，需要重新生成 demo xclbin。
+注意：这段软件验证发生在 one-shot 硬件构建之前；当时
+`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史 service 抽出版。
+后续 2026-05-29 已重新生成并上板测试当前 one-shot demo。
 
 ## 当前基线
 
