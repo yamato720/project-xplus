@@ -80,7 +80,9 @@ Total elapsed time: 7h 29m 0s
 `thermal2` 均返回且 diff 通过；完整 `thermal2` 的
 `spmv_avg=1.781541 ms`。共同成功点上相对 standalone TAPA Cuper SpMV 标准约为
 `1.03x` 到 `1.08x`，即略慢；但标准旧记录在 `thermal2_n262144` 和完整
-`thermal2` 为 timeout，本 demo 成功边界更大。正式 `source.diff` 仍不更新。
+`thermal2` 为 timeout，本 demo 成功边界更大。该 demo 已从 `395bitstream/`
+移入 `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，未晋级标准版。
+正式 `source.diff` 仍不更新。
 
 ## 2026-05-28：finite-exit 修复尝试
 

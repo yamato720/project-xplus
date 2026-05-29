@@ -11,11 +11,13 @@
   内部复用 `Cuper(...)` 同款 `SpElement_list_ptr_Loader` / `Vector_Loader` /
   `Matrix_Loader` / `Core` / `Accumulator` / `Vector_Checker` / `Mult_Sort_Tree` /
   `Vector_Writer`，不再接 `pcg_spmv_service.hpp` 的 command/stop/service 控制壳。
-  2026-05-29 已生成新的 one-shot demo xclbin 并覆盖当前 single-SpMV demo 槽；
-  同日 demo-only 上板测试已通过到完整 `thermal2`。本轮只更新测试报告，不更新
-  正式 `source.diff`
+  2026-05-29 已生成新的 one-shot demo xclbin 并覆盖 single-SpMV demo 槽；
+  同日 demo-only 上板测试已通过到完整 `thermal2`。该 demo 随后已从
+  `395bitstream/` 移入
+  `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。本轮只更新测试报告，
+  不更新正式 `source.diff`
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
-- 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
+- 已归档 demo：`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
 - 本轮抽出版入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `CuperPcgSpmv(...)`
 - 标准 SpMV 文件：`DLC/Cuper/kernels/detail/cuper_spmv_tasks.hpp`
@@ -23,7 +25,9 @@
   `DLC/Cuper/kernels/detail/cuper_spmv_tasks.hpp`
 - 构建目录：`cuper-tapa-spmv-u55c-20260528-demo-build/`
 - 构建日志：`logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log`
-- 生成文件：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
+- 生成文件：测试时同步为 `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`；
+  当前已归档到
+  `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - UUID：`c95c1dfc-20ca-9152-279e-bafdf35fdc3d`
 - SHA256：`19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2`
 - DATA/KERNEL/HBM clock：147 / 500 / 418 MHz

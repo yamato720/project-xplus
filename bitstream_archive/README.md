@@ -8,6 +8,9 @@ GitHub 只同步 Markdown 说明；本目录内的 `.xclbin` 受 `.gitignore` �
 - `395bitstream/`: 放当前需要通过 GitHub 及时同步到服务器的可运行 bitstream 和直接配套文件。
 - `bitstream_archive/`: 放历史 bitstream 的本地留档；Git 可跟踪 `.md`、`.info` 和源码快照，但不跟踪 `.xclbin`。
 - `bitstream_archive/2026-05-24-current-spmv-bitstreams/`: 本地保存 2026-05-24 当前两版 SpMV bitstream 及对应源码快照；Git 同步源码和 `.xclbin.info`，只排除 `.xclbin` 大文件。
+- `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`: 本地保存
+  2026-05-29 从 `395bitstream/` 移出的 `cuper-tapa-spmv` one-shot demo 和
+  `cuper-tapa-pcg` full-PCG demo；两者均未晋级为标准版。
 - 可以在本目录保存 `.xclbin` 原文件，但不要 `git add -f`。
 - 不在本目录放 `.xo`、`.log`、`.json`、Vivado/Vitis 临时目录或其它大型工具原始产物。
 - `.xclbin.info` 可以跟随源码快照进入 Git，用于记录 xclbin 的 kernel、UUID、clock 和 memory topology。

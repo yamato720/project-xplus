@@ -22,14 +22,15 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `2026-05-28-cuper-tapa-spmv-single-optimization/`：当前持续目标目录。
   目标是优化 `Cuper(...)` + `detail/cuper_spmv_tasks.hpp` 这条
   standalone/native TAPA Cuper single-SpMV 路线。后续 single TAPA SpMV 的源码
-  改动说明、demo bitstream 和测试结论都继续写入该目录。当前 demo 槽位为
-  `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`。
+  改动说明、demo bitstream 和测试结论都继续写入该目录。2026-05-29 one-shot
+  demo 已从 `395bitstream/` 移入
+  `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
 - `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：历史 full-PCG
   embedded-SpMV 目标目录。
   目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
-  Cuper SpMV。当前 full-PCG demo 槽位为
-  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`，用于确认
-  `CuperPcg(...)` 路径仍可生成 routed bitstream；尚未上板测试，不替换标准版。
+  Cuper SpMV。2026-05-29 full-PCG demo 用于确认 `CuperPcg(...)` 路径仍可生成
+  routed bitstream，并已完成 demo-only 上板测试；该 demo 已从 `395bitstream/`
+  移入 `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，未替换标准版。
   后续围绕 full-PCG 内嵌 SpMV / service/control 的源码改动说明、demo bitstream
   和测试结论继续写入该目录，不再为每个小 demo 新建目录；正式 `source.diff`
   只有在测试确认性能提升，或用户明确要求保留功能边界修复补丁后才更新。

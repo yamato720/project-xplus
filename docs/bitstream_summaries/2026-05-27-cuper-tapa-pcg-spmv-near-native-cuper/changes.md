@@ -115,6 +115,8 @@ init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准�
    `thermal2_n262144` 和完整 `thermal2` 的 init-only / 1iter 全部返回；
    但 `thermal2_n262144` 的 1iter `kernel_reported=426.7009 ms`，仍慢于
    标准版 `188.8202 ms` 和上一 demo `416.6492 ms`。
+7. 该 2026-05-29 full-PCG demo 已从 `395bitstream/` 移入
+   `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，未晋级标准版。
 
 仍需完成：
 

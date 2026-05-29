@@ -7,10 +7,11 @@
 本目录是 single TAPA SpMV 与 full-PCG service/control 拆分边界的新目标记录。
 历史上本轮先生成过一个 TAPA-PCG service SpMV 抽出版 demo bitstream；该 bitstream
 在最小上板 smoke 中 timeout。当前源码已经切回 Cuper-compatible one-shot
-`CuperPcgSpmv(...)`，并已在 2026-05-29 生成新的 one-shot demo bitstream。当前
-demo 文件已完成 demo-only 上板测试，single SpMV 可返回到完整 `thermal2`。
+`CuperPcgSpmv(...)`，并已在 2026-05-29 生成新的 one-shot demo bitstream。该
+demo 文件已完成 demo-only 上板测试，single SpMV 可返回到完整 `thermal2`；测试后
+已归档到 `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
 
-当前 one-shot demo 已同步到：
+one-shot demo 测试时同步到：
 
 ```text
 session: project-xplus-cuper-tapa-pcg-spmv-hw
@@ -18,6 +19,13 @@ log: logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log
 build_dir: cuper-tapa-spmv-u55c-20260528-demo-build/
 xclbin: cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
 demo: 395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+```
+
+2026-05-29 归档后当前保存位置为：
+
+```text
+bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-spmv-u55c-20260528-demo.xclbin.info
 ```
 
 硬件构建结果：
@@ -28,7 +36,7 @@ Created .../cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
 Total elapsed time: 7h 29m 0s
 ```
 
-当前 bitstream 信息：
+当前已归档 bitstream 信息：
 
 ```text
 kernel: CuperPcgSpmv
@@ -760,9 +768,9 @@ timeout 240s make run-cuper-pcg-tapa-fpga \
 - 当时没有启动新硬件构建，也没有生成新的 one-shot demo xclbin；后续已在
   2026-05-29 完成 one-shot demo 硬件构建并覆盖 `395bitstream/` single-SpMV
   demo 槽；
-- `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 当前已经是
+- 测试时的 `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 是
   UUID `c95c1dfc-20ca-9152-279e-bafdf35fdc3d` 的 one-shot demo，不再是历史
-  service 抽出版。
+  service 抽出版；测试完成后该 demo 已归档。
 
 ## 2026-05-29 one-shot demo-only 上板测试
 
@@ -781,6 +789,10 @@ UUID: c95c1dfc-20ca-9152-279e-bafdf35fdc3d
 SHA256: 19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2
 DATA/KERNEL/HBM clock: 147 / 500 / 418 MHz
 ```
+
+说明：上面的 `395bitstream/` 是本轮上板测试时的同步路径。测试完成后，该 demo
+已归档到
+`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
 
 本轮按 demo-only 口径只跑当前 `Cuper-compatible one-shot` single SpMV demo，
 不重跑四个标准 bitstream。本轮未跑 PCG，无 init/1iter 过程；PCG 相关数据保留

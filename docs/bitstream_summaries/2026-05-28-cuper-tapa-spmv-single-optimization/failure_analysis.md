@@ -2,7 +2,7 @@
 
 ## 现象
 
-当前 demo：
+当时测试的旧 service 抽出版 demo：
 
 ```text
 395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
@@ -27,6 +27,11 @@ logs/codex_spmv_demo_only_test_20260528_143556/
 `Finish`，也就是 TAPA/XRT 等待 kernel 完整结束、收尾和释放执行状态时没有看到
 所有 task 正常退出。它不像是单纯的输出 BO 读不回来，也不像是 CPU diff 失败；
 本轮没有走到 `spmv_avg` 和 diff 打印。
+
+说明：该 timeout 分析只对应旧 UUID `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`。
+2026-05-29 one-shot demo UUID `c95c1dfc-20ca-9152-279e-bafdf35fdc3d` 已通过到完整
+`thermal2`，随后归档到
+`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
 
 ## 为什么从 TAPA PCG 拆出来会单独跑不了
 

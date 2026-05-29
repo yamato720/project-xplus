@@ -61,7 +61,7 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - For bitstream/build/TAPA/report/version-record work, read the matching `docs/codex/workflows/*.md` file before editing.
 - Keep version records in `docs/bitstream_summaries/<version>/`.
 - For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, and, when useful, `code_reading_guide.md`. Update official `source.diff` only after demo-only board testing confirms a performance improvement, or when the user explicitly asks to preserve a functional-boundary fix; do not overwrite the last effective `source.diff` for failed or slower demos.
-- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion. `395bitstream/` currently keeps two demo slots: one `cuper-tapa-spmv` single-SpMV candidate and one `cuper-tapa-pcg` full-PCG candidate. New demos overwrite only the same-mainline demo slot.
+- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion or asks to archive them. `395bitstream/` may keep up to two demo slots: one `cuper-tapa-spmv` single-SpMV candidate and one `cuper-tapa-pcg` full-PCG candidate. New demos overwrite only the same-mainline demo slot; archived demos move to `bitstream_archive/`.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
 - Before starting any `TARGET=hw` bitstream build, run the matching software-level
   validation first (`sw_emu`, TAPA software simulation, or a documented host/local smoke

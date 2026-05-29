@@ -2,14 +2,15 @@
 
 ## 1. bitstream 同步目录
 
-`395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。同步目录的
-常态是“四个标准成品 + 两个当前 demo 候选槽”：
+`395bitstream/` 放当前要同步到服务器和用于对比的最新标准版本；需要测试新候选时，
+可以临时放 demo。同步目录的上限是“四个标准成品 + 两个当前 demo 候选槽”：
 
 - 四个标准成品分别对应四条主线；
 - 两个 demo 槽位用 `-demo` 后缀标识，目前分别服务 `cuper-tapa-spmv` 和
   `cuper-tapa-pcg`；
 - 新生成的 demo 进入 `395bitstream/` 时，优先覆盖同主线旧 demo 候选槽，不新增一串
-  历史 demo 文件；不同主线 demo 可以同时保留，当前上限是两个。
+  历史 demo 文件；不同主线 demo 可以同时保留，上限是两个。用户要求归档后，demo
+  可以移入 `bitstream_archive/`，同步目录回到只保留四个标准成品。
 
 要求：
 
@@ -21,6 +22,10 @@
 6. 覆盖 demo 候选槽不需要归档旧 demo 二进制，但必须在 `395bitstream/README.md`
    和对应 `docs/bitstream_summaries/` 中说明当前 demo 文件已经变更；旧 demo 的
    测试结论只能继续作为历史记录，不能再套到当前 demo 文件上。
+7. 用户要求归档当前 demo 时，把 demo `.xclbin` 和 `.xclbin.info` 移入
+   `bitstream_archive/YYYY-MM-DD-<主线或目标>-<简短原因>/`，更新归档 README、
+   `395bitstream/README.md` 和对应版本记录。归档后的 `.xclbin` 继续受
+   `.gitignore` 保护，默认不进 Git。
 
 ## 2. demo bitstream 规则
 
@@ -48,9 +53,10 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 
 4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
-5. `395bitstream/` 只保留两个当前 demo 候选槽。新 demo 可以直接覆盖同主线旧
+5. `395bitstream/` 最多保留两个当前 demo 候选槽。新 demo 可以直接覆盖同主线旧
    demo 文件和 `.xclbin.info`，但不能覆盖四条主线标准文件；不同主线 demo
-   可以共存，当前默认是 `cuper-tapa-spmv` 一个、`cuper-tapa-pcg` 一个。
+   可以共存，默认是 `cuper-tapa-spmv` 一个、`cuper-tapa-pcg` 一个。归档后同步目录
+   可以没有 demo 文件。
 6. demo 上板测试默认只跑新 demo 本身；同主线当前标准 bitstream 和其它三条标准
    bitstream 默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志，不要
    自动重跑四大标准版本。只有用户要求、标准 bitstream/host 变化、demo 结果与旧记录

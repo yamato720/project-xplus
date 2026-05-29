@@ -50,9 +50,10 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 - `pcg-fpga` 表示 PCG 主循环、dot、alpha/beta、向量更新和收敛判断在 FPGA kernel 内。
 - `spmv` 表示只测/只构造 SpMV kernel，host 可以控制 PCG 或只跑 single SpMV。
 - `host-PCG`、旧 CSR 多 kernel、packed16hbm legacy 等都属于兼容或历史路线，不加入四条主线命名。
-- `395bitstream/` 的成品槽位是四个标准 bitstream 加两个当前 demo 候选；
-  当前两个 demo 槽位分别服务 `cuper-tapa-spmv` 和 `cuper-tapa-pcg`。新 demo
-  允许覆盖同主线旧 demo 文件，但不能覆盖四条标准文件。
+- `395bitstream/` 的同步槽位是四个标准 bitstream，必要时再加最多两个当前 demo
+  候选；demo 槽位分别服务 `cuper-tapa-spmv` 和 `cuper-tapa-pcg`。新 demo 允许覆盖
+  同主线旧 demo 文件，但不能覆盖四条标准文件。用户要求归档后，demo 可从
+  `395bitstream/` 移入 `bitstream_archive/`。
 
 ## 3. 高优先级规则
 
@@ -61,7 +62,8 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
    `workflows/bitstreams.md` 归档旧版。
 3. 允许用最新 demo 覆盖 `395bitstream/` 中同主线旧 demo 候选槽；覆盖后必须更新
    `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
-   不同主线 demo 可以同时保留，当前上限是两个 demo 槽位。
+   不同主线 demo 可以同时保留，上限是两个 demo 槽位；归档后同步目录可以只保留
+   四个标准 bitstream。
 4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
 5. 每次生成 `TARGET=hw` bitstream 前，必须先做同一 top/ABI 的软件级验证：

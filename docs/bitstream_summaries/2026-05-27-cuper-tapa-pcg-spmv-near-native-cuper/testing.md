@@ -4,12 +4,19 @@
 
 记录时间：2026-05-27，更新：2026-05-29
 
-当前 full-PCG demo 已完成 `hw` bitstream 构建，并放入 `395bitstream/` 第二个
-demo 槽位：
+当前 full-PCG demo 已完成 `hw` bitstream 构建，测试时曾放入 `395bitstream/`
+第二个 demo 槽位：
 
 ```bash
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
+```
+
+2026-05-29 归档后当前保存位置为：
+
+```text
+bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
+bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
 ```
 
 当前 demo 信息：
@@ -34,6 +41,7 @@ Total elapsed time: 5h 6m 11s
 
 当前 2026-05-29 demo 已完成 demo-only 上板测试；它可以返回到完整 `thermal2`，
 但共同成功点 1iter 性能仍慢于当前标准版和上一 demo，不能按性能目标晋级为标准版。
+该 demo 已从同步目录移出并归档。
 
 历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
 槽位：
@@ -284,6 +292,10 @@ UUID: 086a3345-ddf0-ffdd-b260-16ca5fa5223a
 SHA256: 83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1
 DATA/KERNEL/HBM clock: 210 / 500 / 408 MHz
 ```
+
+说明：上面的 `395bitstream/` 是本轮上板测试时的同步路径。测试完成后，该 demo
+已归档到
+`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
 
 本轮按 demo-only 口径只跑当前 full-PCG demo，不重跑四个标准 bitstream。先跑
 `thermal2_n16` 低规格 smoke；低规格通过后继续跑规定数据集。

@@ -60,9 +60,10 @@ rg -n "UUID|Frequency|Achieved Freq|Kernel:" 395bitstream/*.xclbin.info
 新生成的 bitstream 不能直接成为标准版。它必须先作为 demo 版放在
 `395bitstream/`，用 `-demo` 后缀命名。测试时默认采用 demo-only 上板实测，
 再用已有标准/基线记录做静态对照；不要自动重跑四大标准版本。
-`395bitstream/` 当前允许两个 demo 槽位并存：一个用于 `cuper-tapa-spmv`
+`395bitstream/` 最多允许两个 demo 槽位并存：一个用于 `cuper-tapa-spmv`
 single SpMV 候选，一个用于 `cuper-tapa-pcg` full-PCG 候选。新 demo 只覆盖同主线
-旧 demo，不能覆盖四条标准 bitstream。
+旧 demo，不能覆盖四条标准 bitstream。用户要求归档后，demo 可移入
+`bitstream_archive/`，同步目录回到只保留四个标准 bitstream。
 
 命名规则：
 
