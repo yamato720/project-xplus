@@ -12,7 +12,8 @@
   `Matrix_Loader` / `Core` / `Accumulator` / `Vector_Checker` / `Mult_Sort_Tree` /
   `Vector_Writer`，不再接 `pcg_spmv_service.hpp` 的 command/stop/service 控制壳。
   2026-05-29 已生成新的 one-shot demo xclbin 并覆盖当前 single-SpMV demo 槽；
-  尚未上板测试，正式 `source.diff` 不更新
+  同日 demo-only 上板测试已通过到完整 `thermal2`。本轮只更新测试报告，不更新
+  正式 `source.diff`
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
 - 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
@@ -157,8 +158,37 @@ Created .../cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
 Total elapsed time: 7h 29m 0s
 ```
 
-当前状态：只确认 `hw` bitstream 生成成功并已同步到 `395bitstream/`；尚未做
-demo-only 上板测试，因此不建议晋级，也不更新正式 `source.diff`。
+2026-05-29 已完成 demo-only 上板测试，日志目录：
+
+```text
+logs/codex_two_demo_test_20260529_1300/
+```
+
+本轮只跑当前 single-SpMV demo，不重跑四个标准 bitstream。测试命令口径：
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv TARGET=hw \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 DIFF_TOL=1e-1
+```
+
+结果：
+
+| 数据集 | rc | spmv_avg ms | GFLOP/s | max_abs_diff | max_rel_diff |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n16` | 0 | 0.068825 | 0.000465 | 3.7558e-07 | 7.6333e-08 |
+| `thermal2_n65536` | 0 | 0.149121 | 5.8610 | 2.3596e-06 | 8.2651e-04 |
+| `thermal2_n131072` | 0 | 0.235847 | 7.3443 | 3.2888e-06 | 1.3183e-03 |
+| `thermal2_n262144` | 0 | 0.425394 | 8.2229 | 3.2376e-06 | 3.1482e-03 |
+| `thermal2` | 0 | 1.781541 | 9.6325 | 1.6333e-06 | 4.4911e-05 |
+
+结论：当前 one-shot demo 功能边界明显好于旧 standalone TAPA Cuper SpMV 标准记录，
+标准旧记录在 `thermal2_n262144` 和完整 `thermal2` 为 180s timeout，而本 demo
+两个点都返回且 diff 通过。共同成功点上，当前 demo 比标准 SpMV 旧记录略慢：
+`thermal2_n16` 约 `1.03x`、`thermal2_n65536` 约 `1.08x`、
+`thermal2_n131072` 约 `1.07x`。因此它是成功边界改善候选，但还不是明确的性能
+提升版；正式 `source.diff` 本轮不更新。
 
 ## 2026-05-28 补充：finite-exit 修复尝试
 

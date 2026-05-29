@@ -38,7 +38,8 @@
 
 2026-05-27 packed feed/AP demo 的板上测试记录仍保留在本文档和 `testing.md`；
 它对应 UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`。当前 2026-05-29 full-PCG
-demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，尚未上板测试。
+demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，并已完成 demo-only
+上板测试；测试结论见本文档和 `testing.md` 的 2026-05-29 小节。
 
 ## 这一版做了什么
 
@@ -89,12 +90,16 @@ demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，尚未上板测�
   运行到完成后 `ctrl=0xe`，不再复现旧标准记录里的 `ctrl=0x0` 未完成。
 - 2026-05-29 已用当前源码重新生成 full-PCG `CuperPcg` demo bitstream，并放入
   第二个 demo 槽：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
-  该文件只确认构建成功，尚未上板测试。
+  该文件已在 2026-05-29 完成 demo-only 上板测试。
+- 2026-05-29 当前 full-PCG demo 的 `thermal2_n16`、`thermal2_n65536`、
+  `thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2` 的 init-only
+  与 1iter 全部返回，direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。
 
 尚未完成：
 
 - 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
-- 2026-05-29 full-PCG demo 尚未做 demo-only 上板测试。
+- 未证明 2026-05-29 full-PCG demo 是性能提升版；共同成功点上的 1iter 仍慢于
+  当前标准版和上一 demo。
 
 ## 是否建议晋级
 
@@ -102,14 +107,13 @@ demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，尚未上板测�
 
 理由：
 
-- 当前 2026-05-29 full-PCG demo 只确认 bitstream 生成成功，尚未做 demo-only
-  上板测试，不能作为标准替换依据。
-- 正面：完整 `thermal2` init-only / 1iter 都能完成，说明这版改变了旧标准的
-  full-size 失败边界。
+- 正面：当前 2026-05-29 full-PCG demo 的完整 `thermal2` init-only / 1iter 都能
+  完成，标准版旧记录中的完整规模 `ctrl=0x0` 失败边界没有复现。
 - 风险：性能目标是让 `CuperPcg` 内嵌 SpMV 靠近 standalone TAPA Cuper，但本版
-  在大规模 1iter 上 controller/update 代价很高；`thermal2_n262144` 的
-  `kernel_reported=416.649 ms`，明显慢于既有标准记录中的约 `188.820 ms`。
-- 结论：它更像“full-size 功能边界修复候选”，还不是当前 SpMV 性能优化目标的
+  在大规模 1iter 上 controller/update 代价仍高；`thermal2_n262144` 的
+  `kernel_reported=426.701 ms`，明显慢于既有标准记录中的约 `188.820 ms`，
+  也比上一 2026-05-27 full-PCG demo 的 `416.649 ms` 略慢。
+- 结论：它仍更像“full-size 功能边界修复候选”，不是当前 SpMV 性能优化目标的
   标准替换候选。
 
 下一步不要继续直接做 full-PCG 性能 demo；应先把当前 PCG 服务化 SpMV 路径抽成

@@ -18,7 +18,9 @@ controller/dot/update 开销拆开看。
 
 2026-05-29 已额外生成一个当前源码下的 full-PCG `CuperPcg` demo bitstream，
 放入 `395bitstream/` 的第二个 demo 槽。它用于确认 full-PCG 路径仍可完成
-`hw` 构建；尚未上板测试，不改变下面 2026-05-27 packed feed/AP demo 的板上结论。
+`hw` 构建；同日已完成 demo-only 上板测试。结果显示完整 `thermal2` 的
+init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准版或上一 demo，
+因此不改变下面 2026-05-27 packed feed/AP demo 的“性能未达标”结论。
 
 代码里要明确区分两套 SpMV：
 
@@ -106,6 +108,11 @@ controller/dot/update 开销拆开看。
    UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a`，SHA256
    `83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1`，
    DATA/KERNEL/HBM clock `210/500/408 MHz`。
+6. 2026-05-29 当前 full-PCG demo 已完成 demo-only 上板测试：
+   `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+   `thermal2_n262144` 和完整 `thermal2` 的 init-only / 1iter 全部返回；
+   但 `thermal2_n262144` 的 1iter `kernel_reported=426.7009 ms`，仍慢于
+   标准版 `188.8202 ms` 和上一 demo `416.6492 ms`。
 
 仍需完成：
 
@@ -116,5 +123,6 @@ controller/dot/update 开销拆开看。
    重新跑 full-PCG init/1iter。
 3. 回填后再分析 `dot_p_ap`、`update_xr`、`update_p` 的大规模退化；不要用这些
    controller 阶段开销掩盖 SpMV 本体结论。
-4. 对 2026-05-29 full-PCG demo 补 demo-only 上板测试后，再判断是否只是构建
-   smoke，还是可以作为 full-PCG 后续性能对比点。
+4. 若要继续 full-PCG 性能优化，需要先从 controller/update/dot 路径拆分开销；
+   当前 2026-05-29 full-PCG demo 只能作为功能边界返回点和对比点，不能作为
+   性能提升补丁依据。

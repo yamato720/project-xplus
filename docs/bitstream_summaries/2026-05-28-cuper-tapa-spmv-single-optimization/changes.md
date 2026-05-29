@@ -11,7 +11,9 @@
 
 2026-05-29 已按这个边界重新生成 one-shot `CuperPcgSpmv` demo bitstream，并覆盖
 `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`。旧 service 抽出版的
-timeout 结论只保留为历史记录，不再对应当前同名 demo 文件。
+timeout 结论只保留为历史记录，不再对应当前同名 demo 文件。当前 one-shot demo
+已完成 demo-only 上板测试，可返回到完整 `thermal2`；共同成功点性能略慢于
+standalone TAPA Cuper SpMV 标准，因此本轮仍不更新正式 `source.diff`。
 
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
@@ -72,8 +74,13 @@ DATA/KERNEL/HBM clock: 147 / 500 / 418 MHz
 Total elapsed time: 7h 29m 0s
 ```
 
-当前只记录构建成功与同步状态，尚未上板测试。由于没有 demo-only 板上性能数据，
-正式 `source.diff` 仍不更新。
+2026-05-29 已完成 demo-only 上板测试，日志在
+`logs/codex_two_demo_test_20260529_1300/`。`thermal2_n16`、
+`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
+`thermal2` 均返回且 diff 通过；完整 `thermal2` 的
+`spmv_avg=1.781541 ms`。共同成功点上相对 standalone TAPA Cuper SpMV 标准约为
+`1.03x` 到 `1.08x`，即略慢；但标准旧记录在 `thermal2_n262144` 和完整
+`thermal2` 为 timeout，本 demo 成功边界更大。正式 `source.diff` 仍不更新。
 
 ## 2026-05-28：finite-exit 修复尝试
 

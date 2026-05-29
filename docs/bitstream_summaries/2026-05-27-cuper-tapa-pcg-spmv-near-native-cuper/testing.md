@@ -32,7 +32,8 @@ Created .../cuper-tapa-pcg-fpga-u55c-20260525-build/hw/CuperPcg.xclbin
 Total elapsed time: 5h 6m 11s
 ```
 
-当前 2026-05-29 demo 尚未做 demo-only 上板测试，不能晋级为标准版。
+当前 2026-05-29 demo 已完成 demo-only 上板测试；它可以返回到完整 `thermal2`，
+但共同成功点 1iter 性能仍慢于当前标准版和上一 demo，不能按性能目标晋级为标准版。
 
 历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
 槽位：
@@ -266,3 +267,84 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
 - 下一次更新 HTML 时，single SpMV 结果只进入 SpMV/demo-only 区域；PCG 分段、
   `Init 与 1iter 差值` 和一次迭代区域保留本轮 full-PCG 数据，并标注“本轮未跑
   PCG，无 init/1iter 过程/无一次迭代新数据”。
+
+## 2026-05-29 当前 full-PCG demo-only 上板测试
+
+日志目录：
+
+```text
+logs/codex_two_demo_test_20260529_1300/
+```
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
+kernel: CuperPcg
+UUID: 086a3345-ddf0-ffdd-b260-16ca5fa5223a
+SHA256: 83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1
+DATA/KERNEL/HBM clock: 210 / 500 / 408 MHz
+```
+
+本轮按 demo-only 口径只跑当前 full-PCG demo，不重跑四个标准 bitstream。先跑
+`thermal2_n16` 低规格 smoke；低规格通过后继续跑规定数据集。
+
+init-only 代理：
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+1iter：
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  MAX_ITERS=1 DIFF_TOL=1e-4
+```
+
+### 退出状态
+
+| 模式 | 数据集 | rc | direct ctrl | status | max_abs_diff | max_rel_diff |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| init | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n65536` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n131072` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n262144` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| 1iter | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 1.0868e-08 | 9.2864e-09 |
+| 1iter | `thermal2_n65536` | 0 | `0x4 -> 0xe` | max_iter | 7.5004e-10 | 7.2993e-10 |
+| 1iter | `thermal2_n131072` | 0 | `0x4 -> 0xe` | max_iter | 2.3337e-10 | 1.8330e-10 |
+| 1iter | `thermal2_n262144` | 0 | `0x4 -> 0xe` | max_iter | 5.3981e-10 | 4.0347e-10 |
+| 1iter | `thermal2` | 0 | `0x4 -> 0xe` | max_iter | 1.1717e-09 | 1.0914e-09 |
+
+### 关键计时
+
+单位：ms。`AP path = iter_spmv + dot_p_ap`，用于观察第二次 `A*p` 接收/累加路径；
+它不是完整一次迭代时间。
+
+| 数据集 | init kernel | init ctrl | init SpMV | 1iter kernel | 1iter ctrl | iter recv | dot_p_ap | AP path | update_xr | update_p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n16` | 10.7189 | 0.0049 | 0.0023 | 10.9542 | 0.0192 | 0.0007 | 0.0016 | 0.0022 | 0.0063 | 0.0053 |
+| `thermal2_n65536` | 35.2486 | 15.2043 | 6.6708 | 114.0532 | 72.0756 | 0.1540 | 6.9254 | 7.0794 | 26.5686 | 22.1407 |
+| `thermal2_n131072` | 53.8559 | 30.4084 | 13.3415 | 218.2640 | 144.1505 | 0.3075 | 13.8509 | 14.1584 | 53.1371 | 44.2820 |
+| `thermal2_n262144` | 98.2320 | 60.8188 | 26.6850 | 426.7009 | 288.2930 | 0.6165 | 27.6965 | 28.3131 | 106.2738 | 88.5623 |
+| `thermal2` | 421.3018 | 284.9298 | 125.0278 | 1959.1344 | 1350.5749 | 2.9066 | 129.7450 | 132.6516 | 497.8559 | 414.8799 |
+
+### 本轮结论
+
+- 当前 full-PCG demo 的低规格 `thermal2_n16` init/1iter 均通过，因此继续跑完规定
+  demo-only sweep；
+- 当前 demo 的 init-only 和 1iter 均能跑完整 `thermal2`，标准版旧记录中的完整
+  规模 `ctrl=0x0` 失败边界没有复现；
+- 数值校验通过，1iter 最大误差远低于 `DIFF_TOL=1e-4`；
+- 性能仍不满足当前 SpMV 优化目标：`thermal2_n262144` 的 1iter
+  `kernel_reported=426.7009 ms`，约为当前标准版 `188.8202 ms` 的 `2.26x`，
+  也比上一 2026-05-27 full-PCG demo 的 `416.6492 ms` 略慢；
+- 完整 `thermal2` 的 1iter 为 `1959.1344 ms`，比上一 demo 的
+  `1887.4481 ms` 略慢，但两者都能返回完整规模；
+- 本轮只更新 README/testing/HTML 测试记录，不更新正式 `source.diff`。

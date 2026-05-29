@@ -2,13 +2,13 @@
 
 ## 当前状态
 
-记录时间：2026-05-28
+记录时间：2026-05-28，更新：2026-05-29
 
 本目录是 single TAPA SpMV 与 full-PCG service/control 拆分边界的新目标记录。
 历史上本轮先生成过一个 TAPA-PCG service SpMV 抽出版 demo bitstream；该 bitstream
 在最小上板 smoke 中 timeout。当前源码已经切回 Cuper-compatible one-shot
 `CuperPcgSpmv(...)`，并已在 2026-05-29 生成新的 one-shot demo bitstream。当前
-demo 文件尚未上板测试。
+demo 文件已完成 demo-only 上板测试，single SpMV 可返回到完整 `thermal2`。
 
 当前 one-shot demo 已同步到：
 
@@ -757,6 +757,73 @@ timeout 240s make run-cuper-pcg-tapa-fpga \
 - 当前 `CuperPcgSpmv` one-shot single SpMV 的 n16/n1024 软件仿真返回且 diff 通过；
 - full `CuperPcg` n16/n1024 软件仿真也返回，说明去掉 single SpMV 控制壳没有破坏
   full-PCG 软件路径；
-- 当前没有启动新硬件构建，也没有生成新的 one-shot demo xclbin；
-- `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史 service 抽出版
-  bitstream，不代表当前源码。
+- 当时没有启动新硬件构建，也没有生成新的 one-shot demo xclbin；后续已在
+  2026-05-29 完成 one-shot demo 硬件构建并覆盖 `395bitstream/` single-SpMV
+  demo 槽；
+- `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 当前已经是
+  UUID `c95c1dfc-20ca-9152-279e-bafdf35fdc3d` 的 one-shot demo，不再是历史
+  service 抽出版。
+
+## 2026-05-29 one-shot demo-only 上板测试
+
+日志目录：
+
+```text
+logs/codex_two_demo_test_20260529_1300/
+```
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+kernel: CuperPcgSpmv
+UUID: c95c1dfc-20ca-9152-279e-bafdf35fdc3d
+SHA256: 19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2
+DATA/KERNEL/HBM clock: 147 / 500 / 418 MHz
+```
+
+本轮按 demo-only 口径只跑当前 `Cuper-compatible one-shot` single SpMV demo，
+不重跑四个标准 bitstream。本轮未跑 PCG，无 init/1iter 过程；PCG 相关数据保留
+在 full-PCG demo 记录中。
+
+运行命令：
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv TARGET=hw \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
+  SPMV_REPEATS=3 DIFF_TOL=1e-1
+```
+
+### 退出状态与计时
+
+| 数据集 | rc | spmv_avg ms | GFLOP/s | max_abs_diff | max_rel_diff | 状态 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 0 | 0.068825 | 0.000465 | 3.7558e-07 | 7.6333e-08 | ok |
+| `thermal2_n65536` | 0 | 0.149121 | 5.8610 | 2.3596e-06 | 8.2651e-04 | ok |
+| `thermal2_n131072` | 0 | 0.235847 | 7.3443 | 3.2888e-06 | 1.3183e-03 | ok |
+| `thermal2_n262144` | 0 | 0.425394 | 8.2229 | 3.2376e-06 | 3.1482e-03 | ok |
+| `thermal2` | 0 | 1.781541 | 9.6325 | 1.6333e-06 | 4.4911e-05 | ok |
+
+### 和 standalone TAPA Cuper SpMV 标准记录对比
+
+标准基线复用 `395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin` 的既有
+HTML/Markdown 记录，本轮没有重跑标准版。
+
+| 数据集 | TAPA 标准 spmv_avg ms | 本 demo spmv_avg ms | 本 demo / 标准 | 备注 |
+| --- | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 0.0670 | 0.068825 | 1.03x | 共同成功点，demo 略慢 |
+| `thermal2_n65536` | 0.1379 | 0.149121 | 1.08x | 共同成功点，demo 略慢 |
+| `thermal2_n131072` | 0.2197 | 0.235847 | 1.07x | 共同成功点，demo 略慢 |
+| `thermal2_n262144` | timeout | 0.425394 | - | 标准旧记录 180s timeout，本 demo 返回 |
+| `thermal2` | timeout | 1.781541 | - | 标准旧记录 180s timeout，本 demo 返回 |
+
+结论：
+
+- 低规格 `thermal2_n16` 已通过，因此按纪律继续跑完了规定 demo-only sweep；
+- 当前 one-shot demo 的成功边界从标准旧记录的 `thermal2_n131072` 扩到完整
+  `thermal2`，这是功能边界改善；
+- 共同成功点上，本 demo 比 standalone TAPA Cuper SpMV 标准略慢约 2.7% 到 8.1%，
+  不能声明为单点性能提升；
+- 数值校验全部通过，`max_rel_diff` 均低于 `DIFF_TOL=1e-1`；
+- 本轮只更新 README/testing/HTML 测试记录，不更新正式 `source.diff`。
