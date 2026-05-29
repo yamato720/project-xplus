@@ -337,6 +337,8 @@ def parse_cuper_tapa_fpga_pcg_output(output: str) -> dict[str, dict[str, object]
         "stage_work_ticks": {},
         "stage_cycles": {},
         "stage_ms": {},
+        "pcg_spmv_ms": {},
+        "pcg_control_ms": {},
     }
     for raw_line in output.splitlines():
         line = raw_line.strip()
@@ -352,6 +354,10 @@ def parse_cuper_tapa_fpga_pcg_output(output: str) -> dict[str, dict[str, object]
             parsed["stage_cycles"] = parse_report_kv(line)
         elif line.startswith("[stage-ms]"):
             parsed["stage_ms"] = parse_report_kv(line)
+        elif line.startswith("[pcg-spmv-ms]"):
+            parsed["pcg_spmv_ms"] = parse_report_kv(line)
+        elif line.startswith("[pcg-control-ms]"):
+            parsed["pcg_control_ms"] = parse_report_kv(line)
     return parsed
 
 
@@ -432,6 +438,8 @@ def write_cuper_tapa_fpga_pcg_report(root: Path,
   {report_table("[check]", parsed["check"])}
   {report_table("[timing-ms]", parsed["timing_ms"])}
   {report_table("[stage-ms]", parsed["stage_ms"])}
+  {report_table("[pcg-spmv-ms]", parsed["pcg_spmv_ms"])}
+  {report_table("[pcg-control-ms]", parsed["pcg_control_ms"])}
   {report_table("[stage-cycles]", parsed["stage_cycles"])}
   {report_table("[stage-work-ticks]", parsed["stage_work_ticks"])}
   <h2>Command</h2>

@@ -138,7 +138,7 @@ init_zp_reduce:
 pcg_loop:
         for (INDEX_TYPE iter = 0; iter < Max_iters && rr > Tau; ++iter) {
 #pragma HLS loop_tripcount min=1 max=1000
-    // 每轮 SpMV：将当前搜索方向 p 送入 Cuper 流水，计算 AP=A*p。
+            // 每轮 SpMV：将当前搜索方向 p 送入 Cuper 流水，计算 AP=A*p。
             pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageBegin);
             pcg_send_spmv_command(Command_out,
                                   Matrix_Command_out,

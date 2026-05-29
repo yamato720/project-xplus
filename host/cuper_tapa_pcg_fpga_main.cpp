@@ -14,8 +14,10 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -140,6 +142,30 @@ struct PcgStageReport {
     std::size_t cycle_metric_index;
 };
 
+struct PcgStageTimes {
+    double init_spmv = 0.0;
+    double init_zp = 0.0;
+    double iter_spmv = 0.0;
+    double dot_p_ap = 0.0;
+    double update_xr = 0.0;
+    double update_z = 0.0;
+    double update_p = 0.0;
+    double controller_total = 0.0;
+    double timer_total = 0.0;
+
+    double spmv_total() const {
+        return init_spmv + iter_spmv;
+    }
+
+    double non_spmv_total() const {
+        return init_zp + dot_p_ap + update_xr + update_z + update_p;
+    }
+
+    double accounted_stage_total() const {
+        return spmv_total() + non_spmv_total();
+    }
+};
+
 double elapsed_ms(const std::chrono::steady_clock::time_point start,
                   const std::chrono::steady_clock::time_point end) {
     return std::chrono::duration<double, std::milli>(end - start).count();
@@ -158,9 +184,70 @@ constexpr std::array<PcgStageReport, 7> kPcgStageReports = {{
     {"update_z", 9, 21},
     {"update_p", 10, 22},
 }};
+double clock_mhz_to_period_ns(const double clock_mhz) {
+    return 1000.0 / clock_mhz;
+}
 
-double cycles_to_ms(const double cycles) {
-    return cycles * kCuperTapaPcgKernelClockPeriodNs * 1.0e-6;
+double cycles_to_ms(const double cycles, const double clock_period_ns) {
+    return cycles * clock_period_ns * 1.0e-6;
+}
+
+double clamp_small_negative_ms(const double value) {
+    return (value < 0.0 && value > -1.0e-9) ? 0.0 : value;
+}
+
+double read_data_clock_mhz_from_info(const std::filesystem::path& info_path) {
+    std::ifstream input(info_path);
+    if (!input) {
+        return 0.0;
+    }
+
+    std::string line;
+    bool in_data_clock_block = false;
+    const std::regex frequency_pattern(R"(Frequency:\s*([0-9]+(?:\.[0-9]+)?)\s*MHz)");
+    while (std::getline(input, line)) {
+        if (line.find("Name:") != std::string::npos &&
+            line.find("DATA_CLK") != std::string::npos) {
+            in_data_clock_block = true;
+            continue;
+        }
+        if (!in_data_clock_block) {
+            continue;
+        }
+
+        std::smatch match;
+        if (std::regex_search(line, match, frequency_pattern)) {
+            return std::stod(match[1].str());
+        }
+        if (line.find("Name:") != std::string::npos) {
+            in_data_clock_block = false;
+        }
+    }
+
+    return 0.0;
+}
+
+double effective_stage_clock_mhz(const CliOptions& options) {
+    if (!options.bitstream.empty()) {
+        const std::filesystem::path info_path = std::filesystem::path(options.bitstream)
+                                                    .concat(".info");
+        const double data_clock_mhz = read_data_clock_mhz_from_info(info_path);
+        if (data_clock_mhz > 0.0) {
+            return data_clock_mhz;
+        }
+    }
+    return kCuperTapaPcgKernelClockMhz;
+}
+
+const char* effective_stage_clock_source(const CliOptions& options) {
+    if (!options.bitstream.empty()) {
+        const std::filesystem::path info_path = std::filesystem::path(options.bitstream)
+                                                    .concat(".info");
+        if (read_data_clock_mhz_from_info(info_path) > 0.0) {
+            return "xclbin_info_DATA_CLK";
+        }
+    }
+    return "assumed_3p3ns";
 }
 
 constexpr std::array<int, 28> kCuperPcgMemoryGroups = {
@@ -916,6 +1003,20 @@ int main(int argc, char** argv) {
                   << " total="
                   << std::chrono::duration<double, std::milli>(total_end - total_start).count()
                   << "\n";
+        const double stage_clock_mhz = effective_stage_clock_mhz(options);
+        const double stage_clock_period_ns = clock_mhz_to_period_ns(stage_clock_mhz);
+        const char* stage_clock_source = effective_stage_clock_source(options);
+        PcgStageTimes stage_times;
+        stage_times.init_spmv = cycles_to_ms(metrics[16], stage_clock_period_ns);
+        stage_times.init_zp = cycles_to_ms(metrics[17], stage_clock_period_ns);
+        stage_times.iter_spmv = cycles_to_ms(metrics[18], stage_clock_period_ns);
+        stage_times.dot_p_ap = cycles_to_ms(metrics[19], stage_clock_period_ns);
+        stage_times.update_xr = cycles_to_ms(metrics[20], stage_clock_period_ns);
+        stage_times.update_z = cycles_to_ms(metrics[21], stage_clock_period_ns);
+        stage_times.update_p = cycles_to_ms(metrics[22], stage_clock_period_ns);
+        stage_times.controller_total = cycles_to_ms(metrics[23], stage_clock_period_ns);
+        stage_times.timer_total = cycles_to_ms(metrics[24], stage_clock_period_ns);
+
         std::cout << std::fixed << std::setprecision(0);
         std::cout << "[stage-work-ticks]"
                   << " packet_count=" << metrics[4];
@@ -927,7 +1028,9 @@ int main(int argc, char** argv) {
                   << " max_iters=" << metrics[13]
                   << "\n";
         std::cout << "[stage-cycles]"
-                  << " clock_mhz=" << std::setprecision(6) << kCuperTapaPcgKernelClockMhz;
+                  << " clock_mhz=" << std::setprecision(6)
+                  << stage_clock_mhz
+                  << " clock_source=" << stage_clock_source;
         for (const PcgStageReport& stage : kPcgStageReports) {
             std::cout << " " << stage.name << "=" << std::setprecision(0)
                       << metrics[stage.cycle_metric_index];
@@ -936,12 +1039,62 @@ int main(int argc, char** argv) {
                   << " timer_total=" << metrics[24]
                   << "\n";
         std::cout << std::scientific << std::setprecision(12);
-        std::cout << "[stage-ms]";
-        for (const PcgStageReport& stage : kPcgStageReports) {
-            std::cout << " " << stage.name << "=" << cycles_to_ms(metrics[stage.cycle_metric_index]);
-        }
-        std::cout << " controller_total=" << cycles_to_ms(metrics[23])
-                  << " timer_total=" << cycles_to_ms(metrics[24])
+        std::cout << "[stage-ms]"
+                  << " init_spmv=" << stage_times.init_spmv
+                  << " init_zp=" << stage_times.init_zp
+                  << " iter_spmv=" << stage_times.iter_spmv
+                  << " dot_p_ap=" << stage_times.dot_p_ap
+                  << " update_xr=" << stage_times.update_xr
+                  << " update_z=" << stage_times.update_z
+                  << " update_p=" << stage_times.update_p
+                  << " controller_total=" << stage_times.controller_total
+                  << " timer_total=" << stage_times.timer_total
+                  << "\n";
+        const double pcg_spmv_calls = 1.0 + static_cast<double>(status[1]);
+        // metrics[18]/iter_spmv 已经是所有 PCG 迭代 A*p 的累计时间；
+        // 多迭代报告只用它本身，不能再乘 Status[1]。
+        const double pcg_spmv_total_ms = stage_times.spmv_total();
+        const double pcg_spmv_avg_ms = pcg_spmv_calls > 0.0
+                                           ? pcg_spmv_total_ms / pcg_spmv_calls
+                                           : 0.0;
+        const double pcg_spmv_seconds = pcg_spmv_total_ms * 1.0e-3;
+        const double pcg_spmv_gflops = pcg_spmv_seconds > 0.0
+                                           ? (2.0 * static_cast<double>(dataset.nnz()) *
+                                              pcg_spmv_calls) /
+                                                 pcg_spmv_seconds / 1.0e9
+                                           : 0.0;
+        std::cout << "[pcg-spmv-ms]"
+                  << " clock_mhz=" << stage_clock_mhz
+                  << " clock_source=" << stage_clock_source
+                  << " init_spmv=" << stage_times.init_spmv
+                  << " iter_spmv=" << stage_times.iter_spmv
+                  << " spmv_total=" << pcg_spmv_total_ms
+                  << " spmv_calls=" << std::defaultfloat << pcg_spmv_calls
+                  << std::scientific
+                  << " spmv_avg=" << pcg_spmv_avg_ms
+                  << " gflops=" << pcg_spmv_gflops
+                  << "\n";
+        const double pcg_non_spmv_total_ms = stage_times.non_spmv_total();
+        const double accounted_stage_total_ms = stage_times.accounted_stage_total();
+        const double unaccounted_controller_ms =
+            clamp_small_negative_ms(stage_times.controller_total - accounted_stage_total_ms);
+        const double kernel_minus_controller_ms =
+            clamp_small_negative_ms(kernel_reported_ms - stage_times.controller_total);
+        std::cout << "[pcg-control-ms]"
+                  << " clock_mhz=" << stage_clock_mhz
+                  << " clock_source=" << stage_clock_source
+                  << " controller_total=" << stage_times.controller_total
+                  << " spmv_total=" << pcg_spmv_total_ms
+                  << " pcg_non_spmv_total=" << pcg_non_spmv_total_ms
+                  << " init_zp=" << stage_times.init_zp
+                  << " dot_p_ap=" << stage_times.dot_p_ap
+                  << " update_xr=" << stage_times.update_xr
+                  << " update_z=" << stage_times.update_z
+                  << " update_p=" << stage_times.update_p
+                  << " accounted_stage_total=" << accounted_stage_total_ms
+                  << " unaccounted_controller=" << unaccounted_controller_ms
+                  << " kernel_reported=" << kernel_reported_ms
+                  << " kernel_minus_controller=" << kernel_minus_controller_ms
                   << "\n";
 
         // Short benchmark runs intentionally use small MAX_ITERS values; max_iter
