@@ -16,6 +16,10 @@
 单 SpMV demo 单独测试。这样可以把 SpMV 本体、vector feed、AP 回收和
 controller/dot/update 开销拆开看。
 
+2026-05-29 已额外生成一个当前源码下的 full-PCG `CuperPcg` demo bitstream，
+放入 `395bitstream/` 的第二个 demo 槽。它用于确认 full-PCG 路径仍可完成
+`hw` 构建；尚未上板测试，不改变下面 2026-05-27 packed feed/AP demo 的板上结论。
+
 代码里要明确区分两套 SpMV：
 
 | 形态 | 入口/文件 | 作用 |
@@ -93,10 +97,15 @@ controller/dot/update 开销拆开看。
 已完成：
 
 1. tmux 中 `hw` 构建成功结束。
-2. xclbin 已以 `-demo` 后缀放入 `395bitstream/`，覆盖当前 demo 槽位。
+2. xclbin 已以 `-demo` 后缀放入 `395bitstream/`，当时覆盖 full-PCG demo 槽位。
 3. `.xclbin.info`、UUID、SHA256、DATA/HBM clock 已记录到 `testing.md`。
 4. 2026-05-28 按用户要求完成 demo-only 上板测试，并更新
    `testing.md` 与 `395bitstream/cuper_spmv_u55c_compare_20260524.html`。
+5. 2026-05-29 同批源码下的 full-PCG demo 构建成功，并同步为
+   `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`：
+   UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a`，SHA256
+   `83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1`，
+   DATA/KERNEL/HBM clock `210/500/408 MHz`。
 
 仍需完成：
 
@@ -107,3 +116,5 @@ controller/dot/update 开销拆开看。
    重新跑 full-PCG init/1iter。
 3. 回填后再分析 `dot_p_ap`、`update_xr`、`update_p` 的大规模退化；不要用这些
    controller 阶段开销掩盖 SpMV 本体结论。
+4. 对 2026-05-29 full-PCG demo 补 demo-only 上板测试后，再判断是否只是构建
+   smoke，还是可以作为 full-PCG 后续性能对比点。

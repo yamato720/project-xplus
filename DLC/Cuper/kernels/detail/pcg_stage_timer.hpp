@@ -28,7 +28,7 @@ stage_timer_loop:
 #pragma HLS pipeline II=1
         ++now;
         if (!Stage_Event_in.empty()) {
-            PcgStageEvent event;
+            PcgStageEvent event = {0, 0};
             Stage_Event_in.try_read(event);
             if (event.op == kPcgStageStop) {
                 break;

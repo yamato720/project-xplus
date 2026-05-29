@@ -47,7 +47,8 @@ struct CliOptions {
     double diff_tol = 1.0e-3;
     // true 时只测一次或多次 Cuper SpMV，不进入 host-side PCG 主循环。
     bool spmv_only = false;
-    // true 时调用从 CuperPcg 内部抽出的服务化 SpMV 顶层 CuperPcgSpmv。
+    // true 时调用 CuperPcgSpmv demo 顶层。该顶层保留历史 kernel 名，
+    // 当前内部采用 Cuper 风格的一次性 SpMV task graph。
     bool pcg_spmv_service = false;
     int spmv_repeats = 1;
 };
@@ -156,8 +157,8 @@ class CuperTapaSpmv {
     CuperPcgBackendInfo backend_info() const {
         return CuperPcgBackendInfo{
             pcg_spmv_service_
-                ? (bitstream_.empty() ? "tapa-cuper-pcg-service-sw-sim-fp32-spmv+fp64-pcg"
-                                      : "tapa-cuper-pcg-service-hw-fp32-spmv+fp64-pcg")
+                ? (bitstream_.empty() ? "tapa-cuper-compat-demo-sw-sim-fp32-spmv+fp64-pcg"
+                                      : "tapa-cuper-compat-demo-hw-fp32-spmv+fp64-pcg")
                 : (bitstream_.empty() ? "tapa-cuper-sw-sim-fp32-spmv+fp64-pcg"
                                       : "tapa-cuper-hw-fp32-spmv+fp64-pcg"),
             Slice_WIDTH,
@@ -321,7 +322,7 @@ int main(int argc, char** argv) {
         std::cout << "[xplus] dataset=" << options.dataset_dir
                   << " mode=" << (options.spmv_only ? "cuper-spmv-tapa" : "cuper-pcg-tapa")
                   << " spmv="
-                  << (options.pcg_spmv_service ? "tapa-cuper-pcg-service"
+                  << (options.pcg_spmv_service ? "tapa-cuper-compat-demo"
                                                : "tapa-cuper")
                   << " bitstream=" << (options.bitstream.empty() ? "<software-sim>" : options.bitstream)
                   << "\n";

@@ -3,37 +3,46 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-spmv`
-- 状态：PCG service SpMV 抽出版第一版 demo bitstream 已生成并放入
-  `395bitstream/`；2026-05-28 demo-only 上板 smoke 在 `thermal2_n16`
-  两次 180s timeout，未晋级。之后已做 finite-exit 修复尝试；本轮进一步
-  清理 PCG service 内部 `Iteration_num` 重复语义，软件仿真已通过，尚未
-  启动新的硬件构建，正式 `source.diff` 不更新
+- 状态：第一版 `CuperPcgSpmv` PCG service 抽出版 demo bitstream 已生成并放入
+  `395bitstream/`，但 2026-05-28 demo-only 上板 smoke 在 `thermal2_n16`
+  两次 180s timeout，未晋级。后续 finite-exit / service helper 清理均只作为
+  历史探索记录保留。当前源码已经按最新边界改成 **Cuper-compatible one-shot
+  single SpMV**：`CuperPcgSpmv(...)` 保留历史 kernel 名和 host/demo 入口，但
+  内部复用 `Cuper(...)` 同款 `SpElement_list_ptr_Loader` / `Vector_Loader` /
+  `Matrix_Loader` / `Core` / `Accumulator` / `Vector_Checker` / `Mult_Sort_Tree` /
+  `Vector_Writer`，不再接 `pcg_spmv_service.hpp` 的 command/stop/service 控制壳。
+  2026-05-29 已生成新的 one-shot demo xclbin 并覆盖当前 single-SpMV demo 槽；
+  尚未上板测试，正式 `source.diff` 不更新
 - 当前标准版：`395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`
 - 当前 demo 命名：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
 - 标准基线入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `Cuper(...)`
 - 本轮抽出版入口：`DLC/Cuper/kernels/Cuper.cpp` 中的 `CuperPcgSpmv(...)`
 - 标准 SpMV 文件：`DLC/Cuper/kernels/detail/cuper_spmv_tasks.hpp`
-- 本轮抽出版文件：`DLC/Cuper/kernels/detail/pcg_spmv_service.hpp`
+- 当前 demo 实现文件：`DLC/Cuper/kernels/detail/cuper_top_graphs.hpp` +
+  `DLC/Cuper/kernels/detail/cuper_spmv_tasks.hpp`
 - 构建目录：`cuper-tapa-spmv-u55c-20260528-demo-build/`
-- 构建日志：`logs/cuper_tapa_pcg_spmv_hw_20260528_023906.log`
+- 构建日志：`logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log`
 - 生成文件：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin`
-- UUID：`08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`
-- SHA256：`0be3ed806febc39ad488ed833c063390978bb2911d4fa298c2056ef2e5ce6356`
-- DATA/KERNEL/HBM clock：222 / 500 / 450 MHz
+- UUID：`c95c1dfc-20ca-9152-279e-bafdf35fdc3d`
+- SHA256：`19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2`
+- DATA/KERNEL/HBM clock：147 / 500 / 418 MHz
 
 ## 目标
 
-本目录专门负责 **single TAPA SpMV** 的优化，不再混入 full-PCG 的
-controller/dot/update 路径。
+本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**。
+最新结论是：单 SpMV demo 不再承载 PCG 控制优化。
 
-目标是把 `cuper-tapa-spmv` 这条原生 TAPA Cuper SpMV 路线本身先做稳、做快：
+当前目标：
 
 1. 保持或提升当前小中规模 `spmv_avg` 性能；
 2. 优先排查大规模矩阵的 timeout、边界和数据正确性问题；
-3. 所有结论只看 single SpMV 口径，不使用 `init_spmv`、`iter_spmv`、
-   `controller_total` 等 full-PCG 指标；
-4. 只有 single SpMV demo 经板上测试确认有效后，才考虑把对应思想迁移回
-   `CuperPcg`。
+3. `CuperPcgSpmv(...)` 只做 Cuper 风格 one-shot single SpMV，不引入
+   `Pcg_Single*` controller/command/stop/writer-done；
+4. PCG service/control 优化只在 full `CuperPcg(...)` 路径处理，主要看
+   `detail/pcg_spmv_service.hpp`、`detail/pcg_controller.hpp` 和相关
+   drain/timer 代码；
+5. 若要证明某个优化会同步进 PCG，必须修改 full `CuperPcg(...)` 实际使用的
+   service 路径，并补 full-PCG 软件或硬件验证；不能只凭 single SpMV demo 结论判断。
 
 ## 和旧目标的区别
 
@@ -43,11 +52,14 @@ controller/dot/update 路径。
 docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
 ```
 
-旧目标是让 `CuperPcg` 内嵌 SpMV 逐步接近 standalone/native TAPA Cuper SpMV，
-属于 full-PCG 体系内的 SpMV 服务路径优化。
+旧目标是把 `CuperPcg` 内嵌 SpMV 逐步接近 standalone/native TAPA Cuper SpMV，
+属于 full-PCG 体系内的 SpMV 服务路径优化记录。
 
-本目录只研究 `Cuper(...)` single SpMV 自身。它是标准基准线，不是
-`CuperPcg` 的 PCG 服务化 SpMV。
+本目录曾尝试把 full-PCG 的 service SpMV 抽成 `CuperPcgSpmv(...)` 单独测试，
+但该路线在板上最小数据集 timeout，且容易把 single SpMV 和 PCG service 控制混在
+一起。当前边界已改为：`CuperPcgSpmv(...)` 只保留 demo kernel 名和 ABI，
+内部回到 Cuper 风格 one-shot 图；真正影响 full-PCG 的优化仍回到
+`CuperPcg(...)` service 路径里做。
 
 ## 2026-05-28 补充：先生成 PCG service 单 SpMV
 
@@ -55,7 +67,8 @@ docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
 新增 `CuperPcgSpmv(...)` 顶层：外部仍按 `cuper-tapa-spmv` demo 归类，ABI 保持
 `Matrix_data + X -> Y_out`，内部则走 `CuperPcg` 当前使用的
 `pcg_spmv_service.hpp` 服务化 SpMV 链。它用于回答“full-PCG 内嵌 SpMV 单独拉出来
-到底有多快”，不是标准 `Cuper(...)` 的优化补丁。
+到底有多快”，并作为后续 PCG 可同步 SpMV 优化入口；不是标准 `Cuper(...)` 的
+优化补丁。
 
 构建产物：
 
@@ -114,6 +127,38 @@ docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/failure_
 ```text
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/code_reading_guide.md
 ```
+
+## 2026-05-29 补充：one-shot Cuper-compatible demo
+
+在去掉 single SpMV 路径里的 PCG service/control 外壳后，已重新生成
+`CuperPcgSpmv` demo bitstream。当前文件仍使用历史 demo 文件名：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+```
+
+但它已经不再是旧 service 抽出版。当前 UUID 为
+`c95c1dfc-20ca-9152-279e-bafdf35fdc3d`，SHA256 为
+`19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2`，
+DATA/KERNEL/HBM clock 为 `147/500/418 MHz`。旧 2026-05-28 timeout 结论只对应
+旧 UUID `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不能再套到当前同名 demo 文件上。
+
+构建日志：
+
+```text
+logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log
+```
+
+构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
+Total elapsed time: 7h 29m 0s
+```
+
+当前状态：只确认 `hw` bitstream 生成成功并已同步到 `395bitstream/`；尚未做
+demo-only 上板测试，因此不建议晋级，也不更新正式 `source.diff`。
 
 ## 2026-05-28 补充：finite-exit 修复尝试
 
@@ -196,6 +241,92 @@ demo-only `thermal2_n16` smoke 验证。验证前仍不建议晋级，也不更�
 `n1024` 和 `n4096` 的 full-PCG 测试使用 `MAX_ITERS=1`，所以 `status=max_iter`
 是预期结果；这里看的是 FPGA-PCG 软件模型和 CPU 同口径 1 次迭代是否一致。
 
+## 2026-05-28 补充：统一 SpMV command 广播 helper
+
+上一节去掉 `Iteration_num` 后，full `Pcg_Controller` 和 single
+`Pcg_SingleSpmv_Controller` 仍各自手写一份 command/stop 广播循环。本轮把这部分
+收敛到 `pcg_common.hpp`：
+
+- `pcg_make_spmv_command(vector_source)`：构造一次普通 SpMV command；
+- `pcg_make_spmv_stop_command()`：构造 stop command；
+- `pcg_send_spmv_command(...)`：同时写入 `Command_Stream[0..1]` 和
+  `Matrix_Command_Stream[0..15]`；
+- `pcg_send_spmv_stop(...)`：用同一套路径广播 stop。
+
+这次不是把 full-PCG controller 直接复用于 single SpMV。两边仍保留不同控制语义：
+full-PCG controller 负责 PCG 初始化、迭代、checker/sort stop 和 metrics；
+single SpMV controller 仍用 writer-done 作为 drain 屏障，然后只关闭
+loader/core/destroy 常驻服务链。统一范围只限 command 构造和广播协议。
+
+本轮软件复测：
+
+| 路径 | 数据集 | 结果 | 关键误差 |
+| --- | --- | --- | --- |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n16` | `status=ok` | `max_abs_diff=3.7558e-07` |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n1024` | `status=ok` | `max_abs_diff=1.3506e-06` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n16` | `converged` | `max_abs_diff=1.0868e-08` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n1024` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=9.2782e-10` |
+
+本轮没有生成新 xclbin，也不更新正式 `source.diff`。
+
+## 2026-05-28 补充：共享向量/checker/sort helper
+
+本轮继续把 single SpMV demo 和 full `CuperPcg` 共同依赖的 SpMV service 逻辑往
+公共 helper 收敛：
+
+- `pcg_read_vector_packets(...)`：统一 packed `float_v16` 向量 HBM 读取循环；
+- `pcg_try_forward_checker_value(...)`：统一 checker 对一拍 `float_v2` 的
+  padding 过滤和转发；
+- `pcg_checker_forward_round(...)`：给 single SpMV finite-exit checker 使用，
+  按固定输出数量完整 drain 一轮；
+- `pcg_try_pack_float_v16(...)`：统一 8 路 `float_v2` 到 1 路 `float_v16`
+  的打包逻辑。
+
+这里踩到一个重要边界：full-PCG 的 `Pcg_Vector_Checker` 是常驻服务，不能只调用
+“整轮 drain” helper 后再检查 stop。软件仿真中曾出现 `thermal2_n16`
+`MAX_ITERS=1` 在 180s timeout，原因是 checker 在 stop token 到达前抢先进下一轮，
+然后等待不存在的新一轮 `Vector_Y_Stream` 数据。最终修复为：共享“单步转发”逻辑，
+但 full-PCG checker 在等待每个输入期间仍持续检查 `Stop_in`；single SpMV checker
+则继续使用固定输出数量自然返回。
+
+修正后软件复测：
+
+| 路径 | 数据集 | 结果 | 关键误差 |
+| --- | --- | --- | --- |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n16` | `status=ok` | `max_abs_diff=3.7558e-07` |
+| `CuperPcgSpmv` service single SpMV | `thermal2_n1024` | `status=ok` | `max_abs_diff=1.3506e-06` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n16` | `converged` | `max_abs_diff=1.0868e-08` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n1024` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=9.2782e-10` |
+
+本轮仍没有生成新 xclbin，也不更新正式 `source.diff`。
+
+## 2026-05-28 补充：single SpMV 去掉 PCG service 控制壳
+
+按最新边界，`CuperPcgSpmv(...)` 不再作为“从 full `CuperPcg(...)` service 链抠出
+来的单 SpMV”。它现在只是保留历史 kernel 名和 `run-cuper-tapa-pcg-spmv`
+入口的 Cuper-compatible demo：
+
+- 删除当前源码中的 `Pcg_SingleSpmv_Controller`、`Pcg_Single_Vector_Loader`、
+  `Pcg_Single_Vector_Checker`、`Pcg_Single_Mult_Sort_Tree`、
+  `Pcg_Single_Vector_Writer` 等单 SpMV service 包装层；
+- `CuperPcgSpmv(...)` 改用和 `Cuper(...)` 同款的一次性 task graph；
+- `pcg_spmv_service.hpp` 只服务 full `CuperPcg(...)`；
+- host 兼容保留 `--pcg-spmv-service` flag，但输出标签改为
+  `tapa-cuper-compat-demo`，避免误读成 PCG service 抽出版。
+
+软件验证：
+
+| 路径 | 数据集 | 结果 | 关键误差 |
+| --- | --- | --- | --- |
+| `CuperPcgSpmv` Cuper-compatible one-shot | `thermal2_n16` | `status=ok` | `max_abs_diff=3.7558e-07` |
+| `CuperPcgSpmv` Cuper-compatible one-shot | `thermal2_n1024` | `status=ok` | `max_abs_diff=1.3506e-06` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n16` | `converged` | `max_abs_diff=1.0868e-08` |
+| full `CuperPcg` FPGA-PCG software sim | `thermal2_n1024` | `max_iter`，与 CPU 1iter 对齐 | `max_abs_diff=9.2782e-10` |
+
+注意：`395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史生成的
+`CuperPcgSpmv` service 抽出版 demo，不代表当前 one-shot 源码。当前源码尚未启动
+新的硬件构建；若要上板测试当前 one-shot 版本，需要重新生成 demo xclbin。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：
@@ -211,7 +342,8 @@ demo-only `thermal2_n16` smoke 验证。验证前仍不建议晋级，也不更�
 
 ## 记录策略
 
-- 后续 single TAPA SpMV 的源码改动、demo bitstream、测试结论和 HTML 摘要都写入本目录。
+- 后续 single SpMV demo / full-PCG service-control 边界相关源码改动、demo
+  bitstream、测试结论和 HTML 摘要都写入本目录。
 - `README.md` 写当前状态和是否建议晋级。
 - `changes.md` 写每轮 single SpMV demo 具体改了什么。
 - `testing.md` 写 demo-only 测试命令、数据、边界和关键输出。

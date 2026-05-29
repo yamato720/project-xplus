@@ -2,17 +2,48 @@
 
 ## 当前状态
 
-记录时间：2026-05-27
+记录时间：2026-05-27，更新：2026-05-29
 
-本版已完成 `hw` bitstream 构建，并已覆盖 `395bitstream/` 当前 demo 槽位：
+当前 full-PCG demo 已完成 `hw` bitstream 构建，并放入 `395bitstream/` 第二个
+demo 槽位：
+
+```bash
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
+```
+
+当前 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| UUID | `086a3345-ddf0-ffdd-b260-16ca5fa5223a` |
+| SHA256 | `83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1` |
+| DATA clock | 210 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 408 MHz |
+| 构建日志 | `logs/cuper_tapa_pcg_hw_parallel_20260528_222446.log` |
+| 构建耗时 | 5h 6m 11s |
+
+关键构建输出：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-pcg-fpga-u55c-20260525-build/hw/CuperPcg.xclbin
+Total elapsed time: 5h 6m 11s
+```
+
+当前 2026-05-29 demo 尚未做 demo-only 上板测试，不能晋级为标准版。
+
+历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
+槽位：
 
 ```bash
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 ```
 
-当前 demo 文件会被后续新 demo 优先覆盖；旧 receive-path demo 的测试结论只作为
-历史记录保留，不再对应当前这个 `.xclbin` 文件。
+该历史 demo 文件已被 2026-05-29 demo 替换；旧 receive-path demo 和 2026-05-27
+packed feed/AP demo 的测试结论只作为历史记录保留，不再对应当前这个 `.xclbin` 文件。
 
 ## 已跑命令
 

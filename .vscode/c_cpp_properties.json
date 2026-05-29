@@ -1,0 +1,54 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Project-XPlus",
+      "compilerPath": "/usr/bin/g++",
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "linux-gcc-x64",
+      "includePath": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/host",
+        "${workspaceFolder}/kernels",
+        "${workspaceFolder}/DLC/Cuper/include",
+        "${workspaceFolder}/DLC/Cuper/kernels",
+        "${workspaceFolder}/DLC/Cuper/kernels/detail",
+        "${workspaceFolder}/../xilinx-local/opt/xilinx/xrt/include",
+        "${workspaceFolder}/../../.tapa/usr/include",
+        "/home/pyx/.tapa/usr/include",
+        "/home/pyx/vivado/Vitis_HLS/2022.2/include",
+        "/home/pyx/vivado/Vitis_HLS/2022.2/common/technology/autopilot",
+        "/opt/xilinx/xrt/include",
+        "/usr/include",
+        "/usr/local/include"
+      ],
+      "defines": [
+        "__SYNTHESIS__=0"
+      ],
+      "browse": {
+        "limitSymbolsToIncludedHeaders": false,
+        "path": [
+          "${workspaceFolder}",
+          "${workspaceFolder}/include",
+          "${workspaceFolder}/src",
+          "${workspaceFolder}/host",
+          "${workspaceFolder}/kernels",
+          "${workspaceFolder}/DLC/Cuper/include",
+          "${workspaceFolder}/DLC/Cuper/kernels",
+          "${workspaceFolder}/DLC/Cuper/kernels/detail",
+          "${workspaceFolder}/../xilinx-local/opt/xilinx/xrt/include",
+          "${workspaceFolder}/../../.tapa/usr/include",
+          "/home/pyx/.tapa/usr/include",
+          "/home/pyx/vivado/Vitis_HLS/2022.2/include",
+          "/home/pyx/vivado/Vitis_HLS/2022.2/common/technology/autopilot",
+          "/opt/xilinx/xrt/include",
+          "/usr/include",
+          "/usr/local/include"
+        ]
+      }
+    }
+  ]
+}

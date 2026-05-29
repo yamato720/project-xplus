@@ -1,0 +1,18 @@
+{
+  "C_Cpp.default.compilerPath": "/usr/bin/g++",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.cStandard": "c17",
+  "files.associations": {
+    "*.tpp": "cpp",
+    "*.ipp": "cpp",
+    "Cuper.h": "cpp",
+    "Cuper_common.h": "cpp",
+    "ap_int.h": "cpp",
+    "tapa.h": "cpp"
+  },
+  "files.exclude": {
+    "**/.Xil": true,
+    "**/.ipcache": true,
+    "**/logs": true
+  }
+}

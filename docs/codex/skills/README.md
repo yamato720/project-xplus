@@ -56,10 +56,16 @@ Project-XPlus/docs/codex/testing.md
 Project-XPlus/395bitstream/README.md
 ```
 
-当前 skill 目标是：优化 `Cuper(...)` / `cuper_spmv_tasks.hpp` 这条
-standalone/native TAPA Cuper single-SpMV 路线。不要把 full-PCG controller、
-FP64 dot/update 或 `CuperPcg(...)` / `pcg_spmv_service.hpp` 的服务化 SpMV 指标
-混进本目标。围绕该目标的连续修改记录统一维护在：
+`395bitstream/` 当前允许两个 demo 槽位并存：`cuper-tapa-spmv` single SpMV
+候选和 `cuper-tapa-pcg` full-PCG 候选。新 demo 只覆盖同主线旧 demo，四个标准
+bitstream 仍需用户明确确认后才能归档替换。
+
+当前 skill 目标边界是：single SpMV demo 不再承载 PCG service/control 优化。
+`CuperPcgSpmv(...)` 保留历史 kernel 名和 demo 构建入口，但内部应走和
+`Cuper(...)` 一样的 one-shot Cuper SpMV task graph。PCG 的控制和 service 优化
+只在 full `CuperPcg(...)` 路径处理；若要证明某个 SpMV 改动进入 PCG，必须修改
+`pcg_spmv_service.hpp` / `pcg_controller.hpp` 等 full-PCG 实际使用路径，并补跑
+full-PCG 验证。围绕该目标的连续修改记录统一维护在：
 
 ```text
 Project-XPlus/docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/

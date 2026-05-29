@@ -3,12 +3,13 @@
 ## 1. bitstream 同步目录
 
 `395bitstream/` 永远放当前要同步到服务器和用于对比的最新版本。同步目录的
-常态是“四个标准成品 + 一个 demo 候选槽”：
+常态是“四个标准成品 + 两个当前 demo 候选槽”：
 
 - 四个标准成品分别对应四条主线；
-- 第五个成品是当前 demo 候选，用 `-demo` 后缀标识；
-- 新生成的 demo 进入 `395bitstream/` 时，优先覆盖旧 demo 候选槽，不新增一串
-  历史 demo 文件。
+- 两个 demo 槽位用 `-demo` 后缀标识，目前分别服务 `cuper-tapa-spmv` 和
+  `cuper-tapa-pcg`；
+- 新生成的 demo 进入 `395bitstream/` 时，优先覆盖同主线旧 demo 候选槽，不新增一串
+  历史 demo 文件；不同主线 demo 可以同时保留，当前上限是两个。
 
 要求：
 
@@ -47,8 +48,9 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 
 4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
-5. `395bitstream/` 只保留一个当前 demo 候选槽。新 demo 可以直接覆盖旧 demo
-   文件和 `.xclbin.info`，但不能覆盖四条主线标准文件。
+5. `395bitstream/` 只保留两个当前 demo 候选槽。新 demo 可以直接覆盖同主线旧
+   demo 文件和 `.xclbin.info`，但不能覆盖四条主线标准文件；不同主线 demo
+   可以共存，当前默认是 `cuper-tapa-spmv` 一个、`cuper-tapa-pcg` 一个。
 6. demo 上板测试默认只跑新 demo 本身；同主线当前标准 bitstream 和其它三条标准
    bitstream 默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志，不要
    自动重跑四大标准版本。只有用户要求、标准 bitstream/host 变化、demo 结果与旧记录
@@ -66,10 +68,11 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
    其中 SpMV 对比组的标准基准是 standalone TAPA Cuper SpMV 标准曲线
    `cuper-tapa-spmv-u55c-20260522.xclbin`；一次迭代对比组才使用 TAPA full-PCG
    标准版的 `1iter kernel_reported`。
-   对从 `CuperPcg` 抠出来的 `cuper-tapa-spmv` 单 SpMV demo，按
-   `cuper-tapa-spmv` 主线 demo 同步；HTML 中标成 PCG SpMV 抽出版，并只进入
-   SpMV 对比组，不进入一次迭代对比组。PCG 诊断和一次迭代区域保留旧数据，但必须
-   标注“本轮未跑 PCG，无 init/1iter 过程/无一次迭代新数据”。
+   对 `CuperPcgSpmv` 这类 `cuper-tapa-spmv` 单 SpMV demo，按
+   `cuper-tapa-spmv` 主线 demo 同步；HTML 中要写清楚它到底是历史 PCG service
+   抽出版，还是当前 Cuper-compatible one-shot 图，并只进入 SpMV 对比组，不进入
+   一次迭代对比组。PCG 诊断和一次迭代区域保留旧数据，但必须标注“本轮未跑 PCG，
+   无 init/1iter 过程/无一次迭代新数据”。
 10. 每个 demo 或标准替换版本都要在 `docs/bitstream_summaries/<版本目录>/`
    留一份 Markdown 详细总结，并包含：
    - `README.md`：版本摘要和是否建议晋级；

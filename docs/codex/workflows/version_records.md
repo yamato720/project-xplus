@@ -19,11 +19,12 @@ docs/bitstream_summaries/YYYY-MM-DD-<主线>-<简短说明>/
 docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 ```
 
-这个目标的定义是：优化 `Cuper(...)` + `detail/cuper_spmv_tasks.hpp` 这条
-standalone/native TAPA Cuper single-SpMV 路线。它不负责 full-PCG 的 controller、
-FP64 dot/update 或 `CuperPcg` service-path 指标。`README.md`、`changes.md`、
-`testing.md` 记录当前最新 demo/尝试状态；`source.diff` 不是“每次尝试的草稿
-补丁”，只代表经过板上测试后确认有性能提升、值得继续保留或晋级的最新有效补丁。
+这个目标的最新定义是：single SpMV demo 不承载 PCG service/control 优化。
+`CuperPcgSpmv(...)` 保留历史 kernel 名和 demo 构建入口，但内部应走和
+`Cuper(...)` 一样的 one-shot Cuper SpMV task graph；PCG service/control 优化只在
+full `CuperPcg(...)` 路径记录和验证。`README.md`、`changes.md`、`testing.md`
+记录当前最新 demo/尝试状态；`source.diff` 不是“每次尝试的草稿补丁”，只代表
+经过板上测试后确认有性能提升、值得继续保留或晋级的最新有效补丁。
 
 目录内至少维护：
 
@@ -69,11 +70,13 @@ code_reading_guide.md
 
 1. 已完成对应 demo-only 上板测试，并把结果写入 HTML 和 `testing.md`。
 2. 对当前优化目标的核心性能指标有提升：
-   - 当前单 SpMV demo 阶段，对比 PCG 抽出版 `cuper-tapa-spmv` demo 的
-     `spmv_avg`、成功/timeout 边界和数值误差，标准基准使用
-     `docs/codex/workflows/reports.md` 定义的 standalone TAPA Cuper SpMV；
-   - 回填 full-PCG 后，1iter 对比使用 TAPA full-PCG 标准版和上一 demo 的同口径
-     记录；
+   - single SpMV demo 阶段，对比 Cuper-compatible demo 和 standalone TAPA
+     Cuper SpMV 的 `spmv_avg`、成功/timeout 边界和数值误差；
+   - PCG service/control 优化必须位于 full `CuperPcg(...)` 实际使用的
+     `pcg_spmv_service.hpp`、`pcg_controller.hpp` 或相关 drain/timer 路径；
+   - 只改 `CuperPcgSpmv(...)` one-shot demo 不能算“同步进 PCG”的性能优化；
+   - full-PCG 同步验证使用 TAPA full-PCG 标准版、上一 demo 和当前 demo 的
+     同口径记录；
    - 不能只因为“能跑更大规模”就更新性能优化 `source.diff`。
 3. 没有引入不可接受的功能退化、数值错误或新的失败边界。
 4. 用户明确要求保留某个功能修复补丁时，可以例外更新，但必须在 `changes.md`

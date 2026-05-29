@@ -46,6 +46,26 @@ const     INDEX_TYPE HBM_CHANNEL_NUM_MULT_2   = HBM_CHANNEL_NUM << 1;
 const     INDEX_TYPE Slice_WIDTH            = Slice_SIZE * BATCH_SIZE;
 const     INDEX_TYPE Slice_WIDTH_DIV_16     = Slice_WIDTH >> 4;
 
+inline INDEX_TYPE Cuper_NumFloatV16Packets(const INDEX_TYPE element_count) {
+#pragma HLS inline
+    return (element_count + 15) >> 4;
+}
+
+inline INDEX_TYPE Cuper_NumAccumulatorInitGroups(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return (row_num + HBM_CHANNEL_NUM_MULT_16 - 1) / HBM_CHANNEL_NUM_MULT_16;
+}
+
+inline INDEX_TYPE Cuper_NumAccumulatorOutputs(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return (row_num + HBM_CHANNEL_NUM_MULT_2 - 1) / HBM_CHANNEL_NUM_MULT_2;
+}
+
+inline INDEX_TYPE Cuper_NumCheckerPeOutputs(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return Cuper_NumAccumulatorOutputs(row_num) * HBM_CHANNEL_NUM_DIV_8;
+}
+
 using int_v2    = tapa::vec_t<INDEX_TYPE, 2>;
 
 using float_v2  = tapa::vec_t<VALUE_TYPE, 2>;
@@ -70,14 +90,13 @@ void Cuper(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
            const INDEX_TYPE Iteration_num
           );
 
-// 从 CuperPcg 内部抽出的 PCG 服务化 SpMV 单 kernel。
+// Cuper 兼容 single SpMV demo kernel。
 //
 // ABI 刻意保持为 single SpMV 形态：
 //   Matrix_data + X -> Y_out
 // 这样 host 可以用和 Cuper(...) 相同的输入/输出缓冲做 demo-only 对比。
-// 区别在于内部不是调用 standalone 的 cuper_spmv_tasks.hpp，而是复用
-// CuperPcg 里的 pcg_spmv_service.hpp 常驻服务版 loader/core/accumulator/
-// checker/sort 链，用来单独观察 full-PCG 内嵌 SpMV 路径的性能。
+// 当前内部刻意采用和 Cuper(...) 一样的一次性 SpMV task graph，不接 PCG
+// service controller/command/stop。PCG 的服务控制优化只在 CuperPcg(...) 路径处理。
 void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                   tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
                   tapa::mmap<float_v16> X,

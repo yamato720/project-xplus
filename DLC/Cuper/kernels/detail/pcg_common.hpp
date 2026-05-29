@@ -54,6 +54,81 @@ static constexpr INDEX_TYPE kPcgVectorSourceP = 1;
 // PCG 分母过小直接判 breakdown，避免 alpha/beta 生成 inf/NaN 后污染全向量。
 static constexpr double kPcgBreakdownEps = 1.0e-30;
 
+inline INDEX_TYPE pcg_num_float_v16_packets(const INDEX_TYPE element_count) {
+#pragma HLS inline
+    return Cuper_NumFloatV16Packets(element_count);
+}
+
+inline INDEX_TYPE pcg_num_accumulator_init_groups(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return Cuper_NumAccumulatorInitGroups(row_num);
+}
+
+inline INDEX_TYPE pcg_num_accumulator_outputs(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return Cuper_NumAccumulatorOutputs(row_num);
+}
+
+inline INDEX_TYPE pcg_num_checker_pe_outputs(const INDEX_TYPE row_num) {
+#pragma HLS inline
+    return Cuper_NumCheckerPeOutputs(row_num);
+}
+
+inline CuperSpmvCommand pcg_make_spmv_command(const INDEX_TYPE vector_source) {
+#pragma HLS inline
+    CuperSpmvCommand command;
+    command.stop = 0;
+    command.vector_source = vector_source;
+    return command;
+}
+
+inline CuperSpmvCommand pcg_make_spmv_stop_command() {
+#pragma HLS inline
+    CuperSpmvCommand command;
+    command.stop = 1;
+    // stop 命令不再触发向量读取；保留 X 作为无害默认值，方便调试波形。
+    command.vector_source = kPcgVectorSourceX;
+    return command;
+}
+
+inline void pcg_broadcast_spmv_command(
+    tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+    tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
+    const CuperSpmvCommand command) {
+#pragma HLS inline
+send_common_command:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        // Command_out[0] 给 ptr loader，Command_out[1] 给 vector loader。
+        Command_out[index].write(command);
+    }
+send_common_matrix_command:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        // 每个 matrix loader 独立一条命令流，保证 16 路 HBM loader 同步启动/停止。
+        Matrix_Command_out[index].write(command);
+    }
+}
+
+inline void pcg_send_spmv_command(
+    tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+    tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
+    const INDEX_TYPE vector_source) {
+#pragma HLS inline
+    pcg_broadcast_spmv_command(Command_out,
+                               Matrix_Command_out,
+                               pcg_make_spmv_command(vector_source));
+}
+
+inline void pcg_send_spmv_stop(
+    tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
+    tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out) {
+#pragma HLS inline
+    pcg_broadcast_spmv_command(Command_out,
+                               Matrix_Command_out,
+                               pcg_make_spmv_stop_command());
+}
+
 inline double pcg_abs(const double value) {
 #pragma HLS inline
     return value < 0.0 ? -value : value;

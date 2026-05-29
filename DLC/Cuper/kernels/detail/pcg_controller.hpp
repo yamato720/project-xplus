@@ -48,7 +48,7 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     // controller 和 SpMV 数据流之间用 float_v16 作为向量包。
     // packet_count 只描述 PCG 向量长度，和 Cuper 内部 18-bit row 编码
     // 不是一回事。
-    const INDEX_TYPE packet_count = (Row_num + 15) >> 4;
+    const INDEX_TYPE packet_count = pcg_num_float_v16_packets(Row_num);
     INDEX_TYPE status_code = kPcgStatusMaxIter;
     INDEX_TYPE iterations = 0;
     double rz = 0.0;
@@ -62,9 +62,6 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     unsigned long long update_xr_ticks = 0;
     unsigned long long update_z_ticks = 0;
     unsigned long long update_p_ticks = 0;
-    CuperSpmvCommand command;
-    command.stop = 0;
-    command.vector_source = kPcgVectorSourceX;
     // controller_total 覆盖从参数检查到 stop 广播、metrics 写回前的主体时间。
     pcg_stage_mark(Stage_Event_out, kPcgStageControllerTotal, kPcgStageBegin);
 
@@ -74,18 +71,9 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     } else {
         // 初始化 SpMV：先用当前 X_spmv 计算 A*x0。
         pcg_stage_mark(Stage_Event_out, kPcgStageInitSpmv, kPcgStageBegin);
-send_init_command:
-        for (INDEX_TYPE index = 0; index < 2; ++index) {
-#pragma HLS unroll
-        // Command_out[0] 给 ptr loader，Command_out[1] 给 vector loader。
-        Command_out[index].write(command);
-    }
-send_init_matrix_command:
-    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
-#pragma HLS unroll
-        // 每个 matrix loader 独立一条命令流，保证 16 路 HBM loader 同步启动。
-        Matrix_Command_out[index].write(command);
-    }
+        pcg_send_spmv_command(Command_out,
+                              Matrix_Command_out,
+                              kPcgVectorSourceX);
 
     init_spmv_stream:
         // x0 已由 host 预打包到 X_spmv，Pcg_Vector_Loader 会按 float_v16
@@ -152,17 +140,9 @@ pcg_loop:
 #pragma HLS loop_tripcount min=1 max=1000
     // 每轮 SpMV：将当前搜索方向 p 送入 Cuper 流水，计算 AP=A*p。
             pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageBegin);
-            command.vector_source = kPcgVectorSourceP;
-    send_iter_command:
-            for (INDEX_TYPE index = 0; index < 2; ++index) {
-#pragma HLS unroll
-                Command_out[index].write(command);
-            }
-    send_iter_matrix_command:
-            for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
-#pragma HLS unroll
-                Matrix_Command_out[index].write(command);
-            }
+            pcg_send_spmv_command(Command_out,
+                                  Matrix_Command_out,
+                                  kPcgVectorSourceP);
 
             p_ap = 0.0;
     iter_spmv_stream:
@@ -312,19 +292,7 @@ pcg_loop:
         }
     }
 
-    CuperSpmvCommand stop_command;
-    stop_command.stop = 1;
-    stop_command.vector_source = kPcgVectorSourceX;
-send_stop_command:
-    for (INDEX_TYPE index = 0; index < 2; ++index) {
-#pragma HLS unroll
-        Command_out[index].write(stop_command);
-    }
-send_stop_matrix_command:
-    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
-#pragma HLS unroll
-        Matrix_Command_out[index].write(stop_command);
-    }
+    pcg_send_spmv_stop(Command_out, Matrix_Command_out);
 send_checker_stop:
     for (INDEX_TYPE index = 0; index < 8; ++index) {
 #pragma HLS unroll

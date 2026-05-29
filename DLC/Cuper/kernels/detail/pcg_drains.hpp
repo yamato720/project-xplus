@@ -21,14 +21,13 @@ void Pcg_Destroy_float_v16(tapa::istream<float_v16> &Vector_X_Stream,
                            tapa::istream<INDEX_TYPE> &Stop_in) {
     for (;;) {
 #pragma HLS pipeline II=1
-        if (!Stop_in.empty()) {
-            INDEX_TYPE stop;
-            Stop_in.try_read(stop);
-            return;
-        }
         if (!Vector_X_Stream.empty()) {
             float_v16 tmp;
             Vector_X_Stream.try_read(tmp);
+        } else if (!Stop_in.empty()) {
+            INDEX_TYPE stop;
+            Stop_in.try_read(stop);
+            return;
         }
     }
 }

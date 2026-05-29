@@ -4,10 +4,44 @@
 
 记录时间：2026-05-28
 
-本目录是 single TAPA SpMV 优化的新目标记录。本轮按用户要求，先不做优化，
-先生成一个当前 TAPA-PCG service SpMV 抽出版 demo bitstream。
+本目录是 single TAPA SpMV 与 full-PCG service/control 拆分边界的新目标记录。
+历史上本轮先生成过一个 TAPA-PCG service SpMV 抽出版 demo bitstream；该 bitstream
+在最小上板 smoke 中 timeout。当前源码已经切回 Cuper-compatible one-shot
+`CuperPcgSpmv(...)`，并已在 2026-05-29 生成新的 one-shot demo bitstream。当前
+demo 文件尚未上板测试。
 
-当前构建已完成并已同步到 demo 槽：
+当前 one-shot demo 已同步到：
+
+```text
+session: project-xplus-cuper-tapa-pcg-spmv-hw
+log: logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log
+build_dir: cuper-tapa-spmv-u55c-20260528-demo-build/
+xclbin: cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
+demo: 395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin
+```
+
+硬件构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-u55c-20260528-demo-build/hw/CuperPcgSpmv.xclbin
+Total elapsed time: 7h 29m 0s
+```
+
+当前 bitstream 信息：
+
+```text
+kernel: CuperPcgSpmv
+UUID: c95c1dfc-20ca-9152-279e-bafdf35fdc3d
+SHA256: 19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2
+DATA/KERNEL/HBM clock: 147 / 500 / 418 MHz
+```
+
+说明：旧 2026-05-28 service 抽出版的 timeout 结论只对应旧 UUID
+`08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不再对应当前同名 demo 文件。
+
+历史 service 抽出版曾完成构建并同步到 demo 槽；该文件已经被当前 one-shot demo
+覆盖，以下只作为旧 UUID 的历史记录：
 
 ```text
 session: project-xplus-cuper-tapa-pcg-spmv-hw
@@ -132,7 +166,9 @@ timeout 180s make run-cuper-tapa-spmv TARGET=hw \
   SPMV_REPEATS=3 DIFF_TOL=1e-1
 ```
 
-本轮 PCG service SpMV 抽出版使用新的 host 入口：
+历史 PCG service SpMV 抽出版和当前 one-shot `CuperPcgSpmv(...)` demo 都使用下面的
+host 入口，区别在于 xclbin 内部 task graph 已经从 service 控制壳切回
+Cuper-compatible one-shot 图：
 
 ```bash
 make run-cuper-tapa-pcg-spmv TARGET=hw \
@@ -140,6 +176,11 @@ make run-cuper-tapa-pcg-spmv TARGET=hw \
   BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin \
   SPMV_REPEATS=3 DIFF_TOL=1e-1
 ```
+
+说明：满血 `Cuper(...)` 标准 bitstream 是基准；当前 `CuperPcgSpmv(...)` 只保留
+历史 kernel 名和 host/demo 入口，内部走 Cuper-compatible one-shot 图。single
+SpMV demo 的结果不能自动证明 full `CuperPcg(...)` 会同步提升；PCG 优化必须另跑
+full `CuperPcg(...)` 软件仿真或上板 smoke。
 
 完整 sweep 建议复用 `docs/codex/testing.md` 的数据集列表：
 
@@ -399,3 +440,323 @@ timeout 300s make run-cuper-pcg-tapa-fpga \
 - 本轮没有启动新的硬件构建，也没有生成新 xclbin；
 - 这只是 service 协议清理和软件正确性验证，不是性能提升记录，正式
   `source.diff` 继续不更新。
+
+## 2026-05-28 command helper 统一后软件复测
+
+改动意图：把 full `Pcg_Controller` 和 single `Pcg_SingleSpmv_Controller` 中
+重复的 SpMV command/stop 广播逻辑收敛到 `pcg_common.hpp`，避免两条 service
+路径后续漂移。
+
+静态检查和 host 构建：
+
+```bash
+git diff --check
+make cuper-tapa-pcg-host
+make cuper-tapa-pcg-fpga-host
+```
+
+结果：均通过。host 构建只有既有 Xilinx/TAPA 头文件和旧代码 warning。
+
+### `CuperPcgSpmv` service single SpMV
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+[timing-ms] plan=5.362270000000e-01 spmv_total=5.902071300000e+01 spmv_calls=1 spmv_avg=5.902071300000e+01 gflops=5.421825385268e-07
+```
+
+```bash
+timeout 240s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=1.350584250659e-06 max_rel_diff=2.196535197242e-06 diff_tol=1.000000000000e-01
+[timing-ms] plan=1.604695000000e+00 spmv_total=7.579837140000e+02 spmv_calls=1 spmv_avg=7.579837140000e+02 gflops=1.678664035254e-05
+```
+
+### full `CuperPcg` FPGA-PCG software sim
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.757821925835e-08 status=converged
+[check] cpu_residual_abs=0.000000000000e+00 cuper_tapa_pcg_residual_abs=9.757821925835e-08 max_abs_diff=1.086781531434e-08 max_rel_diff=9.286405581786e-09 diff_tol=1.000000000000e-01 rr=6.162139191957e-14
+```
+
+```bash
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.826252042344e+00 status=max_iter
+[check] cpu_residual_abs=9.826252034486e+00 cuper_tapa_pcg_residual_abs=9.826252042344e+00 max_abs_diff=9.278180446159e-10 max_rel_diff=7.931379237982e-10 diff_tol=1.000000000000e-01 rr=9.655522643280e+01
+```
+
+结论：公共 command helper 没有破坏 service single SpMV 或 full `CuperPcg`
+软件路径。`n1024` full-PCG 使用 `MAX_ITERS=1`，因此 `status=max_iter` 是预期。
+本轮没有生成新 xclbin，也不更新正式 `source.diff`。
+
+## 2026-05-28 共享包数 helper 后软件验证
+
+本轮把 service SpMV 的包数/padding 公式收敛到 `pcg_common.hpp`，属于源码边界
+整理。它应该保持行为不变，但影响 single demo 和 full `CuperPcg` 的共同计数口径。
+
+静态检查和 host 构建：
+
+```bash
+git diff --check
+make cuper-tapa-pcg-host
+make cuper-tapa-pcg-fpga-host
+```
+
+结果：均通过。host 构建只有既有 Xilinx/TAPA 头文件和旧代码 warning。
+
+### `CuperPcgSpmv` service single SpMV
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+```
+
+```bash
+timeout 240s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=1.350584250659e-06 max_rel_diff=2.196535197242e-06 diff_tol=1.000000000000e-01
+```
+
+### full `CuperPcg` FPGA-PCG software sim
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.757821925835e-08 status=converged
+[check] cpu_residual_abs=0.000000000000e+00 cuper_tapa_pcg_residual_abs=9.757821925835e-08 max_abs_diff=1.086781531434e-08 max_rel_diff=9.286405581786e-09 diff_tol=1.000000000000e-01 rr=6.162139191957e-14
+```
+
+```bash
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.826252042344e+00 status=max_iter
+[check] cpu_residual_abs=9.826252034486e+00 cuper_tapa_pcg_residual_abs=9.826252042344e+00 max_abs_diff=9.278180446159e-10 max_rel_diff=7.931379237982e-10 diff_tol=1.000000000000e-01 rr=9.655522643280e+01
+```
+
+结论：共享包数 helper 保持 single service SpMV 和 full `CuperPcg` 软件行为正确。
+`n1024` full-PCG 使用 `MAX_ITERS=1`，因此 `status=max_iter` 是预期。未上板前
+仍不更新正式 `source.diff`。
+
+## 2026-05-28 vector/checker/sort helper 共享后软件验证
+
+改动意图：继续把 `pcg_spmv_service.hpp` 中真正影响 SpMV 数据通路的公共逻辑从
+single demo 和 full-PCG wrapper 里抽出来，包括 packed vector 读取、checker
+padding 转发和 sort-tree 打包。
+
+中间失败点：
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+最初把 full `Pcg_Vector_Checker` 直接改成整轮 helper 后，这条命令 180s timeout：
+
+```text
+make: *** [Makefile:639: run-cuper-pcg-tapa-fpga] Terminated
+```
+
+判断：full-PCG checker 是常驻服务，不能只在两轮之间检查 stop。它可能在
+controller 发 stop 前抢先进下一轮，然后等待不存在的新一轮 accumulator 输出。
+随后把共享边界改成“单步转发 helper”，full checker 在等待输入时继续检查
+`Stop_in`，single checker 仍按固定输出数量自然返回。
+
+静态检查和强制 host 重编：
+
+```bash
+git diff --check
+make -B cuper-tapa-pcg-host
+make -B cuper-tapa-pcg-fpga-host
+```
+
+结果：均通过。host 构建只有既有 Xilinx/TAPA 头文件和旧代码 warning。
+
+### `CuperPcgSpmv` service single SpMV
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+[timing-ms] plan=4.051040000000e-01 spmv_total=3.806724300000e+01 spmv_calls=1 spmv_avg=3.806724300000e+01 gflops=8.406177458136e-07
+```
+
+```bash
+timeout 240s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=1.350584250659e-06 max_rel_diff=2.196535197242e-06 diff_tol=1.000000000000e-01
+[timing-ms] plan=7.498190000000e-01 spmv_total=7.886953400000e+01 spmv_calls=1 spmv_avg=7.886953400000e+01 gflops=1.613297220699e-04
+```
+
+### full `CuperPcg` FPGA-PCG software sim
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.757821925835e-08 status=converged
+[check] cpu_residual_abs=0.000000000000e+00 cuper_tapa_pcg_residual_abs=9.757821925835e-08 max_abs_diff=1.086781531434e-08 max_rel_diff=9.286405581786e-09 diff_tol=1.000000000000e-01 rr=6.162139191957e-14
+```
+
+```bash
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.826252042344e+00 status=max_iter
+[check] cpu_residual_abs=9.826252034486e+00 cuper_tapa_pcg_residual_abs=9.826252042344e+00 max_abs_diff=9.278180446159e-10 max_rel_diff=7.931379237982e-10 diff_tol=1.000000000000e-01 rr=9.655522643280e+01
+```
+
+结论：
+
+- single service SpMV 的 n16/n1024 软件仿真仍返回且 diff 通过；
+- full `CuperPcg` 的 n16/n1024 软件仿真也返回，修复了中间版本的 stop 等待超时；
+- `n1024` full-PCG 使用 `MAX_ITERS=1`，因此 `status=max_iter` 是预期；
+- 本轮没有生成新 xclbin，也不更新正式 `source.diff`。
+
+## 2026-05-28 single SpMV 去控制壳后软件验证
+
+改动意图：当前 `CuperPcgSpmv(...)` 不再使用 PCG service single-SpMV 控制壳，而是
+保留历史 kernel 名和 host flag，内部改回 Cuper 风格 one-shot task graph。
+
+源码残留检查：
+
+```bash
+rg -n "Pcg_Single|pcg_checker_forward_round|Writer_Done|tapa-cuper-pcg-service" \
+  DLC/Cuper host cfg Makefile -S
+```
+
+结果：源码实现路径中没有 `Pcg_Single*`、`Writer_Done` 或旧
+`tapa-cuper-pcg-service` 标签残留。`Vector_Destroy_Stop_Stream` 仍存在于 full
+`CuperPcg(...)`，这是常驻 service 正常退出路径。
+
+静态检查和强制 host 重编：
+
+```bash
+git diff --check
+make -B cuper-tapa-pcg-host
+make -B cuper-tapa-pcg-fpga-host
+```
+
+结果：均通过。host 构建只有既有 Xilinx/TAPA 头文件和旧代码 warning。
+
+### `CuperPcgSpmv` Cuper-compatible one-shot
+
+```bash
+timeout 180s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[xplus] dataset="data/suitesparse/Schmid/csr/thermal2_n16" mode=cuper-spmv-tapa spmv=tapa-cuper-compat-demo bitstream=<software-sim>
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=3.755767679081e-07 max_rel_diff=7.633263769275e-08 diff_tol=1.000000000000e-01
+[timing-ms] plan=1.413830000000e-01 spmv_total=4.523495000000e+01 spmv_calls=1 spmv_avg=4.523495000000e+01 gflops=7.074176051924e-07
+```
+
+```bash
+timeout 240s make run-cuper-tapa-pcg-spmv \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  SPMV_REPEATS=1 DIFF_TOL=1e-1
+```
+
+```text
+[xplus] dataset="data/suitesparse/Schmid/csr/thermal2_n1024" mode=cuper-spmv-tapa spmv=tapa-cuper-compat-demo bitstream=<software-sim>
+[done] mode=spmv_only spmv_calls=1 status=ok
+[check] max_abs_diff=1.350584250659e-06 max_rel_diff=2.196535197242e-06 diff_tol=1.000000000000e-01
+[timing-ms] plan=7.733940000000e-01 spmv_total=6.289381100000e+01 spmv_calls=1 spmv_avg=6.289381100000e+01 gflops=2.023092542444e-04
+```
+
+### full `CuperPcg` FPGA-PCG software sim
+
+```bash
+timeout 180s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.757821925835e-08 status=converged
+[check] cpu_residual_abs=0.000000000000e+00 cuper_tapa_pcg_residual_abs=9.757821925835e-08 max_abs_diff=1.086781531434e-08 max_rel_diff=9.286405581786e-09 diff_tol=1.000000000000e-01 rr=6.162139191957e-14
+```
+
+备注：这条软件仿真仍出现 TAPA leftover warning：
+`Vector_Y_Stream[13] destructed with leftovers`。当前结果返回且 diff 通过，但它是
+后续 full-PCG service drain 需要继续观察的信号。
+
+```bash
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n1024 \
+  MAX_ITERS=1 DIFF_TOL=1e-1
+```
+
+```text
+[done] iter=1 residual_abs=9.826252042344e+00 status=max_iter
+[check] cpu_residual_abs=9.826252034486e+00 cuper_tapa_pcg_residual_abs=9.826252042344e+00 max_abs_diff=9.278180446159e-10 max_rel_diff=7.931379237982e-10 diff_tol=1.000000000000e-01 rr=9.655522643280e+01
+```
+
+结论：
+
+- 当前 `CuperPcgSpmv` one-shot single SpMV 的 n16/n1024 软件仿真返回且 diff 通过；
+- full `CuperPcg` n16/n1024 软件仿真也返回，说明去掉 single SpMV 控制壳没有破坏
+  full-PCG 软件路径；
+- 当前没有启动新硬件构建，也没有生成新的 one-shot demo xclbin；
+- `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史 service 抽出版
+  bitstream，不代表当前源码。

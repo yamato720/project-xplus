@@ -61,7 +61,7 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - For bitstream/build/TAPA/report/version-record work, read the matching `docs/codex/workflows/*.md` file before editing.
 - Keep version records in `docs/bitstream_summaries/<version>/`.
 - For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, and, when useful, `code_reading_guide.md`. Update official `source.diff` only after demo-only board testing confirms a performance improvement, or when the user explicitly asks to preserve a functional-boundary fix; do not overwrite the last effective `source.diff` for failed or slower demos.
-- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion.
+- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion. `395bitstream/` currently keeps two demo slots: one `cuper-tapa-spmv` single-SpMV candidate and one `cuper-tapa-pcg` full-PCG candidate. New demos overwrite only the same-mainline demo slot.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
 - Before starting any `TARGET=hw` bitstream build, run the matching software-level
   validation first (`sw_emu`, TAPA software simulation, or a documented host/local smoke
@@ -72,11 +72,15 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 
 ## Current Goal
 
-- Current optimization target: optimize the standalone/native TAPA Cuper single-SpMV
-  route itself, i.e. `Cuper(...)` and `detail/cuper_spmv_tasks.hpp`.
-- Do not mix this target with full-PCG controller, FP64 dot/update, or `CuperPcg`
-  service-path metrics. Use `spmv_avg`, success/timeout boundary, GFLOP/s, and CPU diff
-  as the primary measurements.
+- Current boundary: single-SpMV demo must not carry PCG service/control optimization.
+  `CuperPcgSpmv(...)` keeps the historical kernel name and demo build entry, but should
+  use a one-shot Cuper-style SpMV graph like `Cuper(...)`.
+- Treat full/native `Cuper(...)` plus `detail/cuper_spmv_tasks.hpp` as the single-SpMV
+  baseline and shape reference. Keep PCG-specific control work out of this route.
+- PCG service/control optimization belongs in full `CuperPcg(...)`, primarily
+  `detail/pcg_spmv_service.hpp`, `detail/pcg_controller.hpp`, and related drain/timer
+  code. To claim an SpMV change affects PCG, modify the full-PCG service path and run
+  full-PCG software or hardware validation; a single-SpMV demo result alone is not enough.
 - For this target, keep ongoing notes in:
 
 ```text

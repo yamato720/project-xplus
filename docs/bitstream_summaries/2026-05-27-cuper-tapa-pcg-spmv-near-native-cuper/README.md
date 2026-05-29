@@ -15,13 +15,15 @@
   demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
   只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
-- demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
-- demo UUID：`cc61e044-06f7-4726-8f18-773ac52ab1b2`
-- demo SHA256：`add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb`
-- demo DATA/KERNEL/HBM：216/500/450 MHz
-- 构建目录：`cuper-tapa-pcg-packed-ap-build/`
-- tmux 会话：`project-xplus-cuper-tapa-pcg-packed-ap-hw`
-- 构建日志：`logs/cuper_tapa_pcg_packed_ap_hw_20260527_191340.log`
+- 当前 demo 命名：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`
+- 当前 demo UUID：`086a3345-ddf0-ffdd-b260-16ca5fa5223a`
+- 当前 demo SHA256：`83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1`
+- 当前 demo DATA/KERNEL/HBM：210/500/408 MHz
+- 当前构建目录：`cuper-tapa-pcg-fpga-u55c-20260525-build/`
+- 当前 tmux 会话：`project-xplus-cuper-tapa-pcg-hw`
+- 当前构建日志：`logs/cuper_tapa_pcg_hw_parallel_20260528_222446.log`
+- 历史 packed feed/AP demo：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
+  / UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`
 
 ## 历史阶段
 
@@ -32,7 +34,11 @@
 - `receive_path_source.diff`
 
 这些历史文件对应旧 demo UUID `9474ef8e-571b-ae13-f898-890e3af8ae5e`，不再对应
-当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`。
+当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
+
+2026-05-27 packed feed/AP demo 的板上测试记录仍保留在本文档和 `testing.md`；
+它对应 UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`。当前 2026-05-29 full-PCG
+demo 已覆盖 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，尚未上板测试。
 
 ## 这一版做了什么
 
@@ -70,7 +76,8 @@
 - `thermal2_n1024 MAX_ITERS=1` TAPA 软件仿真通过；
 - `hw_emu` 目标的 TAPA/HLS/XO 生成通过；
 - `hw` bitstream 生成成功，`v++` 总耗时 4h39m35s；
-- 新 xclbin 和 `.xclbin.info` 已覆盖 `395bitstream/` 当前 demo 槽位；
+- 2026-05-27 新 xclbin 和 `.xclbin.info` 当时已覆盖 `395bitstream/`
+  full-PCG demo 槽位；
 - 本轮 demo-only 测试显示性能退步；按当前版本管理纪律，不应因为这轮 demo
   自动刷新“性能有效补丁”的正式 `source.diff`。若保留相关源码 diff，只能标为
   功能边界修复候选，不能标为性能提升补丁。
@@ -80,10 +87,14 @@
   `thermal2_n262144`、完整 `thermal2` 的 init-only 和 1iter 全部返回。
 - 完整 `thermal2` 边界已变化：init-only 和 1iter 都从启动前 `ctrl=0x4`
   运行到完成后 `ctrl=0xe`，不再复现旧标准记录里的 `ctrl=0x0` 未完成。
+- 2026-05-29 已用当前源码重新生成 full-PCG `CuperPcg` demo bitstream，并放入
+  第二个 demo 槽：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
+  该文件只确认构建成功，尚未上板测试。
 
 尚未完成：
 
 - 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
+- 2026-05-29 full-PCG demo 尚未做 demo-only 上板测试。
 
 ## 是否建议晋级
 
@@ -91,6 +102,8 @@
 
 理由：
 
+- 当前 2026-05-29 full-PCG demo 只确认 bitstream 生成成功，尚未做 demo-only
+  上板测试，不能作为标准替换依据。
 - 正面：完整 `thermal2` init-only / 1iter 都能完成，说明这版改变了旧标准的
   full-size 失败边界。
 - 风险：性能目标是让 `CuperPcg` 内嵌 SpMV 靠近 standalone TAPA Cuper，但本版

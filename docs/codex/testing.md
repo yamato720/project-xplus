@@ -60,6 +60,9 @@ rg -n "UUID|Frequency|Achieved Freq|Kernel:" 395bitstream/*.xclbin.info
 新生成的 bitstream 不能直接成为标准版。它必须先作为 demo 版放在
 `395bitstream/`，用 `-demo` 后缀命名。测试时默认采用 demo-only 上板实测，
 再用已有标准/基线记录做静态对照；不要自动重跑四大标准版本。
+`395bitstream/` 当前允许两个 demo 槽位并存：一个用于 `cuper-tapa-spmv`
+single SpMV 候选，一个用于 `cuper-tapa-pcg` full-PCG 候选。新 demo 只覆盖同主线
+旧 demo，不能覆盖四条标准 bitstream。
 
 命名规则：
 
@@ -91,10 +94,10 @@ cuper-notapa-spmv
    - 当前标准 bitstream 或 host 代码发生变化；
    - demo 结果和旧基线预期矛盾，需要排除板卡/XRT/数据集状态问题；
    - 要判断失败边界是否移动，且旧基线没有同口径记录。
-4. 当前 SpMV 优化阶段优先做 `cuper-tapa-spmv` demo：把 `CuperPcg` 里的 PCG
-   服务化 SpMV 路径抠出来，以单 SpMV kernel 形式测试。它属于
-   `cuper-tapa-spmv` 主线 demo，默认只跑该 demo 的 single SpMV 数据集；标准基准
-   复用满血 standalone TAPA Cuper SpMV 记录
+4. 当前 SpMV 优化阶段优先做 `cuper-tapa-spmv` demo。若 demo 是
+   `CuperPcgSpmv(...)`，必须在报告中写清楚它是历史 PCG service 抽出版，还是当前
+   Cuper-compatible one-shot 图；它属于 `cuper-tapa-spmv` 主线 demo，默认只跑该
+   demo 的 single SpMV 数据集。标准基准复用满血 standalone TAPA Cuper SpMV 记录
    `395bitstream/cuper-tapa-spmv-u55c-20260522.xclbin`。
 5. demo 的最低动态实测范围只针对 demo 本身；对 PCG 抽出版 `cuper-tapa-spmv`
    demo，至少跑 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、

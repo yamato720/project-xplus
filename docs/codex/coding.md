@@ -50,16 +50,18 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 - `pcg-fpga` 表示 PCG 主循环、dot、alpha/beta、向量更新和收敛判断在 FPGA kernel 内。
 - `spmv` 表示只测/只构造 SpMV kernel，host 可以控制 PCG 或只跑 single SpMV。
 - `host-PCG`、旧 CSR 多 kernel、packed16hbm legacy 等都属于兼容或历史路线，不加入四条主线命名。
-- `395bitstream/` 的成品槽位是四个标准 bitstream 加一个当前 demo 候选；
-  新 demo 允许覆盖旧 demo 文件，但不能覆盖四条标准文件。
+- `395bitstream/` 的成品槽位是四个标准 bitstream 加两个当前 demo 候选；
+  当前两个 demo 槽位分别服务 `cuper-tapa-spmv` 和 `cuper-tapa-pcg`。新 demo
+  允许覆盖同主线旧 demo 文件，但不能覆盖四条标准文件。
 
 ## 3. 高优先级规则
 
 1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
 2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
    `workflows/bitstreams.md` 归档旧版。
-3. 允许用最新 demo 覆盖 `395bitstream/` 中旧 demo 候选槽；覆盖后必须更新
+3. 允许用最新 demo 覆盖 `395bitstream/` 中同主线旧 demo 候选槽；覆盖后必须更新
    `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
+   不同主线 demo 可以同时保留，当前上限是两个 demo 槽位。
 4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
 5. 每次生成 `TARGET=hw` bitstream 前，必须先做同一 top/ABI 的软件级验证：
@@ -69,11 +71,15 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
    不能立刻离开：至少守到 XO 生成并完成必要 patch，且 Vitis link 已进入
    `vpl` / synthesis / implementation 早期阶段；若本轮目标只是 XO，则守到 XO
    文件存在、patch 通过、`make -q` 认为 XO target up-to-date。
-7. 当前新目标是 single TAPA SpMV 优化，只针对 `Cuper(...)` +
-   `detail/cuper_spmv_tasks.hpp` 和 `cuper-tapa-spmv` 主线；不要把 full-PCG
-   controller、FP64 dot/update、`init_spmv` / `iter_spmv` 当成本轮评价口径。
-   评价优先看 `spmv_avg`、GFLOP/s、成功/timeout 边界和 CPU diff。
-8. 这个 single TAPA SpMV 优化目标的连续改动统一维护在
+7. 当前新边界：single SpMV demo 不承载 PCG 控制优化。`CuperPcgSpmv(...)`
+   只保留历史 kernel 名和 demo 构建入口，内部应采用和满血 `Cuper(...)` 一样的
+   one-shot Cuper SpMV task graph；不要再把 `Pcg_Single*` controller/command/
+   stop/writer-done 壳作为优化目标。PCG service/control 优化只在 full
+   `CuperPcg(...)` 路径处理，核心文件是 `detail/pcg_spmv_service.hpp`、
+   `detail/pcg_controller.hpp` 和相关 drain/timer 代码。若要证明某个 SpMV 改动
+   会同步进入 PCG，必须改 full `CuperPcg(...)` 实际使用的 service 路径，并补跑
+   full-PCG 软件或硬件验证；不能只凭 single SpMV demo 结论判断。
+8. 这个 single SpMV 与 full-PCG 控制拆分目标的连续改动统一维护在
    `docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`；
    旧的 `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/` 只作为 full-PCG
    embedded-SpMV 历史目标记录保留。
