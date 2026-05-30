@@ -34,7 +34,7 @@ Total elapsed time: 4h 36m 24s
 build finished with exit code: 0
 ```
 
-当前 2026-05-31 II=1 controller 实验 demo 尚未做 demo-only 上板测试。2026-05-29
+当前 2026-05-31 II=1 controller 实验 demo 已完成 demo-only 上板测试。2026-05-29
 旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的测试数据只作为历史记录保留，
 不能套用到当前同名 `.xclbin`。
 
@@ -127,9 +127,90 @@ build finished with exit code: 0
 | KERNEL clock | 500 MHz |
 | HBM clock | 444 MHz |
 
-本轮尚未上板测试，暂不更新正式 `source.diff`。如果后续 demo-only 数据证明
-`1iter kernel_reported`、`controller_total` 或 `dot/update` 阶段变好，再更新
-HTML 当前诊断表和 `source.diff`。
+本轮上板测试见下一节。虽然 `1iter kernel_reported` 相比 2026-05-29 旧 UUID
+有改善，但共同成功点仍慢于当前标准版和上一 demo，因此暂不更新正式
+`source.diff`。
+
+## 2026-05-31 II=1 controller demo-only 上板测试
+
+日志目录：
+
+```text
+logs/codex_ii1_demo_test_20260531_011314/
+```
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
+```
+
+环境：
+
+```text
+git: 5b7a028 Archive TAPA demo bitstream metadata
+XRT: 2.15.225
+BDF: 0000:01:00.1
+UUID: 0170fa86-6e62-cfc9-aa66-2d330dd72cf2
+SHA256: ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8
+DATA/KERNEL/HBM: 223/500/444 MHz
+```
+
+本轮没有重跑四个标准 bitstream；标准数据复用当前 HTML 和历史测试记录。
+
+运行口径：
+
+```bash
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1
+
+timeout 240s make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/<dataset> \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  MAX_ITERS=1 DIFF_TOL=1e-4
+```
+
+退出状态：
+
+| 模式 | 数据集 | rc | direct ctrl | status | max_abs_diff | max_rel_diff |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| init | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n65536` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n131072` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n262144` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| 1iter | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 1.0868e-08 | 9.2864e-09 |
+| 1iter | `thermal2_n65536` | 0 | `0x4 -> 0xe` | max_iter | 7.5004e-10 | 7.2993e-10 |
+| 1iter | `thermal2_n131072` | 0 | `0x4 -> 0xe` | max_iter | 2.3337e-10 | 1.8330e-10 |
+| 1iter | `thermal2_n262144` | 0 | `0x4 -> 0xe` | max_iter | 5.3981e-10 | 4.0347e-10 |
+| 1iter | `thermal2` | 0 | `0x4 -> 0xe` | max_iter | 1.1717e-09 | 1.0914e-09 |
+
+关键计时，单位 ms：
+
+| 数据集 | init kernel | init ctrl | init SpMV | 1iter kernel | 1iter ctrl | iter SpMV | dot_p_ap | update_xr | update_p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n16` | 13.9018 | 0.0063 | 0.0019 | 10.6769 | 0.0261 | 0.0008 | 0.0022 | 0.0085 | 0.0072 |
+| `thermal2_n65536` | 28.7686 | 18.0269 | 6.6797 | 104.3695 | 92.5708 | 0.2044 | 9.4554 | 33.5769 | 29.8331 |
+| `thermal2_n131072` | 46.6432 | 36.0601 | 13.3574 | 197.8439 | 185.1159 | 0.4080 | 18.9116 | 67.1272 | 59.6626 |
+| `thermal2_n262144` | 83.4064 | 72.1119 | 26.7298 | 385.1288 | 370.2404 | 0.8173 | 37.8233 | 134.2822 | 119.3272 |
+| `thermal2` | 353.0281 | 337.8235 | 125.2876 | 1767.8254 | 1734.2845 | 3.8549 | 177.1899 | 628.7404 | 559.0005 |
+
+本轮结论：
+
+- 当前 II=1 demo 能跑完整 `thermal2` 的 init-only 和 1iter，direct ctrl 均为
+  `0x4 -> 0xe`，数值校验通过。
+- 相比 2026-05-29 旧 UUID，`thermal2_n262144` 1iter 从 `426.3557 ms`
+  降到 `385.1288 ms`，完整 `thermal2` 1iter 从 `1960.0357 ms`
+  降到 `1767.8254 ms`。
+- 相比当前 TAPA full-PCG 标准版共同成功点仍明显偏慢：
+  `thermal2_n262144` 标准版为 `188.8202 ms`，当前 II=1 demo 为
+  `385.1288 ms`。
+- 大规模主开销仍在 PCG 非 SpMV 路径。完整 `thermal2` 1iter 中
+  `update_xr=628.7404 ms`、`update_p=559.0005 ms`、`dot_p_ap=177.1899 ms`、
+  `init_zp=212.6581 ms`，raw SpMV 本身为 `129.1594 ms`。
+- 暂不建议晋级为标准版，也不更新正式 `source.diff`。
 
 ## 已跑命令
 

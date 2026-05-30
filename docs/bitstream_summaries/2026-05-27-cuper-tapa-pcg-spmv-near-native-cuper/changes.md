@@ -24,8 +24,8 @@ init/1iter 仍能返回，但共同成功点的 1iter 性能没有优于标准�
 
 2026-05-31 又按“把 controller 内部循环 II 尽量拉满”的实验方向生成了新的
 full-PCG `CuperPcg` demo bitstream，并覆盖 `395bitstream/` 的同名 full-PCG
-demo 槽。这个新文件尚未上板测试；2026-05-29 的 demo-only 测试结论只作为历史
-记录保留，不再对应当前同名 `.xclbin`。
+demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo-only 测试结论
+只作为历史记录保留，不再对应当前同名 `.xclbin`。
 
 代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
@@ -142,7 +142,14 @@ HLS 实际调度没有全部达到 II=1。
    `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`：
    UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，SHA256
    `ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8`，
-   DATA/KERNEL/HBM clock `223/500/444 MHz`。该 demo 尚未上板测试。
+   DATA/KERNEL/HBM clock `223/500/444 MHz`。
+9. 2026-05-31 II=1 controller 实验 demo-only 上板测试完成：
+   `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+   `thermal2_n262144` 和完整 `thermal2` 的 init-only / 1iter 全部返回。
+   完整 `thermal2` 1iter `kernel_reported=1767.8254 ms`，比 2026-05-29
+   旧 UUID 的 `1960.0357 ms` 改善；但 `thermal2_n262144` 1iter
+   `385.1288 ms` 仍明显慢于标准版 `188.8202 ms` 和上一 demo
+   `182.5644 ms`。
 
 仍需完成：
 
@@ -150,6 +157,5 @@ HLS 实际调度没有全部达到 II=1。
    破坏 SpMV 成功边界和 diff。
 2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
    退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
-3. 对当前 2026-05-31 II=1 full-PCG demo 做 demo-only 上板测试；只有实测证明
-   `1iter kernel_reported`、`controller_total` 或 `dot/update` 关键阶段改善后，
-   才能更新正式 `source.diff`。
+3. 继续分析当前 II=1 demo 里 `update_xr`、`update_p`、`dot_p_ap` 的大规模瓶颈；
+   只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。

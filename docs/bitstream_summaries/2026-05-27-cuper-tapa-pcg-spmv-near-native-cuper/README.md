@@ -4,8 +4,8 @@
 
 - 主线：`cuper-tapa-pcg`
 - 状态：2026-05-31 已用 II=1 controller 实验构建覆盖 `395bitstream/`
-  的 full-PCG demo 槽；新 demo 已完成 `hw` bitstream 构建，尚未做 demo-only
-  上板测试，未替换当前标准版
+  的 full-PCG demo 槽；新 demo 已完成 `hw` bitstream 构建和 demo-only 上板测试，
+  未替换当前标准版
 - 持续目标：优化 full `CuperPcg(...)` 的 controller/dot/update 路径，降低
   `1iter kernel_reported` 和 `controller_total`
 - 当前 demo 方向：single SpMV one-shot demo 已接近满血 `Cuper(...)` 并能跑完整
@@ -104,13 +104,20 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
   与 1iter 全部返回，direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。
 - 2026-05-31 II=1 controller 实验 `hw` bitstream 构建成功，并覆盖
   `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。该文件当前 UUID
-  为 `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，尚未做 demo-only 上板测试。
+  为 `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`。
+- 2026-05-31 II=1 controller 实验 demo-only 上板测试完成：
+  `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+  `thermal2_n262144` 和完整 `thermal2` 的 init-only 与 1iter 全部返回，
+  direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 的
+  1iter `kernel_reported=1767.8254 ms`，比 2026-05-29 旧 UUID 的
+  `1960.0357 ms` 改善；`thermal2_n262144` 的 1iter 为 `385.1288 ms`，
+  仍明显慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。
 
 尚未完成：
 
 - 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
-- 未证明当前 2026-05-31 II=1 full-PCG demo 是性能提升版；需要先做 demo-only
-  init-only / 1iter 上板测试，再决定是否更新 HTML 当前诊断表和正式 `source.diff`。
+- 未证明当前 2026-05-31 II=1 full-PCG demo 达到标准替换性能；虽然比
+  2026-05-29 旧 UUID 改善，但共同成功点仍明显慢于标准版和上一 demo。
 
 ## 是否建议晋级
 
@@ -119,12 +126,12 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
 理由：
 
 - 正面：当前 II=1 实验能完成完整 `hw` route，最终 routed timing met；
-  DATA/HBM clock 提升到 `223/444 MHz`。
+  DATA/HBM clock 提升到 `223/444 MHz`；demo-only 测试显示完整
+  `thermal2` init-only / 1iter 均能返回。
 - 风险：XO/HLS 报告显示多个被强制 `II=1` 的 controller loop 实际未达到 II=1，
-  `update_xr_lanes` 和 `update_p_lanes` 仍分别是实际 II 18 / 24；是否改善板上
-  `1iter` 只能看 demo-only 实测。
-- 结论：它目前只是“可上板验证的 full-PCG controller II 实验候选”，不是标准
-  替换候选。
+  `update_xr_lanes` 和 `update_p_lanes` 仍分别是实际 II 18 / 24；板上实测
+  1iter 虽比 2026-05-29 旧 UUID 改善，但仍慢于标准版和上一 demo。
+- 结论：它是“full-PCG controller II 实验候选”，不是标准替换候选。
 
 下一步不要继续把主要精力放在 single SpMV 本体上；它作为回归基线保留。full-PCG
 优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径，先拆

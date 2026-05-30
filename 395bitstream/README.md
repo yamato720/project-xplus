@@ -24,7 +24,7 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
-| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 II=1 controller 实验 demo，未上板测试 |
+| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 II=1 controller 实验 demo，已完成 demo-only 上板测试 |
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -92,9 +92,15 @@ HBM clock 为 444 MHz。构建日志为
 `cuper-tapa-pcg-ii1-build/`，版本记录见
 `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
 
-这次只完成 `hw` bitstream 构建和同步，尚未做 demo-only 上板测试。2026-05-29
-旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的上板测试结论只作为历史记录，
-不再对应当前同名 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
+2026-05-31 已完成 demo-only 上板测试，日志在
+`logs/codex_ii1_demo_test_20260531_011314/`。本轮没有重跑四个标准 bitstream。
+`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
+和完整 `thermal2` 的 init-only 与 `MAX_ITERS=1` 均返回，direct ctrl 均为
+`0x4 -> 0xe`，数值校验通过。完整 `thermal2` 上 init-only
+`kernel_reported=353.028139 ms`，1iter `kernel_reported=1767.825376 ms`。
+相对 2026-05-29 旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a`，1iter 有改善；
+但共同成功点仍明显慢于当前 TAPA full-PCG 标准版，因此该 demo 仍不建议按性能目标
+晋级为标准版。
 
 被移出旧 single demo 槽的 full-PCG packed feed/AP demo 已本地归档到：
 
