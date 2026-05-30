@@ -297,6 +297,11 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     //
     // 2 条命令流：controller 分别通知 ptr loader 和 vector loader
     // 启动一次 SpMV，结束时再发 stop 让服务任务退出。
+    //
+    // 这套 Pcg_* SpMV service 同时服务 init_spmv(A*x0) 和 iter_spmv(A*p)：
+    // controller 通过 CuperSpmvCommand::vector_source 指定本轮读 X_spmv
+    // 还是 P_spmv。下面的 loader/core/accumulator/checker/sort-tree
+    // 都是 init 与 PCG 迭代共用的数据通路。
     tapa::streams<CuperSpmvCommand, 2, 4>                   Command_Stream("Command_Stream");
     // 16 条矩阵命令流：controller 给每个 HBM matrix loader 发同一轮
     // SpMV 命令。HBM_CHANNEL_NUM 当前是 16。
@@ -365,9 +370,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
                 Max_iters,
                 Tau)
         .invoke(Pcg_Stage_Timer, Stage_Event_Stream, Stage_Ticks_Stream)
-        // Cuper SpMV 的参数/向量/矩阵输入端。Command_Stream[0] 给 ptr loader，
-        // Command_Stream[1] 给 vector loader；Matrix_Command_Stream 分发到
-        // 16 个矩阵 HBM channel。
+        // [init+PCG 共用 SpMV service] Cuper SpMV 的参数/向量/矩阵输入端。
+        // Command_Stream[0] 给 ptr loader，Command_Stream[1] 给 vector loader；
+        // Matrix_Command_Stream 分发到 16 个矩阵 HBM channel。
         .invoke(Pcg_SpElement_list_ptr_Loader,
                 Batch_num,
                 Row_num,
@@ -382,8 +387,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
                 Command_Stream[1],
                 Vector_X_Stream[0])
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Matrix_Loader, Matrix_len, Matrix_data, Matrix_Command_Stream, Matrix_A_Stream)
-        // 16 级 Cuper Core 链。PE_Param 和 Vector_X_Stream 在各级之间传递，
-        // 每级消费一个 Matrix_data[channel]，输出该 channel 对 y 的部分贡献。
+        // [init+PCG 共用 SpMV service] 16 级 Cuper Core 链。PE_Param 和
+        // Vector_X_Stream 在各级之间传递，每级消费一个 Matrix_data[channel]，
+        // 输出该 channel 对 y 的部分贡献。
         //
         // 对第 i 级 core，可以按下面的通用形式读：
         //
@@ -418,8 +424,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
         // Destroy_* 常驻读取尾流，防止最后一级 core 写满 FIFO 后反压整条链。
         .invoke(Pcg_Destroy_int, PE_Param[HBM_CHANNEL_NUM])
         .invoke(Pcg_Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
-        // Cuper 输出端：累加各 PE 部分和，过滤 padding，排序/拼包后直接
-        // 回到 PCG controller，而不是像 Cuper(...) 那样写回 Y_out HBM。
+        // [init+PCG 共用 SpMV service] Cuper 输出端：累加各 PE 部分和，
+        // 过滤 padding，排序/拼包后直接回到 PCG controller。controller
+        // 再根据当前阶段把它解释成 A*x0 或 A*p；这里不写 Y_out HBM。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
         .invoke<tapa::join, 8>(Pcg_Vector_Checker, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck, Checker_Stop_Stream)
         .invoke(Pcg_Mult_Sort_Tree, Vector_Y_Stream_Aftck, Pcg_Spmv_Stream, Sort_Stop_Stream)

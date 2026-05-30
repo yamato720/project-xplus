@@ -19,6 +19,13 @@
 // 发送命令、消费 SpMV 结果和维护 PCG 向量状态。x0/p 的 SpMV 输入
 // 由 packed float_v16 HBM 副本喂给 vector loader，避免 controller
 // 在 SpMV 热路径里逐元素打包。
+//
+// 阶段归属速记：
+//   - 共用 SpMV service：init_spmv / iter_spmv 都走同一套 Pcg_* loader/core/
+//     accumulator/checker/sort-tree，只是 vector_source 分别选择 X_spmv/P_spmv。
+//   - init 专用：init_spmv 生成初始 R，init_zp 生成 Z/P/P_spmv 并累计初始 rz/rr。
+//   - PCG 迭代专用：iter_spmv、dot_p_ap、update_xr、update_z、update_p。
+//   - 收尾控制：stop 广播、timer 读回、Metrics/Status 写回；它们不属于算法阶段。
 void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
                     tapa::ostreams<INDEX_TYPE, 8> &Checker_Stop_out,
@@ -69,16 +76,18 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     if (Row_num <= 0 || Max_iters < 0 || Tau <= 0.0 || pcg_invalid(Tau)) {
         status_code = kPcgStatusBreakdown;
     } else {
-        // 初始化 SpMV：先用当前 X_spmv 计算 A*x0。
+        // [共用 SpMV service / init 调用] 初始化 SpMV：先用当前 X_spmv
+        // 计算 A*x0。硬件数据通路和每轮 A*p 相同，区别只在 vector_source。
         pcg_stage_mark(Stage_Event_out, kPcgStageInitSpmv, kPcgStageBegin);
         pcg_send_spmv_command(Command_out,
                               Matrix_Command_out,
                               kPcgVectorSourceX);
 
     init_spmv_stream:
-        // x0 已由 host 预打包到 X_spmv，Pcg_Vector_Loader 会按 float_v16
-        // packed HBM 顺序读入。controller 只负责消费 A*x0，避免在 SpMV
-        // 计时段内逐元素读取 double X 并临时打包。
+        // [init 专用后处理] x0 已由 host 预打包到 X_spmv，
+        // Pcg_Vector_Loader 会按 float_v16 packed HBM 顺序读入。
+        // controller 只负责消费 A*x0，并把它转成初始残差 R。
+        // 这段的 SpMV 输入/矩阵读取是共用 service；R = B - A*x0 是 init 专用。
         for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
             ++init_spmv_ticks;
@@ -91,7 +100,7 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                 // 写 R/Z/P、做 rz/rr 归约，route 最后 4 根冲突线集中在这条大流水。
                 // 拆开后用一次额外 R 读取换取更小的局部 FP64/HBM 访问压力。
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-#pragma HLS pipeline II=4
+#pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     if (index < Row_num) {
                         const double b_value = B[index];
@@ -107,15 +116,16 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
 
         pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageBegin);
 init_zp_reduce:
-        // 第二段再读 R/M_inv，初始化 Z/P 并累计 rz/rr。这里同时维护
-        // P_spmv 的 float_v16 packed 副本，下一轮 A*p 可直接走 Cuper
-        // 风格向量 loader，不再由 controller 从 double P 标量打包。
+        // [init 专用] 第二段再读 R/M_inv，初始化 Z/P 并累计初始 rz/rr。
+        // 这里同时维护 P_spmv 的 float_v16 packed 副本，为后续 PCG 迭代
+        // 的 A*p 准备输入。它和 update_z/update_p 有相似访问模式，但目前
+        // 是独立 loop；优化 update_p 不会自动改到这里。
         for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
 #pragma HLS loop_tripcount min=1 max=500000
             float_v16 p_packet;
     init_zp_lanes:
             for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-#pragma HLS pipeline II=4
+#pragma HLS pipeline II=1
                 const INDEX_TYPE index = (packet << 4) + lane;
                 double z_value = 0.0;
                 if (index < Row_num) {
@@ -131,14 +141,16 @@ init_zp_reduce:
             }
             P_spmv[packet] = p_packet;
         }
-        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
+        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
                           static_cast<unsigned long long>(packet_count);
         pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageEnd);
 
 pcg_loop:
         for (INDEX_TYPE iter = 0; iter < Max_iters && rr > Tau; ++iter) {
 #pragma HLS loop_tripcount min=1 max=1000
-            // 每轮 SpMV：将当前搜索方向 p 送入 Cuper 流水，计算 AP=A*p。
+            // [共用 SpMV service / PCG 迭代调用] 每轮 SpMV：将当前搜索方向 p
+            // 送入 Cuper 流水，计算 AP=A*p。硬件 service 与 init_spmv 共用，
+            // 只是 Pcg_Vector_Loader 这次从 P_spmv 读 packed 输入。
             pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageBegin);
             pcg_send_spmv_command(Command_out,
                                   Matrix_Command_out,
@@ -146,8 +158,10 @@ pcg_loop:
 
             p_ap = 0.0;
     iter_spmv_stream:
-            // p 已经在 init_zp/update_p 阶段维护为 P_spmv packed 副本。
-            // 这里不再从 double P 逐元素读和打包，controller 只消费 A*p。
+            // [PCG 迭代专用接收] p 已经在 init_zp/update_p 阶段维护为
+            // P_spmv packed 副本。这里不再从 double P 逐元素读和打包，
+            // controller 只消费 A*p，并把 packed AP 暂存到 AP_spmv。
+            // 后续 dot/update 再读 AP_spmv，因此这里仍有一次 HBM 往返。
             for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
                 ++iter_spmv_ticks;
@@ -166,6 +180,8 @@ pcg_loop:
 
             pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageBegin);
     dot_p_ap:
+            // [PCG 迭代专用] 计算 p^T AP。这里读 FP64 P 和 packed FP32 AP_spmv，
+            // 每个 lane 做 FP32->FP64 转换后参与归约；不参与 init-only。
             for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
 #pragma HLS loop_tripcount min=1 max=500000
                 // AP 已按 Cuper 输出粒度缓存为 float_v16；P 仍保留 FP64，
@@ -173,14 +189,14 @@ pcg_loop:
                 const float_v16 ap_packet = AP_spmv[packet];
         dot_p_ap_lanes:
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-#pragma HLS pipeline II=4
+#pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     if (index < Row_num) {
                         p_ap += P[index] * static_cast<double>(ap_packet[lane]);
                     }
                 }
             }
-            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
+            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
                               static_cast<unsigned long long>(packet_count);
             pcg_stage_mark(Stage_Event_out, kPcgStageDotPAp, kPcgStageEnd);
 
@@ -198,6 +214,9 @@ pcg_loop:
 
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateXr, kPcgStageBegin);
     update_xr:
+            // [PCG 迭代专用] 用 alpha 更新 x/r。这里读写 FP64 X/R，
+            // 读 FP64 P，并读 packed FP32 AP_spmv 后转 double。
+            // 它是当前 full-PCG 里最大的向量更新热点之一，不参与 init-only。
             // 只更新 x/r。上一版把 x/r/z 更新、M_inv 读取、rz/rr 归约
             // 都塞在同一个 update_xrz pipeline 里，route 失败集中在该
             // pipeline 的 FP64 乘法和 AXI 读写附近。这里把它拆成两段，
@@ -207,7 +226,7 @@ pcg_loop:
                 const float_v16 ap_packet = AP_spmv[packet];
         update_xr_lanes:
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-#pragma HLS pipeline II=4
+#pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     if (index < Row_num) {
                         const double x_value = X[index];
@@ -221,7 +240,7 @@ pcg_loop:
                     }
                 }
             }
-            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 4ULL +
+            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
                                static_cast<unsigned long long>(packet_count);
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateXr, kPcgStageEnd);
 
@@ -229,11 +248,14 @@ pcg_loop:
             double rr_new = 0.0;
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateZ, kPcgStageBegin);
     update_z_reduce:
+            // [PCG 迭代专用] 根据更新后的 R 重新计算 Z 和新的 rz/rr。
+            // 访问模式类似 init_zp 的 R/M_inv/Z 片段，但这里不初始化 P，
+            // 也不写 P_spmv；后者留给 update_p。
             // 再更新 z 并累计新残差。该段只读 R/M_inv、写 Z，避免和
             // update_xr 的 X/P/AP_spmv 访问以及 alpha 乘法挤在同一条流水里。
             for (INDEX_TYPE index = 0; index < Row_num; ++index) {
 #pragma HLS loop_tripcount min=1 max=8000000
-#pragma HLS pipeline II=4
+#pragma HLS pipeline II=1
                 const double r_new = R[index];
                 const double minv_value = M_inv[index];
                 const double z_new = minv_value * r_new;
@@ -241,7 +263,7 @@ pcg_loop:
                 rz_new += r_new * z_new;
                 rr_new += r_new * r_new;
             }
-            update_z_ticks += static_cast<unsigned long long>(Row_num) * 4ULL;
+            update_z_ticks += static_cast<unsigned long long>(Row_num) * 1ULL;
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateZ, kPcgStageEnd);
 
             if (pcg_invalid(rz_new) || pcg_invalid(rr_new)) {
@@ -257,6 +279,9 @@ pcg_loop:
 
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateP, kPcgStageBegin);
     update_p:
+            // [PCG 迭代专用] 用 beta 更新搜索方向 P，并同步维护下一轮
+            // A*p 所需的 packed FP32 P_spmv。这里是 FP64 主状态和 FP32
+            // Cuper 输入副本之间的关键同步点。
             // p = z + beta * p。
             // 这里同步更新 P_spmv packed 副本，把下一轮 SpMV 的向量输入
             // 准备成 single Cuper 相同的 float_v16 HBM 形态。
@@ -265,7 +290,7 @@ pcg_loop:
                 float_v16 p_packet;
         update_p_lanes:
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
-#pragma HLS pipeline II=2
+#pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     double p_new = 0.0;
                     if (index < Row_num) {
@@ -278,7 +303,7 @@ pcg_loop:
                 }
                 P_spmv[packet] = p_packet;
             }
-            update_p_ticks += static_cast<unsigned long long>(Row_num) * 2ULL +
+            update_p_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
                               static_cast<unsigned long long>(packet_count);
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateP, kPcgStageEnd);
 

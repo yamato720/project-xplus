@@ -321,9 +321,11 @@
         并补充 2026-05-28 旧 <code>CuperPcgSpmv</code> service 抽出版 demo smoke 结果。
         2026-05-29 当前 <code>cuper-tapa-spmv-u55c-20260528-demo.xclbin</code>
         one-shot single SpMV demo 与
-        <code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code> full-PCG demo
+        旧 UUID 的 <code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code> full-PCG demo
         已按 demo-only 口径上板测试完成；full-PCG demo 已在 host 分层计时后重跑 PCG。
         2026-05-29/30 又补跑 full-run，不再强制 <code>MAX_ITERS=1</code>。
+        2026-05-31 同名 full-PCG demo 槽已被 II=1 controller 实验构建覆盖，
+        当前 UUID 为 <code>0170fa86-6e62-cfc9-aa66-2d330dd72cf2</code>，尚未上板测试。
       </div>
       <div class="meta">
         <span class="pill">日期 2026-05-24/30 CST</span>
@@ -403,8 +405,8 @@
         暂不建议作为当前 SpMV 性能目标的标准替换版。
       </p>
       <p>
-        当前 2026-05-29 full-PCG demo
-        <code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code> 也已按 demo-only
+        历史 2026-05-29 full-PCG demo UUID
+        <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code> 也已按 demo-only
         口径测试完成，不重跑四个标准版。<code>thermal2_n16</code> 到完整
         <code>thermal2</code> 的 init-only / 1iter 全部返回，完整规模从启动前
         <code>ctrl=0x4</code> 到完成后 <code>ctrl=0xe</code>。host 分层计时后重跑显示，
@@ -415,6 +417,15 @@
         <code>1735.060 ms</code>，controller 外 kernel/runtime 开销
         <code>11.133 ms</code>。因此当前瓶颈主要在 PCG 控制和向量更新路径，
         不是 raw SpMV，也不是 launch/drain/runtime 周边。
+      </p>
+      <p class="callout">
+        注意：2026-05-31 当前同步目录里的
+        <code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code> 已替换为 II=1
+        controller 实验构建，UUID 为 <code>0170fa86-6e62-cfc9-aa66-2d330dd72cf2</code>，
+        SHA256 为 <code>ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8</code>，
+        DATA/KERNEL/HBM 为 <code>223/500/444 MHz</code>。本页下方 PCG demo 的动态
+        计时表仍是旧 UUID <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code> 的历史实测数据；
+        新 II=1 demo 尚未上板测试。
       </p>
       <p>
         2026-05-29/30 补跑 full-run 时不再传 <code>MAX_ITERS=1</code>，让 host 使用默认
@@ -478,13 +489,14 @@ timeout 180s make run-cuper-tapa-pcg-spmv TARGET=hw \
 
 timeout 180s make run-cuper-pcg-tapa-fpga \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n262144 \
-  BITFILE=bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
   TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1
 
 timeout 180s make run-cuper-pcg-tapa-fpga \
   DATASET=data/suitesparse/Schmid/csr/thermal2_n262144 \
-  BITFILE=bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin \
   MAX_ITERS=1 DIFF_TOL=1e-4</code></pre>
+          <p>注意：上述 full-PCG demo 命令对应 2026-05-29 测试当时的同步槽旧 UUID；当前同名文件已在 2026-05-31 被 II=1 实验构建覆盖。</p>
         </div>
         <div>
           <h3>计时含义</h3>
@@ -576,14 +588,14 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <td><code>add20fec0352d83c2b8cc8161d78d7f989124e11278ca553fe94a8cd231309bb</code></td>
             </tr>
             <tr class="current-demo-row">
-              <td>full-PCG demo 对比 A：<span class="tag current-demo">本次 demo</span></td>
-              <td><span class="tag current-demo">本次 demo</span> TAPA full-PCG</td>
+              <td>full-PCG demo 对比 A：<span class="tag current-demo">当前同步槽</span></td>
+              <td><span class="tag current-demo">当前同步槽</span> TAPA full-PCG</td>
               <td><code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code></td>
               <td><code>CuperPcg</code></td>
-              <td><code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code></td>
-              <td class="num">210 MHz</td>
-              <td class="num">408 MHz</td>
-              <td><code>83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1</code></td>
+              <td><code>0170fa86-6e62-cfc9-aa66-2d330dd72cf2</code></td>
+              <td class="num">223 MHz</td>
+              <td class="num">444 MHz</td>
+              <td><code>ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8</code></td>
             </tr>
             <tr>
               <td>single SpMV demo 对比 B：上一 demo</td>
@@ -841,9 +853,7 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
 
       <h3>Full-PCG demo：CuperPcg</h3>
       <p>
-        测试对象为
-        <code>bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code>，
-        kernel 为 <code>CuperPcg</code>，UUID 为
+        测试对象为 2026-05-29 历史 full-PCG demo，kernel 为 <code>CuperPcg</code>，UUID 为
         <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code>，SHA256 为
         <code>83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1</code>，
         DATA/KERNEL/HBM 为 <code>210/500/408 MHz</code>。init-only 使用
@@ -1155,8 +1165,9 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
       <p>
         本组比较 <code>MAX_ITERS=1</code> 的 <code>kernel_reported</code>。它是端到端一次迭代
         代理，包含 SpMV、AP 写回、dot、向量更新和 controller/service 开销。本组的
-        本 demo 使用当前 <code>cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code>
-        full-PCG 1iter 数据，已用新版 host 分层计时重跑；当前 single SpMV demo 不进入这一组。
+        本 demo 使用历史 UUID <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code> 的
+        full-PCG 1iter 数据，已用新版 host 分层计时重跑；当前 2026-05-31 II=1
+        同名 demo 尚未进入这一组。
       </p>
       <div class="legend">
         <span><i style="background: var(--tapa-pcg);"></i>标准版</span>
@@ -1474,7 +1485,8 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
       <p>2026-05-28 demo-only 测试显示：<code>thermal2_n16</code>、<code>thermal2_n65536</code>、<code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整 <code>thermal2</code> 的 init-only 与 1iter 都能返回，完整规模也是 <code>ctrl 0x4-&gt;0xe</code>。</p>
       <p>性能结论：这版更像 full-size 功能边界修复候选，不是当前 SpMV 性能目标的标准替换候选。<code>thermal2_n262144</code> 1iter 的 <code>kernel_reported=416.6492 ms</code>，完整 <code>thermal2</code> 为 <code>1887.4481 ms</code>；主要瓶颈在 <code>update_xr</code>、<code>update_p</code> 和 <code>dot_p_ap</code>。</p>
       <h3><span class="tag tapa-pcg-demo">TAPA full-PCG demo current</span> cuper-tapa-pcg-fpga-u55c-20260529-demo</h3>
-      <p>这版是 2026-05-29 放入第二个 demo 槽的 full-PCG <code>CuperPcg</code> 构建，UUID 为 <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code>，DATA/HBM 频率为 <code>210/408 MHz</code>。</p>
+      <p>当前同步槽已在 2026-05-31 被 II=1 controller 实验构建覆盖，UUID 为 <code>0170fa86-6e62-cfc9-aa66-2d330dd72cf2</code>，DATA/HBM 频率为 <code>223/444 MHz</code>；该新构建尚未上板测试。</p>
+      <p>下面的 2026-05-29 demo-only 性能结论对应历史 UUID <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code>，不再对应当前同步目录里的同名 xclbin。</p>
       <p>2026-05-29 demo-only 测试显示：<code>thermal2_n16</code>、<code>thermal2_n65536</code>、<code>thermal2_n131072</code>、<code>thermal2_n262144</code> 和完整 <code>thermal2</code> 的 init-only 与 1iter 都能返回，完整规模也是 <code>ctrl 0x4-&gt;0xe</code>。新版 host 分层计时重跑日志在 <code>logs/pcg_breakdown_20260529_hostsplit/</code>。</p>
       <p>性能结论：这版保持 full-size 功能边界，但不是性能提升候选。<code>thermal2_n262144</code> 1iter 的 <code>kernel_reported=426.3557 ms</code>，完整 <code>thermal2</code> 为 <code>1960.0357 ms</code>；共同成功点比标准版和上一 demo 都慢。完整 <code>thermal2</code> 上 SpMV 本身为 <code>184.60 ms</code>，PCG 非 SpMV 控制和向量更新为 <code>1735.06 ms</code>，controller 外开销为 <code>11.13 ms</code>。</p>
       <h3><span class="tag tapa">PCG SpMV 抽出版 demo historical</span> cuper-tapa-spmv-u55c-20260528-demo</h3>
@@ -1551,9 +1563,11 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     demo bitstream 为 <code>395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin</code>
     和 <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code>。
     2026-05-29 PCG host 分层计时重跑日志位于 <code>logs/pcg_breakdown_20260529_hostsplit/</code>，
-    demo bitstream 来自 <code>bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin</code>。
+    对应历史 UUID <code>086a3345-ddf0-ffdd-b260-16ca5fa5223a</code>。
     2026-05-29/30 PCG full-run 重跑日志位于 <code>logs/codex_tapa_pcg_fullrun_20260529_231754/</code>，
     汇总见 <code>logs/codex_tapa_pcg_fullrun_20260529_231754/summary.md</code>。
+    2026-05-31 II=1 controller 实验构建日志位于 <code>logs/cuper_tapa_pcg_ii1_hw_20260530_200825.log</code>，
+    当前同步槽 UUID 为 <code>0170fa86-6e62-cfc9-aa66-2d330dd72cf2</code>，尚未上板测试。
     本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
   </footer>
 </body>

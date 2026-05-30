@@ -2,46 +2,41 @@
 
 ## 当前状态
 
-记录时间：2026-05-27，更新：2026-05-29
+记录时间：2026-05-27，更新：2026-05-31
 
-当前 full-PCG demo 已完成 `hw` bitstream 构建，测试时曾放入 `395bitstream/`
-第二个 demo 槽位：
+当前 full-PCG demo 已完成 `hw` bitstream 构建，并放入 `395bitstream/`
+full-PCG demo 槽位：
 
 ```bash
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
 ```
 
-2026-05-29 归档后当前保存位置为：
-
-```text
-bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
-bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
-```
-
 当前 demo 信息：
 
 | 项目 | 数值 |
 | --- | --- |
-| UUID | `086a3345-ddf0-ffdd-b260-16ca5fa5223a` |
-| SHA256 | `83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1` |
-| DATA clock | 210 MHz |
+| UUID | `0170fa86-6e62-cfc9-aa66-2d330dd72cf2` |
+| SHA256 | `ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8` |
+| DATA clock | 223 MHz |
 | KERNEL clock | 500 MHz |
-| HBM clock | 408 MHz |
-| 构建日志 | `logs/cuper_tapa_pcg_hw_parallel_20260528_222446.log` |
-| 构建耗时 | 5h 6m 11s |
+| HBM clock | 444 MHz |
+| 构建目录 | `cuper-tapa-pcg-ii1-build/` |
+| 构建日志 | `logs/cuper_tapa_pcg_ii1_hw_20260530_200825.log` |
+| 构建耗时 | 4h 36m 24s |
 
 关键构建输出：
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-pcg-fpga-u55c-20260525-build/hw/CuperPcg.xclbin
-Total elapsed time: 5h 6m 11s
+Created .../cuper-tapa-pcg-ii1-build/hw/CuperPcg.xclbin
+Total elapsed time: 4h 36m 24s
+build finished with exit code: 0
 ```
 
-当前 2026-05-29 demo 已完成 demo-only 上板测试；它可以返回到完整 `thermal2`，
-但共同成功点 1iter 性能仍慢于当前标准版和上一 demo，不能按性能目标晋级为标准版。
-该 demo 已从同步目录移出并归档。
+当前 2026-05-31 II=1 controller 实验 demo 尚未做 demo-only 上板测试。2026-05-29
+旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的测试数据只作为历史记录保留，
+不能套用到当前同名 `.xclbin`。
 
 历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
 槽位：
@@ -53,6 +48,88 @@ Total elapsed time: 5h 6m 11s
 
 该历史 demo 文件已被 2026-05-29 demo 替换；旧 receive-path demo 和 2026-05-27
 packed feed/AP demo 的测试结论只作为历史记录保留，不再对应当前这个 `.xclbin` 文件。
+
+## 2026-05-31 II=1 controller 实验构建
+
+源码验证：
+
+```bash
+cmake --build DLC/Cuper/build --target cuper_host -j "$(nproc)"
+```
+
+结果：通过。只有 TAPA packed attribute 相关 warning。
+
+XO 级 TAPA compile：
+
+```bash
+rm -rf /tmp/cuper_tapa_pcg_ii1_test
+mkdir -p /tmp/cuper_tapa_pcg_ii1_test
+cd DLC/Cuper
+source scripts/env_u55c.sh
+tapa -w /tmp/cuper_tapa_pcg_ii1_test/tapa_CuperPcg compile \
+  -f kernels/Cuper.cpp -t CuperPcg \
+  -p "$DEVICE" --clock-period 3.3 \
+  -j "${JOBS:-$(nproc)}" --enable-synth-util \
+  -c "-I$PWD/include" \
+  -o /tmp/cuper_tapa_pcg_ii1_test/CuperPcg_ii1.xo
+```
+
+结果：通过。
+
+HLS 实际 II：
+
+| loop | target II | achieved II |
+| --- | ---: | ---: |
+| `init_r_lanes` | 1 | 1 |
+| `init_zp_lanes` | 1 | 5 |
+| `dot_p_ap_lanes` | 1 | 5 |
+| `update_xr_lanes` | 1 | 18 |
+| `update_z_reduce` | 1 | 5 |
+| `update_p_lanes` | 1 | 24 |
+
+说明：`II=1` pragma 不是全部实现为 II=1。`update_xr_lanes` 和 `update_p_lanes`
+仍是主要调度压力点。XO 报告中 `Pcg_Controller` 有时序压力；最终完整 `hw`
+实现仍通过 routed timing。
+
+完整 bitstream 构建：
+
+```bash
+make CUPER_TAPA_FPGA_PCG_BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-ii1-build \
+  build-cuper-tapa-pcg-hw
+```
+
+tmux 会话：
+
+```text
+project-xplus-cuper-tapa-pcg-ii1
+```
+
+构建结果：成功。
+
+关键输出：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-586] Created /home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-ii1-build/hw/CuperPcg.xclbin
+INFO: [v++ 60-791] Total elapsed time: 4h 36m 24s
+build finished with exit code: 0
+```
+
+同步到 `395bitstream/` 的 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| demo xclbin | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` |
+| demo info | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info` |
+| UUID | `0170fa86-6e62-cfc9-aa66-2d330dd72cf2` |
+| SHA256 | `ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8` |
+| DATA clock | 223 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 444 MHz |
+
+本轮尚未上板测试，暂不更新正式 `source.diff`。如果后续 demo-only 数据证明
+`1iter kernel_reported`、`controller_total` 或 `dot/update` 阶段变好，再更新
+HTML 当前诊断表和 `source.diff`。
 
 ## 已跑命令
 
@@ -293,9 +370,9 @@ SHA256: 83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1
 DATA/KERNEL/HBM clock: 210 / 500 / 408 MHz
 ```
 
-说明：上面的 `395bitstream/` 是本轮上板测试时的同步路径。测试完成后，该 demo
-已归档到
-`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
+说明：上面的 `395bitstream/` 是本轮上板测试时的同步路径。2026-05-31 该同名
+demo 槽已被 II=1 controller 实验构建覆盖；这里的结果只对应旧 UUID
+`086a3345-ddf0-ffdd-b260-16ca5fa5223a`。
 
 本轮按 demo-only 口径只跑当前 full-PCG demo，不重跑四个标准 bitstream。先跑
 `thermal2_n16` 低规格 smoke；低规格通过后继续跑规定数据集。

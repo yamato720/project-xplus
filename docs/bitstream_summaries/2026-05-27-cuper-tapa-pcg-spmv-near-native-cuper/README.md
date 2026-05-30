@@ -3,9 +3,9 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-pcg`
-- 状态：demo bitstream 已生成并完成 demo-only 上板测试；2026-05-29 已从
-  `395bitstream/` 移入
-  `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，未替换当前标准版
+- 状态：2026-05-31 已用 II=1 controller 实验构建覆盖 `395bitstream/`
+  的 full-PCG demo 槽；新 demo 已完成 `hw` bitstream 构建，尚未做 demo-only
+  上板测试，未替换当前标准版
 - 持续目标：优化 full `CuperPcg(...)` 的 controller/dot/update 路径，降低
   `1iter kernel_reported` 和 `controller_total`
 - 当前 demo 方向：single SpMV one-shot demo 已接近满血 `Cuper(...)` 并能跑完整
@@ -16,13 +16,14 @@
   demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
   只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
-- 已归档 demo：`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`
-- 当前 demo UUID：`086a3345-ddf0-ffdd-b260-16ca5fa5223a`
-- 当前 demo SHA256：`83baded1910ecb2c9e662f9ff6920fd8a55dbd2898ae69629c862714e17cf7f1`
-- 当前 demo DATA/KERNEL/HBM：210/500/408 MHz
-- 当前构建目录：`cuper-tapa-pcg-fpga-u55c-20260525-build/`
-- 当前 tmux 会话：`project-xplus-cuper-tapa-pcg-hw`
-- 当前构建日志：`logs/cuper_tapa_pcg_hw_parallel_20260528_222446.log`
+- 当前 demo：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`
+- 当前 demo UUID：`0170fa86-6e62-cfc9-aa66-2d330dd72cf2`
+- 当前 demo SHA256：`ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8`
+- 当前 demo DATA/KERNEL/HBM：223/500/444 MHz
+- 当前构建目录：`cuper-tapa-pcg-ii1-build/`
+- 当前 tmux 会话：`project-xplus-cuper-tapa-pcg-ii1`
+- 当前构建日志：`logs/cuper_tapa_pcg_ii1_hw_20260530_200825.log`
+- 上一个已测试 demo UUID：`086a3345-ddf0-ffdd-b260-16ca5fa5223a`
 - 历史 packed feed/AP demo：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
   / UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`
 
@@ -35,15 +36,14 @@
 - `receive_path_source.diff`
 
 这些历史文件对应旧 demo UUID `9474ef8e-571b-ae13-f898-890e3af8ae5e`，不再对应
-当前已归档的
-`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
+后续任何同名 `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
 
 2026-05-27 packed feed/AP demo 的板上测试记录仍保留在本文档和 `testing.md`；
 它对应 UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`。当前 2026-05-29 full-PCG
 demo 测试时覆盖过 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，并已完成
-demo-only 上板测试；2026-05-29 已归档到
-`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。测试结论见本文档
-和 `testing.md` 的 2026-05-29 小节。
+demo-only 上板测试。2026-05-31 新 II=1 controller 实验构建再次覆盖同名 demo
+槽，因此 2026-05-29 的测试结论只作为历史记录保留，不再对应当前同步目录里的
+同名 `.xclbin` 文件。
 
 ## 这一版做了什么
 
@@ -97,17 +97,20 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
   运行到完成后 `ctrl=0xe`，不再复现旧标准记录里的 `ctrl=0x0` 未完成。
 - 2026-05-29 已用当前源码重新生成 full-PCG `CuperPcg` demo bitstream，测试时放入
   第二个 demo 槽：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`；
-  该文件已完成 demo-only 上板测试，随后归档到
-  `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
+  该旧 UUID 文件已完成 demo-only 上板测试。2026-05-31 该同步槽被 II=1 实验
+  构建覆盖，旧测试结论只保留为历史记录。
 - 2026-05-29 当前 full-PCG demo 的 `thermal2_n16`、`thermal2_n65536`、
   `thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2` 的 init-only
   与 1iter 全部返回，direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。
+- 2026-05-31 II=1 controller 实验 `hw` bitstream 构建成功，并覆盖
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。该文件当前 UUID
+  为 `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，尚未做 demo-only 上板测试。
 
 尚未完成：
 
 - 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
-- 未证明 2026-05-29 full-PCG demo 是性能提升版；共同成功点上的 1iter 仍慢于
-  当前标准版和上一 demo。
+- 未证明当前 2026-05-31 II=1 full-PCG demo 是性能提升版；需要先做 demo-only
+  init-only / 1iter 上板测试，再决定是否更新 HTML 当前诊断表和正式 `source.diff`。
 
 ## 是否建议晋级
 
@@ -115,14 +118,13 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
 
 理由：
 
-- 正面：当前 2026-05-29 full-PCG demo 的完整 `thermal2` init-only / 1iter 都能
-  完成，标准版旧记录中的完整规模 `ctrl=0x0` 失败边界没有复现。
-- 风险：性能目标是让 `CuperPcg` 内嵌 SpMV 靠近 standalone TAPA Cuper，但本版
-  在大规模 1iter 上 controller/update 代价仍高；`thermal2_n262144` 的
-  `kernel_reported=426.701 ms`，明显慢于既有标准记录中的约 `188.820 ms`，
-  也比上一 2026-05-27 full-PCG demo 的 `416.649 ms` 略慢。
-- 结论：它仍更像“full-size 功能边界修复候选”，不是当前 SpMV 性能优化目标的
-  标准替换候选。
+- 正面：当前 II=1 实验能完成完整 `hw` route，最终 routed timing met；
+  DATA/HBM clock 提升到 `223/444 MHz`。
+- 风险：XO/HLS 报告显示多个被强制 `II=1` 的 controller loop 实际未达到 II=1，
+  `update_xr_lanes` 和 `update_p_lanes` 仍分别是实际 II 18 / 24；是否改善板上
+  `1iter` 只能看 demo-only 实测。
+- 结论：它目前只是“可上板验证的 full-PCG controller II 实验候选”，不是标准
+  替换候选。
 
 下一步不要继续把主要精力放在 single SpMV 本体上；它作为回归基线保留。full-PCG
 优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径，先拆
