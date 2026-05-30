@@ -636,7 +636,7 @@ run-cuper-tapa-pcg-spmv: $(CUPER_TAPA_PCG_HOST)
 	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" --spmv-only --pcg-spmv-service $(if $(SPMV_REPEATS),--spmv-repeats $(SPMV_REPEATS)) $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL))
 
 run-cuper-pcg-tapa-fpga: $(CUPER_TAPA_PCG_FPGA_HOST)
-	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL)) $(if $(LEGACY_ABI),--legacy-abi)
+	LD_LIBRARY_PATH="$(TAPA_ROOT)/lib:$(XILINX_XRT)/lib:$${LD_LIBRARY_PATH:-}" $(CUPER_TAPA_PCG_FPGA_HOST) "$(or $(DATASET),$(ROOT_DIR)/data/suitesparse/Schmid/csr/thermal2_n16)" $(if $(BITFILE),--bitstream "$(BITFILE)") $(if $(TAU),--tau $(TAU)) $(if $(MAX_ITERS),--max-iters $(MAX_ITERS)) $(if $(DIFF_TOL),--diff-tol $(DIFF_TOL)) $(if $(KERNEL_TIMEOUT_SEC),--kernel-timeout-sec $(KERNEL_TIMEOUT_SEC)) $(if $(LEGACY_ABI),--legacy-abi)
 
 run-cuper-notapa-pcg-xrt: $(CUPER_NOTAPA_PCG_XRT_HOST)
 	@test -f "$(or $(BITFILE),$(CUPER_NOTAPA_SPMV_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin)" || (echo "ERROR: xclbin not found: $(or $(BITFILE),$(CUPER_NOTAPA_SPMV_BUILD_DIR)/$(TARGET)/cuper_packed_spmv_kernel.xclbin). Build it first with: make build-cuper-pcg-notapa-spmv-$(if $(filter hw,$(TARGET)),hw,sw), or pass BITFILE=/path/to/cuper_packed_spmv_kernel.xclbin" && exit 1)

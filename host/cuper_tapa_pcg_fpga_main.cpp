@@ -53,6 +53,7 @@ struct CliOptions {
     double tau = project_xplus::cgsolver::run_defaults::kTau;
     int max_iters = project_xplus::cgsolver::run_defaults::kMaxIters;
     double diff_tol = 1.0e-3;
+    int kernel_timeout_sec = 60;
     // 旧标准 bitstream 只有 26 个 memory args，且 AP 是 double*。
     // 新 packed feed/AP demo 有 28 个 memory args。legacy_abi 让同一个
     // host 可以继续对比旧标准版。
@@ -62,7 +63,7 @@ struct CliOptions {
 void usage(const char* argv0) {
     std::cerr << "Usage: " << argv0
               << " [dataset_dir] [--bitstream path] [--tau value] [--max-iters value]"
-              << " [--diff-tol value] [--legacy-abi]\n";
+              << " [--diff-tol value] [--kernel-timeout-sec value] [--legacy-abi]\n";
 }
 
 std::string env_or_empty(const char* name) {
@@ -102,6 +103,11 @@ CliOptions parse_args(int argc, char** argv) {
                 throw std::runtime_error("--diff-tol requires a value");
             }
             options.diff_tol = std::stod(argv[++index]);
+        } else if (arg == "--kernel-timeout-sec") {
+            if (index + 1 >= argc) {
+                throw std::runtime_error("--kernel-timeout-sec requires a value");
+            }
+            options.kernel_timeout_sec = std::stoi(argv[++index]);
         } else if (arg == "--legacy-abi") {
             options.legacy_abi = true;
         } else {
@@ -117,6 +123,9 @@ CliOptions parse_args(int argc, char** argv) {
     }
     if (options.diff_tol <= 0.0) {
         throw std::runtime_error("--diff-tol must be positive");
+    }
+    if (options.kernel_timeout_sec < 0) {
+        throw std::runtime_error("--kernel-timeout-sec must be non-negative");
     }
 
     return options;
@@ -663,7 +672,8 @@ double run_cuper_pcg_xrt_legacy(const CliOptions& options,
                       << std::flush;
             next_report = now + std::chrono::seconds(5);
         }
-        if (now - kernel_start > std::chrono::seconds(60)) {
+        if (options.kernel_timeout_sec > 0 &&
+            now - kernel_start > std::chrono::seconds(options.kernel_timeout_sec)) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -841,7 +851,8 @@ double run_cuper_pcg_xrt(const CliOptions& options,
                       << std::flush;
             next_report = now + std::chrono::seconds(5);
         }
-        if (now - kernel_start > std::chrono::seconds(60)) {
+        if (options.kernel_timeout_sec > 0 &&
+            now - kernel_start > std::chrono::seconds(options.kernel_timeout_sec)) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
