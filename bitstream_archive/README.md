@@ -11,6 +11,10 @@ GitHub 只同步 Markdown 说明；本目录内的 `.xclbin` 受 `.gitignore` �
 - `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`: 本地保存
   2026-05-29 从 `395bitstream/` 移出的 `cuper-tapa-spmv` one-shot demo 和
   `cuper-tapa-pcg` full-PCG demo；两者均未晋级为标准版。
+- `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`: 本地保存
+  2026-05-31 从 `395bitstream/` 移出的 `cuper-tapa-pcg` controller-split
+  full-PCG demo；该版上板测试通过到完整 `thermal2` 的 init/1iter，并 full-run
+  到 `thermal2_n262144`，但未晋级为标准版。
 - 可以在本目录保存 `.xclbin` 原文件，但不要 `git add -f`。
 - 不在本目录放 `.xo`、`.log`、`.json`、Vivado/Vitis 临时目录或其它大型工具原始产物。
 - `.xclbin.info` 可以跟随源码快照进入 Git，用于记录 xclbin 的 kernel、UUID、clock 和 memory topology。

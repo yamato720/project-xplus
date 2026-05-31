@@ -4,12 +4,12 @@
 
 记录时间：2026-05-27，更新：2026-05-31
 
-当前 full-PCG demo 已完成 `hw` bitstream 构建，并放入 `395bitstream/`
-full-PCG demo 槽位：
+当前 full-PCG demo 已完成 `hw` bitstream 构建、demo-only 上板测试和一组 partial
+full-run 补测；该 demo 已从 `395bitstream/` 移入归档目录：
 
 ```bash
-395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
-395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
+bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
+bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
 ```
 
 当前 demo 信息：
@@ -34,16 +34,22 @@ Total elapsed time: 4h 31m 0s
 build finished with exit code: 0
 ```
 
-当前 2026-05-31 controller-split 实验 demo 已完成 demo-only 上板测试。旧
-II=1 controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2` 和 2026-05-29 旧
-UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的测试数据只作为历史记录保留，不能
-套用到当前同名 `.xclbin`。
+当前 2026-05-31 controller-split 实验 demo 已完成 demo-only 上板测试并归档。旧
+II=1 controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`、2026-05-29 旧
+UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 和当前 controller-split UUID 的测试数据
+都只作为历史记录保留，不能套用到当前 `395bitstream/` 同名路径。
 
 当前 demo 还补跑了一组完整 PCG full-run，日志在
 `logs/codex_controller_split_fullrun_20260531_142400/`。该组不传
 `MAX_ITERS=1`，并传 `KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒轮询超时。
 `thermal2_n16` 到 `thermal2_n262144` 已确认多轮收敛；完整 `thermal2`
 按用户要求停止，记录为未完成。
+
+归档路径：
+
+```text
+bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/
+```
 
 历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
 槽位：
@@ -120,7 +126,7 @@ INFO: [v++ 60-791] Total elapsed time: 4h 31m 0s
 build finished with exit code: 0
 ```
 
-同步到 `395bitstream/` 的 demo 信息：
+测试时同步到 `395bitstream/` 的 demo 信息：
 
 | 项目 | 数值 |
 | --- | --- |
@@ -136,6 +142,10 @@ build finished with exit code: 0
 `iter_spmv` 标成 `iter recv + dot`，不能直接沿用旧 `dot_p_ap` stage 口径。虽然
 1iter 比上一 II=1 demo 明显改善，但共同成功点仍略慢于标准版和上一 demo，因此
 当前仍不更新正式 `source.diff`。
+
+2026-05-31 该 demo 已归档到
+`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`，当前 `395bitstream/`
+不再保留这个 full-PCG demo 文件。
 
 ## 2026-05-31 controller-split demo-only 上板测试
 

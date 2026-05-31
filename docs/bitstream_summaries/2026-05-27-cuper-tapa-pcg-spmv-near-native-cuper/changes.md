@@ -32,7 +32,9 @@ demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo
 旧 II=1 demo 的测试结论只作为历史对照，不能套用到当前 UUID。2026-05-31 又补跑
 一组当前 UUID 的 full-run 完整 PCG，不传 `MAX_ITERS=1`，并用
 `KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒超时；该组已确认到
-`thermal2_n262144` 多轮收敛。
+`thermal2_n262144` 多轮收敛。随后该 controller-split demo 已按用户要求作为新存档点
+移入 `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`，不再保留在
+`395bitstream/` 同步目录。
 
 代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
@@ -205,6 +207,9 @@ HLS 报告显示：
     `kernel_reported=15263.805830 ms`，明显快于 2026-05-29 旧 demo 的
     `39491.638 ms`，接近 TAPA 标准版旧记录 `14418.306 ms`。完整 `thermal2`
     禁用 host 60 秒超时后约 490 秒仍为 `ctrl=0x0`，按用户要求停止，记录为未完成。
+13. 2026-05-31 已把 controller-split demo 作为新存档点移入
+    `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`；`.xclbin` 只做本地
+    留档，`.xclbin.info` 和 README 记录归档信息。
 
 仍需完成：
 

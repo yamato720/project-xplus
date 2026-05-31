@@ -10,9 +10,8 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 当前候选 bitstream。两个 demo 槽位分别用于 `cuper-tapa-spmv` single SpMV 候选
 和 `cuper-tapa-pcg` full-PCG 候选；新 demo 进入同一主线槽位时优先覆盖旧 demo
 文件。四个标准版只有在用户明确确认满意后才会归档旧版并晋级替换。当前
-`395bitstream/` 保留四个标准 bitstream、single SpMV demo 槽和 full-PCG demo
-槽；full-PCG demo 槽已在 2026-05-31 用 controller-split 实验构建覆盖，并已完成
-demo-only 上板测试和一组 partial full-run 完整 PCG 测试。
+`395bitstream/` 保留四个标准 bitstream 和 single SpMV demo 槽；2026-05-31
+controller-split full-PCG demo 已归档，当前同步目录里不再保留 full-PCG demo 槽文件。
 
 如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
 
@@ -25,7 +24,6 @@ demo-only 上板测试和一组 partial full-run 完整 PCG 测试。
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
-| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 controller-split 实验 demo，已完成 demo-only 上板测试 |
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -42,14 +40,13 @@ UUID 为 `51132100-b217-df93-f4dd-05bfc169f820`，SHA256 为
 HBM clock 为 437 MHz。替换前版本已归档到
 `bitstream_archive/2026-05-26-tapa-pcg-pre-timed-debug/`。
 
-TAPA Cuper / single SpMV 已归档 demo 候选文件：
+TAPA Cuper / single SpMV 当前 demo 候选文件：
 
 ```text
 cuper-tapa-spmv-u55c-20260528-demo.xclbin
 ```
 
-这版是 `CuperPcgSpmv`，当前文件已在 2026-05-29 被新构建覆盖。
-它属于 `cuper-tapa-spmv` demo 候选，未替换当前标准
+这版是 `CuperPcgSpmv`。它属于 `cuper-tapa-spmv` demo 候选，未替换当前标准
 `cuper-tapa-spmv-u55c-20260522.xclbin`。demo xclbin UUID 为
 `c95c1dfc-20ca-9152-279e-bafdf35fdc3d`，SHA256 为
 `19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2`。
@@ -57,9 +54,8 @@ cuper-tapa-spmv-u55c-20260528-demo.xclbin
 HBM clock 为 418 MHz。构建日志为
 `logs/cuper_tapa_pcg_spmv_hw_parallel_20260528_222446.log`，版本记录见
 `docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`。
-该 demo 已归档到
-`bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，当前同步目录里不再
-保留该 demo 文件。
+该 demo 当前仍保留在 `395bitstream/` 的 single SpMV demo 槽；其 `.xclbin.info`
+同时在 `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/` 留有文字归档。
 
 该 single-SpMV demo 只保留历史 `CuperPcgSpmv` kernel 名和 demo/host 入口，
 内部回到和满血 `Cuper(...)` 一致的 one-shot Cuper SpMV task graph，不再复用
@@ -77,7 +73,7 @@ HBM clock 为 418 MHz。构建日志为
 Cuper SpMV 标准略慢约 2.7% 到 8.1%，但成功边界从标准旧记录的
 `thermal2_n131072` 扩到完整 `thermal2`。该 demo 未晋级为标准版。
 
-TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
+TAPA Cuper / FPGA-PCG 已归档 demo 候选文件：
 
 ```text
 cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
@@ -92,6 +88,9 @@ HBM clock 为 450 MHz。构建日志为
 `logs/cuper_tapa_pcg_controller_split_hw_20260531_020548.log`，构建目录为
 `cuper-tapa-pcg-controller-split-build/`，版本记录见
 `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+该 demo 已归档到
+`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`，当前同步目录里不再
+保留该 full-PCG demo 文件。
 
 2026-05-31 已完成 controller-split demo 的 `hw` bitstream 构建、同步和
 demo-only 上板测试。日志在
