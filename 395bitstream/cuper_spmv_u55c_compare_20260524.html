@@ -1188,50 +1188,70 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         本组比较 <code>MAX_ITERS=1</code> 的 <code>kernel_reported</code>。它是端到端一次迭代
         代理，包含 SpMV、AP 写回、dot、向量更新和 controller/service 开销。本组的
         本 demo 使用当前 2026-05-31 controller-split 实验 full-PCG 1iter 数据，
-        UUID 为 <code>1d536c39-f561-340b-7efc-ac2c8440543d</code>。
+        UUID 为 <code>1d536c39-f561-340b-7efc-ac2c8440543d</code>。no-TAPA 曲线使用
+        <code>cuper-notapa-pcg-fpga-u55c-20260522.xclbin</code> 重新补跑的
+        <code>MAX_ITERS=1</code> 数据，日志位于
+        <code>logs/codex_notapa_1iter_for_html_20260531_145910/</code>；大数据点返回
+        <code>status=max_iter</code> 且 rc=2，但 timing 与 diff 有效。
       </p>
       <div class="legend">
-        <span><i style="background: var(--tapa-pcg);"></i>标准版</span>
-        <span><i style="background: var(--tapa-pcg-demo);"></i>上一 demo</span>
-        <span><i style="background: var(--ok);"></i>本 demo</span>
+        <span><i style="background: var(--tapa-pcg);"></i>TAPA 标准版</span>
+        <span><i style="background: var(--tapa-pcg-demo);"></i>TAPA 上一 demo</span>
+        <span><i style="background: var(--ok);"></i>TAPA 本 demo</span>
+        <span><i style="background: var(--notapa);"></i>no-TAPA 标准版</span>
       </div>
       <div class="svg-wrap">
-        <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="TAPA PCG 1iter comparison">
+        <svg width="980" height="360" viewBox="0 0 980 360" role="img" aria-label="PCG 1iter comparison">
           <line class="gridline" x1="70" y1="20" x2="930" y2="20"></line>
-          <line class="gridline" x1="70" y1="74" x2="930" y2="74"></line>
-          <line class="gridline" x1="70" y1="133" x2="930" y2="133"></line>
-          <line class="gridline" x1="70" y1="187" x2="930" y2="187"></line>
-          <line class="gridline" x1="70" y1="246" x2="930" y2="246"></line>
+          <line class="gridline" x1="70" y1="50" x2="930" y2="50"></line>
+          <line class="gridline" x1="70" y1="83" x2="930" y2="83"></line>
+          <line class="gridline" x1="70" y1="112" x2="930" y2="112"></line>
+          <line class="gridline" x1="70" y1="145" x2="930" y2="145"></line>
+          <line class="gridline" x1="70" y1="175" x2="930" y2="175"></line>
+          <line class="gridline" x1="70" y1="208" x2="930" y2="208"></line>
+          <line class="gridline" x1="70" y1="237" x2="930" y2="237"></line>
+          <line class="gridline" x1="70" y1="270" x2="930" y2="270"></line>
           <line class="gridline" x1="70" y1="300" x2="930" y2="300"></line>
           <line class="axis" x1="70" y1="300" x2="930" y2="300"></line>
           <line class="axis" x1="70" y1="20" x2="70" y2="300"></line>
           <text x="13" y="24">3000 ms</text>
-          <text x="13" y="78">1000 ms</text>
-          <text x="20" y="137">300 ms</text>
-          <text x="20" y="191">100 ms</text>
-          <text x="28" y="250">30 ms</text>
-          <text x="28" y="304">10 ms</text>
+          <text x="13" y="54">1000 ms</text>
+          <text x="20" y="87">300 ms</text>
+          <text x="20" y="116">100 ms</text>
+          <text x="28" y="149">30 ms</text>
+          <text x="28" y="179">10 ms</text>
+          <text x="36" y="212">3 ms</text>
+          <text x="36" y="241">1 ms</text>
+          <text x="24" y="274">0.3 ms</text>
+          <text x="24" y="304">0.1 ms</text>
 
-          <polyline class="line-standard" points="70,280 285,217 500,187 715,156"></polyline>
-          <polyline class="line-prev-demo" points="70,280 285,217 500,189 715,157 930,43"></polyline>
-          <polyline class="line-current-demo" points="70,297 285,212 500,182 715,150 930,76"></polyline>
+          <polyline class="line-standard" points="70,164 285,129 500,112 715,95"></polyline>
+          <polyline class="line-prev-demo" points="70,164 285,129 500,113 715,96 930,33"></polyline>
+          <polyline class="line-current-demo" points="70,173 285,126 500,110 715,92 930,51"></polyline>
+          <polyline class="line-notapa" points="70,287 285,143 500,124 715,105 930,63"></polyline>
 
-          <circle class="dot-standard" cx="70" cy="280" r="4"></circle>
-          <circle class="dot-standard" cx="285" cy="217" r="4"></circle>
-          <circle class="dot-standard" cx="500" cy="187" r="4"></circle>
-          <circle class="dot-standard" cx="715" cy="156" r="4"></circle>
+          <circle class="dot-standard" cx="70" cy="164" r="4"></circle>
+          <circle class="dot-standard" cx="285" cy="129" r="4"></circle>
+          <circle class="dot-standard" cx="500" cy="112" r="4"></circle>
+          <circle class="dot-standard" cx="715" cy="95" r="4"></circle>
 
-          <circle class="dot-prev-demo" cx="70" cy="280" r="4"></circle>
-          <circle class="dot-prev-demo" cx="285" cy="217" r="4"></circle>
-          <circle class="dot-prev-demo" cx="500" cy="189" r="4"></circle>
-          <circle class="dot-prev-demo" cx="715" cy="157" r="4"></circle>
-          <circle class="dot-prev-demo" cx="930" cy="43" r="4"></circle>
+          <circle class="dot-prev-demo" cx="70" cy="164" r="4"></circle>
+          <circle class="dot-prev-demo" cx="285" cy="129" r="4"></circle>
+          <circle class="dot-prev-demo" cx="500" cy="113" r="4"></circle>
+          <circle class="dot-prev-demo" cx="715" cy="96" r="4"></circle>
+          <circle class="dot-prev-demo" cx="930" cy="33" r="4"></circle>
 
-          <circle class="dot-current-demo" cx="70" cy="297" r="4"></circle>
-          <circle class="dot-current-demo" cx="285" cy="212" r="4"></circle>
-          <circle class="dot-current-demo" cx="500" cy="182" r="4"></circle>
-          <circle class="dot-current-demo" cx="715" cy="150" r="4"></circle>
-          <circle class="dot-current-demo" cx="930" cy="76" r="4"></circle>
+          <circle class="dot-current-demo" cx="70" cy="173" r="4"></circle>
+          <circle class="dot-current-demo" cx="285" cy="126" r="4"></circle>
+          <circle class="dot-current-demo" cx="500" cy="110" r="4"></circle>
+          <circle class="dot-current-demo" cx="715" cy="92" r="4"></circle>
+          <circle class="dot-current-demo" cx="930" cy="51" r="4"></circle>
+
+          <circle class="dot-notapa" cx="70" cy="287" r="4"></circle>
+          <circle class="dot-notapa" cx="285" cy="143" r="4"></circle>
+          <circle class="dot-notapa" cx="500" cy="124" r="4"></circle>
+          <circle class="dot-notapa" cx="715" cy="105" r="4"></circle>
+          <circle class="dot-notapa" cx="930" cy="63" r="4"></circle>
 
           <text x="52" y="325">16</text>
           <text x="257" y="325">65,536</text>
@@ -1248,16 +1268,18 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <th class="num">标准 1iter</th>
               <th class="num">上一 demo 1iter</th>
               <th class="num">本 demo 1iter</th>
+              <th class="num">no-TAPA 1iter</th>
               <th class="num">本 demo / 标准</th>
+              <th class="num">本 demo / no-TAPA</th>
               <th>备注</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">14.9905</td><td class="num">14.9260</td><td class="num">10.5436</td><td class="num">0.70x</td><td>小数据点固定开销波动较大，本轮更快</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">54.5996</td><td class="num">54.4713</td><td class="num">60.1869</td><td class="num">1.10x</td><td>比上一 II=1 demo 快，略慢于标准/上一 demo</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">99.8461</td><td class="num">96.5312</td><td class="num">110.6622</td><td class="num">1.11x</td><td>比上一 II=1 demo 快，仍略慢于标准/上一 demo</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">188.8202</td><td class="num">182.5644</td><td class="num">211.3790</td><td class="num">1.12x</td><td>比上一 II=1 demo 385.1288 ms 明显改善，但仍略慢于标准和上一 demo</td></tr>
-            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">1887.4481</td><td class="num">954.0779</td><td class="num">-</td><td>保持完整规模返回边界，且快于上一 demo 和上一 II=1 demo 1767.8254 ms</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">14.9905</td><td class="num">14.9260</td><td class="num">10.5436</td><td class="num">0.1641</td><td class="num">0.70x</td><td class="num">64.27x</td><td>小数据点 no-TAPA 固定开销最低；TAPA 本 demo 比 TAPA 标准快</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">54.5996</td><td class="num">54.4713</td><td class="num">60.1869</td><td class="num">32.7173</td><td class="num">1.10x</td><td class="num">1.84x</td><td>no-TAPA 1iter 更快；TAPA 本 demo 略慢于 TAPA 标准/上一 demo</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">99.8461</td><td class="num">96.5312</td><td class="num">110.6622</td><td class="num">65.3334</td><td class="num">1.11x</td><td class="num">1.69x</td><td>no-TAPA 1iter 更快；TAPA 本 demo 仍略慢于 TAPA 标准/上一 demo</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">188.8202</td><td class="num">182.5644</td><td class="num">211.3790</td><td class="num">130.5516</td><td class="num">1.12x</td><td class="num">1.62x</td><td>比上一 II=1 demo 385.1288 ms 明显改善，但 no-TAPA 1iter 仍更快</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">failed</td><td class="num">1887.4481</td><td class="num">954.0779</td><td class="num">611.1935</td><td class="num">-</td><td class="num">1.56x</td><td>TAPA 本 demo 保持完整规模 1iter 返回；no-TAPA 标准版同口径也返回且更快</td></tr>
           </tbody>
         </table>
       </div>
