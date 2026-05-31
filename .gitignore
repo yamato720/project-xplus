@@ -36,3 +36,4 @@ hd_visual/
 docs/refer/*.pdf
 
 # Archived .xclbin files stay local; source snapshots and .xclbin.info may be tracked.
+archived_edition/
