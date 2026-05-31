@@ -36,6 +36,14 @@ demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo
 移入 `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`，不再保留在
 `395bitstream/` 同步目录。
 
+2026-05-31 又在 `0940e6c` 的 packed timing 版本上生成新的 full-PCG
+`CuperPcg` demo bitstream，当前同步槽为
+`395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin`。这版把 PCG 主状态改为
+packed `double_v8`，并把 `Metrics[5..15]` 明确为 packed memory packet work，
+分段实测继续看 `[stage-cycles]` / `[stage-ms]`。它已完成 demo-only init-only 与
+1iter 上板测试；完整 `thermal2` 1iter 比归档 controller-split demo 略快，但共同成功点
+仍未超过标准版。
+
 代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
 | 形态 | 入口/文件 | 作用 |
@@ -119,6 +127,24 @@ HLS 报告显示：
 `Pcg_Controller` 顶层 HLS 估计 latency 从上一版约 `451580129243` 降到
 `173580117235`，LUT 从 `72458` 降到 `51280`。这只是 HLS 层面的改善，是否转化
 为板上收益需要当前 UUID 的 demo-only 测试确认。
+
+### 2026-05-31 packed timing 实验
+
+本轮继续围绕 `detail/pcg_controller.hpp` 和 host metrics 口径调整：
+
+- `B/M_inv/X/R/Z/P` 主状态从标量 `double` mmap 改为 512-bit packed
+  `double_v8` mmap，降低 controller 对 FP64 状态的逐元素 HBM 访问压力。
+- `init_spmv_recv_r`、`init_zp_reduce_pack`、`update_xr`、`update_z_reduce`、
+  `update_p_pack` 等阶段按 double-v8 packet 读写，`X` 最终仍作为 FP64 状态写回。
+- `Metrics[5..15]` 改为 packed memory packet work，避免把它误认为 cycle；
+  `[stage-cycles]` 和 `[stage-ms]` 才是分段实测时间。
+- host 的 `MAX_ITERS=0` 语义改为 `effective_max_iters=max(4*N,1000)`，
+  不再代表 init-only。init-only 测试仍使用
+  `TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1`。
+
+这版生成的 bitstream UUID 为 `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`，
+DATA/KERNEL/HBM clock 为 `172/500/405 MHz`。它比归档 controller-split demo
+频率低，但完整 `thermal2` 1iter 仍从 `954.0779 ms` 降到 `944.1232 ms`。
 
 ## 预期影响
 
@@ -210,6 +236,18 @@ HLS 报告显示：
 13. 2026-05-31 已把 controller-split demo 作为新存档点移入
     `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`；`.xclbin` 只做本地
     留档，`.xclbin.info` 和 README 记录归档信息。
+14. 2026-05-31 packed timing 实验构建成功，并同步为
+    `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin`：
+    UUID `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`，SHA256
+    `a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72`，
+    DATA/KERNEL/HBM clock `172/500/405 MHz`。
+15. 2026-05-31 packed timing demo-only 上板测试完成：
+    `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+    `thermal2_n262144` 和完整 `thermal2` 的 init-only / 1iter 全部返回。
+    完整 `thermal2` 1iter `kernel_reported=944.1232 ms`，比归档
+    controller-split demo 的 `954.0779 ms` 略快；`thermal2_n262144` 1iter
+    `210.3193 ms`，仍慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。
+    本版不更新正式 `source.diff`。
 
 仍需完成：
 
@@ -218,7 +256,7 @@ HLS 报告显示：
 2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
    退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
 3. 继续分析当前 controller/update 路径里 `update_z_reduce`、`iter_dot_p_ap_lanes`
-   和标量 FP64 HBM 访问的大规模瓶颈；
+   和 packed FP64 HBM 访问的大规模瓶颈；
    只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。
 4. 如后续仍要验证完整 `thermal2` full-run，需要按长跑任务单独安排，不再用 host
    默认 60 秒超时判断；本轮只确认禁用 host 超时后长时间仍未返回。

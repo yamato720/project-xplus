@@ -3,8 +3,8 @@
 ## 版本信息
 
 - 主线：`cuper-tapa-pcg`
-- 状态：2026-05-31 controller-split 实验 demo 已完成 `hw` bitstream 构建、
-  demo-only 上板测试和一组 partial full-run 补测；该 demo 已归档，未替换当前标准版
+- 状态：2026-05-31 packed timing 实验 demo 已完成 `hw` bitstream 构建和
+  demo-only init-only / 1iter 上板测试；未替换当前标准版
 - 持续目标：优化 full `CuperPcg(...)` 的 controller/dot/update 路径，降低
   `1iter kernel_reported` 和 `controller_total`
 - 当前 demo 方向：single SpMV one-shot demo 已接近满血 `Cuper(...)` 并能跑完整
@@ -15,17 +15,17 @@
   demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
   只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
 - 对应标准版：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin`
-- 当前 demo 归档路径：`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`
-- 当前归档 demo 文件：`cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`
-- 当前归档 demo UUID：`1d536c39-f561-340b-7efc-ac2c8440543d`
-- 当前归档 demo SHA256：`bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8`
-- 当前归档 demo DATA/KERNEL/HBM：211/500/450 MHz
-- 当前构建目录：`cuper-tapa-pcg-controller-split-build/`
-- 当前 tmux 会话：`project-xplus-cuper-tapa-pcg-controller-split-hw`
-- 当前构建日志：`logs/cuper_tapa_pcg_controller_split_hw_20260531_020548.log`
-- 当前上板测试日志：`logs/codex_controller_split_demo_test_20260531_140333/`
-- 当前 full-run 补测日志：`logs/codex_controller_split_fullrun_20260531_142400/`
-- 上一个已测试 demo UUID：`0170fa86-6e62-cfc9-aa66-2d330dd72cf2`
+- 当前 demo 文件：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin`
+- 当前 demo UUID：`f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`
+- 当前 demo SHA256：`a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72`
+- 当前 demo DATA/KERNEL/HBM：172/500/405 MHz
+- 当前构建目录：`cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/`
+- 当前 tmux 会话：`project-xplus-cuper-tapa-pcg-packed-timing-hw`
+- 当前构建日志：`logs/cuper_tapa_pcg_packed_timing_hw_20260531_163554.log`
+- 当前上板测试日志：`logs/codex_packed_timing_demo_test_20260531_195109_proper/`
+- 归档 controller-split demo：`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`
+  / UUID `1d536c39-f561-340b-7efc-ac2c8440543d`
+- 上一个 II=1 demo UUID：`0170fa86-6e62-cfc9-aa66-2d330dd72cf2`
 - 历史 packed feed/AP demo：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin`
   / UUID `cc61e044-06f7-4726-8f18-773ac52ab1b2`
 
@@ -45,9 +45,10 @@
 demo 测试时覆盖过 `395bitstream/` 的 `cuper-tapa-pcg` demo 槽，并已完成
 demo-only 上板测试。2026-05-31 的 II=1 controller 实验构建再次覆盖同名 demo
 槽，随后 controller-split 实验构建又覆盖该槽，并已在 2026-05-31 归档到
-`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`。因此 2026-05-29、
-旧 II=1 demo 与 controller-split demo 的测试结论都只作为历史记录保留，不再对应
-当前同步目录里的同名 `.xclbin` 文件。
+`bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`。当前同步目录里的
+full-PCG demo 槽已换成 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` packed timing
+实验。因此 2026-05-29、旧 II=1 demo 与 controller-split demo 的测试结论都只作为
+历史记录保留，不再对应当前同步目录里的 full-PCG demo 文件。
 
 ## 这一版做了什么
 
@@ -135,14 +136,26 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
 - 2026-05-31 已按用户要求把 controller-split demo 作为新存档点移入
   `bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/`。`.xclbin` 只做本地
   留档，`.xclbin.info` 和归档 README 记录 UUID、clock、测试结论和硬件报告入口。
+- 2026-05-31 packed timing 实验 `hw` bitstream 构建成功，并作为当前
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 同步槽。该文件 UUID
+  为 `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`，SHA256 为
+  `a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72`，
+  DATA/KERNEL/HBM clock 为 `172/500/405 MHz`。
+- 2026-05-31 packed timing demo-only 上板测试完成：
+  `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+  `thermal2_n262144` 和完整 `thermal2` 的 init-only 与 1iter 全部返回，
+  direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 的
+  1iter `kernel_reported=944.123210 ms`，比归档 controller-split demo 的
+  `954.0779 ms` 略快；`thermal2_n262144` 的 1iter 为
+  `210.319328 ms`，仍慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。
 
 尚未完成：
 
 - 未按本轮要求重跑四个标准 bitstream；旧标准数据只复用既有 HTML/Markdown 记录。
-- 未证明当前 2026-05-31 controller-split full-PCG demo 达到标准替换性能；虽然比
-  上一 II=1 demo 明显改善，但共同成功点仍略慢于标准版和上一 demo。
-- 未证明完整 `thermal2` 的 full-run 能在当前 controller-split demo 上完成；本轮
-  只确认去掉 host 60 秒超时后不会立即失败，但长时间仍未返回。
+- 未证明当前 2026-05-31 packed timing full-PCG demo 达到标准替换性能；虽然比
+  归档 controller-split demo 略快，但共同成功点仍慢于标准版和上一 demo。
+- 未对当前 packed timing demo 补跑完整 full-run；现有 full-run 结论仍来自归档
+  controller-split demo。
 
 ## 是否建议晋级
 
@@ -150,18 +163,15 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
 
 理由：
 
-- 正面：当前 controller-split 实验能完成完整 `hw` route 并生成可上板 xclbin；
-  HLS 报告显示 `update_xr` 从约 `310 cycles/packet` 降到约 `80 cycles/packet`，
-  `update_p` 从约 `397 cycles/packet` 降到约 `78 cycles/packet`；板上实测
-  完整 `thermal2` 1iter 从上一 II=1 demo 的 `1767.8254 ms` 降到
-  `954.0779 ms`；full-run 到 `thermal2_n262144` 也从上一 2026-05-29 demo 的
-  `39491.638 ms` 降到 `15263.805830 ms`，接近 TAPA 标准版旧记录
-  `14418.306 ms`。
-- 风险：routed timing report 显示 timing constraints are not met，`WNS=-1.405 ns`；
+- 正面：当前 packed timing 实验能完成完整 `hw` route 并生成可上板 xclbin；
+  板上实测完整 `thermal2` 1iter 为 `944.123210 ms`，比归档 controller-split demo
+  的 `954.0779 ms` 略快；完整规模 init-only 从 `361.4214 ms` 降到
+  `302.744196 ms`。
+- 风险：新 bitstream DATA/HBM clock 降到 `172/405 MHz`；
   `dot_p_ap` 已合入 `iter_spmv_stream`，stage counter 口径变化，HTML 更新时必须按新
-  语义标注；1iter 共同成功点仍未超过标准版和上一 demo；完整 `thermal2` full-run
-  仍未完成。
-- 结论：它是“full-PCG controller-split 实验候选”，不是标准替换候选。
+  语义标注；1iter 共同成功点仍未超过标准版和上一 demo；当前 packed timing demo 的
+  完整 `thermal2` full-run 尚未补测。
+- 结论：它是“full-PCG packed timing 实验候选”，不是标准替换候选。
 
 下一步不要继续把主要精力放在 single SpMV 本体上；它作为回归基线保留。full-PCG
 优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径，先拆

@@ -4,48 +4,49 @@
 
 记录时间：2026-05-27，更新：2026-05-31
 
-当前 full-PCG demo 已完成 `hw` bitstream 构建、demo-only 上板测试和一组 partial
-full-run 补测；该 demo 已从 `395bitstream/` 移入归档目录：
+当前 full-PCG demo 已完成 `hw` bitstream 构建和 demo-only init-only / 1iter
+上板测试；它仍作为 demo 保留在 `395bitstream/`，未替换当前标准版：
 
 ```bash
-bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
-bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin.info
 ```
 
 当前 demo 信息：
 
 | 项目 | 数值 |
 | --- | --- |
-| UUID | `1d536c39-f561-340b-7efc-ac2c8440543d` |
-| SHA256 | `bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8` |
-| DATA clock | 211 MHz |
+| UUID | `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668` |
+| SHA256 | `a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72` |
+| DATA clock | 172 MHz |
 | KERNEL clock | 500 MHz |
-| HBM clock | 450 MHz |
-| 构建目录 | `cuper-tapa-pcg-controller-split-build/` |
-| 构建日志 | `logs/cuper_tapa_pcg_controller_split_hw_20260531_020548.log` |
-| 构建耗时 | 4h 31m 0s |
+| HBM clock | 405 MHz |
+| 构建目录 | `cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/` |
+| 构建日志 | `logs/cuper_tapa_pcg_packed_timing_hw_20260531_163554.log` |
+| 构建耗时 | 3h 4m 41s |
 
 关键构建输出：
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-pcg-controller-split-build/hw/CuperPcg.xclbin
-Total elapsed time: 4h 31m 0s
+Created .../cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/hw/CuperPcg.xclbin
+Total elapsed time: 3h 4m 41s
 build finished with exit code: 0
 ```
 
-当前 2026-05-31 controller-split 实验 demo 已完成 demo-only 上板测试并归档。旧
-II=1 controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`、2026-05-29 旧
-UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 和当前 controller-split UUID 的测试数据
-都只作为历史记录保留，不能套用到当前 `395bitstream/` 同名路径。
+当前 2026-05-31 packed timing 实验 demo 已完成 demo-only 上板测试。旧 II=1
+controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`、2026-05-29 旧 UUID
+`086a3345-ddf0-ffdd-b260-16ca5fa5223a` 和归档 controller-split UUID
+`1d536c39-f561-340b-7efc-ac2c8440543d` 的测试数据都只作为历史记录保留，不能套用到
+当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin`。
 
-当前 demo 还补跑了一组完整 PCG full-run，日志在
+归档 controller-split demo 还补跑过一组完整 PCG full-run，日志在
 `logs/codex_controller_split_fullrun_20260531_142400/`。该组不传
 `MAX_ITERS=1`，并传 `KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒轮询超时。
 `thermal2_n16` 到 `thermal2_n262144` 已确认多轮收敛；完整 `thermal2`
-按用户要求停止，记录为未完成。
+按用户要求停止，记录为未完成。当前 packed timing demo 尚未补跑 full-run。
 
-归档路径：
+controller-split 归档路径：
 
 ```text
 bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/
@@ -61,6 +62,134 @@ bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/
 
 该历史 demo 文件已被 2026-05-29 demo 替换；旧 receive-path demo 和 2026-05-27
 packed feed/AP demo 的测试结论只作为历史记录保留，不再对应当前这个 `.xclbin` 文件。
+
+## 2026-05-31 packed timing 实验构建
+
+源码状态：
+
+```text
+git: 0940e6c Adapt packed PCG timing metrics
+```
+
+完整 bitstream 构建：
+
+```bash
+tmux new-session -d -s project-xplus-cuper-tapa-pcg-packed-timing-hw ...
+make _build-cuper-tapa-pcg TARGET=hw \
+  BUILD_DIR=/home/pyx/ProjectFS/Project-X/Project-XPlus/cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build
+```
+
+构建结果：成功。
+
+关键输出：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-586] Created /home/pyx/ProjectFS/Project-X/Project-XPlus/cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/hw/CuperPcg.xclbin
+INFO: [v++ 60-791] Total elapsed time: 3h 4m 41s
+build finished with exit code: 0
+```
+
+同步到 `395bitstream/` 的 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| demo xclbin | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` |
+| demo info | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin.info` |
+| UUID | `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668` |
+| SHA256 | `a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72` |
+| DATA clock | 172 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 405 MHz |
+
+本轮上板测试见下一节。本版把 PCG 主状态改成 packed `double_v8`，并继续把
+`dot_p_ap` 合入 `iter_spmv_stream`，因此 HTML 中 raw `iter_spmv` 仍标成
+`iter recv + dot`。`Metrics[5..15]` 是 packed memory packet work，不是实测 cycle；
+实测分段以 `[stage-cycles]` / `[stage-ms]` 为准。
+
+## 2026-05-31 packed timing demo-only 上板测试
+
+日志目录：
+
+```text
+logs/codex_packed_timing_demo_test_20260531_195109_proper/
+```
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin
+```
+
+环境：
+
+```text
+XRT: 2.15.225
+BDF: 0000:01:00.1
+UUID: f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668
+SHA256: a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72
+DATA/KERNEL/HBM: 172/500/405 MHz
+```
+
+本轮没有重跑四个标准 bitstream；标准数据复用当前 HTML 和历史测试记录。
+
+运行口径：
+
+```bash
+host=./cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/xplus_cuper_tapa_pcg_fpga_host
+bit=395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin
+export XILINX_XRT=/opt/xilinx/xrt
+export LD_LIBRARY_PATH="/home/pyx/.tapa/usr/lib:/opt/xilinx/xrt/lib:${LD_LIBRARY_PATH:-}"
+
+timeout 300s "$host" data/suitesparse/Schmid/csr/<dataset> \
+  --bitstream "$bit" --tau 1e100 --max-iters 1 --diff-tol 1e-1
+
+timeout 300s "$host" data/suitesparse/Schmid/csr/<dataset> \
+  --bitstream "$bit" --max-iters 1 --diff-tol 1e-4
+```
+
+说明：新版 host 中 `MAX_ITERS=0` 不再代表 init-only，而是映射为
+`effective_max_iters=max(4*N, 1000)`。本轮 init-only 仍使用
+`TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1`。
+
+退出状态：
+
+| 模式 | 数据集 | rc | direct ctrl | status | max_abs_diff | max_rel_diff |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| init | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n65536` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n131072` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2_n262144` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| init | `thermal2` | 0 | `0x4 -> 0xe` | converged | 0 | 0 |
+| 1iter | `thermal2_n16` | 0 | `0x4 -> 0xe` | converged | 1.0868e-08 | 9.2864e-09 |
+| 1iter | `thermal2_n65536` | 0 | `0x4 -> 0xe` | max_iter | 7.5004e-10 | 7.2993e-10 |
+| 1iter | `thermal2_n131072` | 0 | `0x4 -> 0xe` | max_iter | 2.3337e-10 | 1.8330e-10 |
+| 1iter | `thermal2_n262144` | 0 | `0x4 -> 0xe` | max_iter | 5.3981e-10 | 4.0347e-10 |
+| 1iter | `thermal2` | 0 | `0x4 -> 0xe` | max_iter | 1.1717e-09 | 1.0914e-09 |
+
+关键计时，单位 ms。`iter recv + dot` 是本版 raw `iter_spmv` 计时；本版已把
+`dot_p_ap` 合入 `iter_spmv_stream` 接收路径，因此不再有独立 `dot_p_ap` 计数。
+
+| 数据集 | init kernel | init ctrl | init SpMV | 1iter kernel | 1iter ctrl | iter recv + dot | update_xr | update_z | update_p |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n16` | 11.8041 | 0.0051 | 0.0022 | 11.7857 | 0.0145 | 0.0021 | 0.0027 | 0.0021 | 0.0021 |
+| `thermal2_n65536` | 26.5787 | 15.3126 | 4.7867 | 61.3343 | 49.1072 | 5.3132 | 11.2777 | 9.0233 | 8.1796 |
+| `thermal2_n131072` | 42.3436 | 30.6249 | 9.5731 | 111.7730 | 98.2127 | 10.6252 | 22.5554 | 18.0463 | 16.3613 |
+| `thermal2_n262144` | 73.5284 | 61.2522 | 19.1487 | 210.3193 | 196.4336 | 21.2531 | 45.1102 | 36.0926 | 32.7252 |
+| `thermal2` | 302.7442 | 286.9757 | 89.7385 | 944.1232 | 920.2593 | 99.5997 | 211.3258 | 169.0716 | 153.2865 |
+
+本轮结论：
+
+- 当前 packed timing demo 能跑完整 `thermal2` 的 init-only 和 1iter，direct ctrl
+  均为 `0x4 -> 0xe`，数值校验通过。
+- 相比归档 controller-split demo，完整 `thermal2` 1iter 从 `954.0779 ms` 降到
+  `944.1232 ms`，`thermal2_n262144` 1iter 从 `211.3790 ms` 降到 `210.3193 ms`。
+- 相比当前 TAPA full-PCG 标准版共同成功点仍慢：`thermal2_n262144` 标准版为
+  `188.8202 ms`，当前 packed timing demo 为 `210.3193 ms`。
+- 完整 `thermal2` 的 1iter 中 `iter recv + dot=99.5997 ms`、
+  `update_xr=211.3258 ms`、`update_z=169.0716 ms`、`update_p=153.2865 ms`、
+  `init_zp=197.2362 ms`。SpMV/接收路径下降，但向量更新和归约仍是主项。
+- 暂不建议晋级为标准版，也不更新正式 `source.diff`。
 
 ## 2026-05-31 controller-split 实验构建
 
@@ -216,12 +345,12 @@ timeout 300s make run-cuper-pcg-tapa-fpga \
 
 本轮结论：
 
-- 当前 controller-split demo 能跑完整 `thermal2` 的 init-only 和 1iter，direct ctrl
+- 归档 controller-split demo 能跑完整 `thermal2` 的 init-only 和 1iter，direct ctrl
   均为 `0x4 -> 0xe`，数值校验通过。
 - 相比上一 II=1 demo，`thermal2_n262144` 1iter 从 `385.1288 ms` 降到
   `211.3790 ms`，完整 `thermal2` 1iter 从 `1767.8254 ms` 降到 `954.0779 ms`。
 - 相比当前 TAPA full-PCG 标准版共同成功点仍略慢：`thermal2_n262144` 标准版为
-  `188.8202 ms`，当前 controller-split demo 为 `211.3790 ms`。
+  `188.8202 ms`，归档 controller-split demo 为 `211.3790 ms`。
 - 完整 `thermal2` 的 1iter 中 `iter recv + dot=168.3785 ms`、
   `update_xr=198.6112 ms`、`update_p=193.7012 ms`、`init_zp=223.4468 ms`。
   相比旧 II=1，`update_xr` 和 `update_p` 大幅下降，但一次迭代仍主要受
@@ -283,7 +412,7 @@ host 侧 direct-register 轮询的 60 秒超时；外层保护曾被手动移除
 
 本轮结论：
 
-- 当前 controller-split demo 已确认能跑完整 PCG 多轮迭代到 `thermal2_n262144`，
+- 归档 controller-split demo 已确认能跑完整 PCG 多轮迭代到 `thermal2_n262144`，
   不是只迭代一次。
 - 共同成功点的 full-run 性能比 2026-05-29 旧 demo 大幅改善，并接近 TAPA 标准版；
   但仍未证明完整 `thermal2` 能完成。

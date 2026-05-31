@@ -17,17 +17,20 @@ TAPA stream 如何传递，先看同目录的 `two_iteration_dataflow.md`。
    `float_v16`，不再让 controller 从 `double X/P` 逐元素打包。
 2. `AP` 输出侧新增 packed `AP_spmv`，让 controller 直接缓存 Cuper 输出的一包
    `float_v16`，后续 dot/update 再按包读取。
-3. 当前 controller-split demo 又把 `p^T AP` 合入 `iter_spmv_stream` 接收路径，
+3. controller-split demo 又把 `p^T AP` 合入 `iter_spmv_stream` 接收路径，
    并把 `update_xr` / `update_p` 各自拆成 compute/store 两段。
+4. 当前 packed timing demo 把 `B/M_inv/X/R/Z/P` 主状态改成 packed `double_v8`
+   mmap，`Metrics[5..15]` 改为 packed memory packet work，真实分段时间看
+   `[stage-cycles]` / `[stage-ms]`。
 
 所以读代码时不要把 `X` 和 `X_spmv`、`P` 和 `P_spmv`、旧 `AP` 和 `AP_spmv`
 混成同一个东西：
 
 | 名称 | 类型 | 作用 |
 | --- | --- | --- |
-| `X` | `double*` | PCG 最终解和 FP64 更新状态 |
+| `X` | `double_v8*` | PCG 最终解和 FP64 更新状态，512-bit packed |
 | `X_spmv` | `float_v16*` | 初始化 `A*x0` 的 packed SpMV 输入 |
-| `P` | `double*` | PCG 搜索方向的 FP64 状态 |
+| `P` | `double_v8*` | PCG 搜索方向的 FP64 状态，512-bit packed |
 | `P_spmv` | `float_v16*` | 每轮 `A*p` 的 packed SpMV 输入 |
 | `AP_spmv` | `float_v16*` | 每轮 `A*p` 的 packed SpMV 输出缓存 |
 
@@ -106,6 +109,10 @@ host/cuper_tapa_pcg_fpga_main.cpp
 26     Metrics
 27     Status
 ```
+
+其中 `B/M_inv/X/R/Z/P` 的 mmap 元素类型在当前 packed timing demo 中是
+`double_v8`，host 负责在读写前后做 pack/unpack。旧文档或旧 `source.diff` 中的
+`double*` 表述只对应早期 packed feed/AP 版本。
 
 旧标准 bitstream 是 26 个 memory args，没有 `X_spmv/P_spmv/AP_spmv`。host 里
 `--legacy-abi` 专门保留给旧标准 bitstream 对比，不要删。
@@ -225,7 +232,7 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
 5. `iter_spmv_stream`：
    - PCG 迭代专用接收 `A*p`；
    - 直接写 packed `AP_spmv`；
-   - 当前 controller-split demo 在接收 AP 时同步读 `P` 并计算
+   - 当前 packed timing demo 在接收 AP 时同步读 packed `P` 并计算
      `p_ap = p^T A p`，不再另开独立 `dot_p_ap` stage。
 7. `update_xr`：
    - PCG 迭代专用；
@@ -248,7 +255,7 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
 | Metrics | 含义 |
 | --- | --- |
 | `[0..3]` | `rz/rr/p_ap/alpha` |
-| `[4..14]` | 手工 work-tick 估算 |
+| `[4..15]` | packed memory packet work，不是实测 cycle |
 | `[16..24]` | `Pcg_Stage_Timer` 统计 cycle |
 
 板上看性能时，优先对比：
@@ -259,7 +266,7 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
 - `stage-ms`：`init_zp`、`dot_p_ap`、`update_xr`、`update_z`、`update_p`；
 - `[timing-ms] kernel_reported`：host/XRT 看到的完整 kernel 时间。
 
-当前 controller-split demo 的 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
+当前 packed timing demo 的 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
 发 begin/end event，raw stage timer 里的 `dot_p_ap` 可能为 0；`p^T AP` 的真实
 工作被并入 `iter_spmv_stream`。更新 HTML 或比较历史数据时，应把这一项标成
 `iter recv + dot` 或显式写出新旧口径差异，不能直接把 raw `iter_spmv` 当作纯
@@ -326,7 +333,7 @@ nnz = 8,580,313
 
 1. 读取 Project-XPlus CSR 数据集；
 2. 用 Cuper 工具函数把 CSR 转成 `SpElement_list_ptr` 和 16 路 `Matrix_data`；
-3. 准备 FP64 PCG 状态和 packed `X_spmv/P_spmv/AP_spmv`；
+3. 准备 packed `double_v8` FP64 PCG 状态和 packed `X_spmv/P_spmv/AP_spmv`；
 4. 软件仿真时用 `tapa::invoke`，硬件运行时用 XRT direct-register 启动。
 
 host 里最容易看错的是两套 ABI：

@@ -10,8 +10,8 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 当前候选 bitstream。两个 demo 槽位分别用于 `cuper-tapa-spmv` single SpMV 候选
 和 `cuper-tapa-pcg` full-PCG 候选；新 demo 进入同一主线槽位时优先覆盖旧 demo
 文件。四个标准版只有在用户明确确认满意后才会归档旧版并晋级替换。当前
-`395bitstream/` 保留四个标准 bitstream 和 single SpMV demo 槽；2026-05-31
-controller-split full-PCG demo 已归档，当前同步目录里不再保留 full-PCG demo 槽文件。
+`395bitstream/` 保留四个标准 bitstream、一个 single SpMV demo 槽和一个
+full-PCG demo 槽。
 
 如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
 
@@ -24,6 +24,7 @@ controller-split full-PCG demo 已归档，当前同步目录里不再保留 ful
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
+| `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -72,6 +73,34 @@ HBM clock 为 418 MHz。构建日志为
 `spmv_avg=1.781541 ms`，`gflops=9.632462`。共同成功点上它比 standalone TAPA
 Cuper SpMV 标准略慢约 2.7% 到 8.1%，但成功边界从标准旧记录的
 `thermal2_n131072` 扩到完整 `thermal2`。该 demo 未晋级为标准版。
+
+TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
+
+```text
+cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin
+```
+
+这版是 2026-05-31 新生成的 `CuperPcg` packed timing 实验 demo。它不替换当前
+标准 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。demo xclbin UUID 为
+`f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`，SHA256 为
+`a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72`。
+最终 xclbin info 中 DATA clock 为 172 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 405 MHz。构建日志为
+`logs/cuper_tapa_pcg_packed_timing_hw_20260531_163554.log`，构建目录为
+`cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/`，版本记录见
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+
+2026-05-31 已完成该 demo 的 init-only 与 `MAX_ITERS=1` demo-only 上板测试，
+日志在 `logs/codex_packed_timing_demo_test_20260531_195109_proper/`。本轮没有重跑
+四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+`thermal2_n262144` 和完整 `thermal2` 的 init-only 与 1iter 均返回，direct ctrl
+均为 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 上 init-only
+`kernel_reported=302.744196 ms`，1iter `kernel_reported=944.123210 ms`；
+`thermal2_n262144` 上 1iter `kernel_reported=210.319328 ms`。该版比归档的
+controller-split demo 略快，但共同成功点仍慢于 TAPA full-PCG 标准版，因此暂不建议
+晋级为标准版。注意本版 `MAX_ITERS=0` 会映射为
+`effective_max_iters=max(4*N, 1000)`，不能再当 init-only 使用；init-only 仍使用
+`TAU=1e100 MAX_ITERS=1 DIFF_TOL=1e-1`。
 
 TAPA Cuper / FPGA-PCG 已归档 demo 候选文件：
 
