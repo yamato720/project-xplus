@@ -27,6 +27,10 @@ full-PCG `CuperPcg` demo bitstream，并覆盖 `395bitstream/` 的同名 full-PC
 demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo-only 测试结论
 只作为历史记录保留，不再对应当前同名 `.xclbin`。
 
+随后又生成了 controller-split 实验 demo，并再次覆盖同名 full-PCG demo 槽。该
+新文件只完成了软件级验证、XO/HLS 和完整 `hw` bitstream 构建，尚未完成 demo-only
+上板测试；旧 II=1 demo 的测试结论不能套用到当前 UUID。
+
 代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
 | 形态 | 入口/文件 | 作用 |
@@ -81,6 +85,35 @@ demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo
 这些 loop 的 `#pragma HLS pipeline` 目标被压到 `II=1`，对应手工 ticks 从原先
 `Row_num * 4` 或 `Row_num * 2` 改成 `Row_num * 1`。这只是实验性目标值；
 HLS 实际调度没有全部达到 II=1。
+
+### 2026-05-31 controller-split 实验
+
+本轮继续只改 `detail/pcg_controller.hpp`，目标是缓解上一版
+`update_xr_lanes` / `update_p_lanes` 的大 II：
+
+- `dot_p_ap` 合入 `iter_spmv_stream`，controller 接收 `A*p` 时同步计算
+  `p^T AP`，避免后续再完整扫描一遍 `P` 和 `AP_spmv`。
+- `update_xr` 拆成 `update_xr_compute_lanes` 与 `update_xr_store_lanes`，
+  用本地 fully partitioned lane 数组隔离 FP64 计算和 HBM store。
+- `update_p` 拆成 `update_p_compute_lanes` 与 `update_p_store_lanes`，再单独
+  pack `P_spmv`。
+- `init_r` / `init_zp` / `iter_spmv` / `update_xr` 内的 `float_v16` lane 访问先
+  unpack 到本地数组，避免直接在重计算路径上反复访问 packed 类型。
+
+HLS 报告显示：
+
+| loop | 新结果 |
+| --- | ---: |
+| `update_xr_compute_lanes` | II=1 |
+| `update_xr_store_lanes` | II=1 |
+| `update_p_compute_lanes` | II=1 |
+| `update_p_store_lanes` | II=1 |
+| `iter_dot_p_ap_lanes` | II=5 |
+| `update_z_reduce` | II=5 |
+
+`Pcg_Controller` 顶层 HLS 估计 latency 从上一版约 `451580129243` 降到
+`173580117235`，LUT 从 `72458` 降到 `51280`。这只是 HLS 层面的改善，是否转化
+为板上收益需要当前 UUID 的 demo-only 测试确认。
 
 ## 预期影响
 
@@ -150,12 +183,21 @@ HLS 实际调度没有全部达到 II=1。
    旧 UUID 的 `1960.0357 ms` 改善；但 `thermal2_n262144` 1iter
    `385.1288 ms` 仍明显慢于标准版 `188.8202 ms` 和上一 demo
    `182.5644 ms`。
+10. 2026-05-31 controller-split 实验构建成功，并覆盖
+    `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`：
+    UUID `1d536c39-f561-340b-7efc-ac2c8440543d`，SHA256
+    `bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8`，
+    DATA/KERNEL/HBM clock `211/500/450 MHz`。该 UUID 尚未完成 demo-only
+    上板测试。
 
 仍需完成：
 
-1. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
+1. 对当前 controller-split UUID 做 demo-only 上板测试，并更新 HTML 与
+   `testing.md`。
+2. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
    破坏 SpMV 成功边界和 diff。
-2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
+3. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
    退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
-3. 继续分析当前 II=1 demo 里 `update_xr`、`update_p`、`dot_p_ap` 的大规模瓶颈；
+4. 继续分析当前 controller/update 路径里 `update_z_reduce`、`iter_dot_p_ap_lanes`
+   和标量 FP64 HBM 访问的大规模瓶颈；
    只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。

@@ -11,7 +11,8 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 和 `cuper-tapa-pcg` full-PCG 候选；新 demo 进入同一主线槽位时优先覆盖旧 demo
 文件。四个标准版只有在用户明确确认满意后才会归档旧版并晋级替换。当前
 `395bitstream/` 保留四个标准 bitstream、single SpMV demo 槽和 full-PCG demo
-槽；full-PCG demo 槽已在 2026-05-31 用 II=1 controller 实验构建覆盖。
+槽；full-PCG demo 槽已在 2026-05-31 用 controller-split 实验构建覆盖，等待
+demo-only 上板测试。
 
 如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
 
@@ -24,7 +25,7 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
-| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 II=1 controller 实验 demo，已完成 demo-only 上板测试 |
+| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 controller-split 实验 demo，待 demo-only 上板测试 |
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -82,25 +83,38 @@ TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin
 ```
 
-这版是 2026-05-31 同名覆盖的 `CuperPcg` II=1 controller 实验 demo。它不替换
+这版是 2026-05-31 同名覆盖的 `CuperPcg` controller-split 实验 demo。它不替换
 当前标准 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。demo xclbin UUID 为
-`0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，SHA256 为
-`ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8`。
-最终 xclbin info 中 DATA clock 为 223 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 444 MHz。构建日志为
-`logs/cuper_tapa_pcg_ii1_hw_20260530_200825.log`，构建目录为
-`cuper-tapa-pcg-ii1-build/`，版本记录见
+`1d536c39-f561-340b-7efc-ac2c8440543d`，SHA256 为
+`bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8`。
+最终 xclbin info 中 DATA clock 为 211 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz。构建日志为
+`logs/cuper_tapa_pcg_controller_split_hw_20260531_020548.log`，构建目录为
+`cuper-tapa-pcg-controller-split-build/`，版本记录见
 `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
 
-2026-05-31 已完成 demo-only 上板测试，日志在
+2026-05-31 已完成 controller-split demo 的 `hw` bitstream 构建并同步到本目录，
+尚未完成该 UUID 的 demo-only 上板测试。该版主要把 `dot_p_ap` 融入
+`iter_spmv_stream` 接收路径，并把 `update_xr` / `update_p` 拆成 compute/store
+两段，HLS 报告中这两段内部均达到 II=1；`update_z_reduce` 与
+`iter_dot_p_ap_lanes` 仍保留 FP64 reduction 的 II=5 代价。测试时不要复用下面
+历史 II=1 demo 的实测结果。
+
+上一版 II=1 controller 实验 demo 已被覆盖；其构建目录为
+`cuper-tapa-pcg-ii1-build/`，版本记录见
+`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+该旧 UUID 为 `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，SHA256 为
+`ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8`，
+DATA/KERNEL/HBM 为 `223/500/444 MHz`。2026-05-31 已完成该旧 UUID 的
+demo-only 上板测试，日志在
 `logs/codex_ii1_demo_test_20260531_011314/`。本轮没有重跑四个标准 bitstream。
 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
 和完整 `thermal2` 的 init-only 与 `MAX_ITERS=1` 均返回，direct ctrl 均为
 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 上 init-only
 `kernel_reported=353.028139 ms`，1iter `kernel_reported=1767.825376 ms`。
 相对 2026-05-29 旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a`，1iter 有改善；
-但共同成功点仍明显慢于当前 TAPA full-PCG 标准版，因此该 demo 仍不建议按性能目标
-晋级为标准版。
+但共同成功点仍明显慢于当前 TAPA full-PCG 标准版，因此该旧 demo 未按性能目标
+晋级为标准版。该结论只作为历史记录，不对应当前同步目录里的新 `.xclbin` 文件。
 
 被移出旧 single demo 槽的 full-PCG packed feed/AP demo 已本地归档到：
 

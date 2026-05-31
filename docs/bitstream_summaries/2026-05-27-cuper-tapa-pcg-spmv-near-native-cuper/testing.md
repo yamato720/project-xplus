@@ -16,27 +16,28 @@ full-PCG demo 槽位：
 
 | 项目 | 数值 |
 | --- | --- |
-| UUID | `0170fa86-6e62-cfc9-aa66-2d330dd72cf2` |
-| SHA256 | `ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8` |
-| DATA clock | 223 MHz |
+| UUID | `1d536c39-f561-340b-7efc-ac2c8440543d` |
+| SHA256 | `bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8` |
+| DATA clock | 211 MHz |
 | KERNEL clock | 500 MHz |
-| HBM clock | 444 MHz |
-| 构建目录 | `cuper-tapa-pcg-ii1-build/` |
-| 构建日志 | `logs/cuper_tapa_pcg_ii1_hw_20260530_200825.log` |
-| 构建耗时 | 4h 36m 24s |
+| HBM clock | 450 MHz |
+| 构建目录 | `cuper-tapa-pcg-controller-split-build/` |
+| 构建日志 | `logs/cuper_tapa_pcg_controller_split_hw_20260531_020548.log` |
+| 构建耗时 | 4h 31m 0s |
 
 关键构建输出：
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-pcg-ii1-build/hw/CuperPcg.xclbin
-Total elapsed time: 4h 36m 24s
+Created .../cuper-tapa-pcg-controller-split-build/hw/CuperPcg.xclbin
+Total elapsed time: 4h 31m 0s
 build finished with exit code: 0
 ```
 
-当前 2026-05-31 II=1 controller 实验 demo 已完成 demo-only 上板测试。2026-05-29
-旧 UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的测试数据只作为历史记录保留，
-不能套用到当前同名 `.xclbin`。
+当前 2026-05-31 controller-split 实验 demo 尚未完成 demo-only 上板测试。旧
+II=1 controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2` 和 2026-05-29 旧
+UUID `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 的测试数据只作为历史记录保留，不能
+套用到当前同名 `.xclbin`。
 
 历史 2026-05-27 packed feed/AP demo 曾完成 `hw` bitstream 构建并覆盖旧 demo
 槽位：
@@ -48,6 +49,89 @@ build finished with exit code: 0
 
 该历史 demo 文件已被 2026-05-29 demo 替换；旧 receive-path demo 和 2026-05-27
 packed feed/AP demo 的测试结论只作为历史记录保留，不再对应当前这个 `.xclbin` 文件。
+
+## 2026-05-31 controller-split 实验构建
+
+软件级验证：
+
+```bash
+make cuper-tapa-pcg-fpga-host
+make run-cuper-pcg-tapa-fpga \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-3
+```
+
+结果：通过。关键结果：
+
+| 指标 | 数值 |
+| --- | ---: |
+| status | converged |
+| iter | 1 |
+| max_abs_diff | 1.086781531434e-08 |
+| max_rel_diff | 9.286405581786e-09 |
+
+XO / HLS 构建：
+
+```bash
+make _build-cuper-tapa-pcg TARGET=hw \
+  BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-controller-split-build
+```
+
+本轮在完整 `hw` 构建前已生成并 patch 通过 XO：
+
+```text
+cuper-tapa-pcg-controller-split-build/hw/CuperPcg.xo
+XO SHA256: e8760fbaf97ed27372f6cfec6e1fb48bcc57221e80caced2f34043fb6b65ea89
+```
+
+HLS 关键变化：
+
+| loop | achieved II / latency |
+| --- | ---: |
+| `iter_dot_p_ap_lanes` | II=5，latency 97 |
+| `update_xr_compute_lanes` | II=1，latency 39 |
+| `update_xr_store_lanes` | II=1，latency 22 |
+| `update_p_compute_lanes` | II=1，latency 41 |
+| `update_p_store_lanes` | II=1，latency 22 |
+| `update_z_reduce` | II=5，latency 40000018 |
+
+完整 bitstream 构建：
+
+```bash
+tmux new-session -d -s project-xplus-cuper-tapa-pcg-controller-split-hw ...
+make _build-cuper-tapa-pcg TARGET=hw \
+  BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-controller-split-build
+```
+
+构建结果：成功。
+
+关键输出：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-586] Created /home/pyx/project-x/Project-XPlus/cuper-tapa-pcg-controller-split-build/hw/CuperPcg.xclbin
+INFO: [v++ 60-791] Total elapsed time: 4h 31m 0s
+build finished with exit code: 0
+```
+
+同步到 `395bitstream/` 的 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| demo xclbin | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` |
+| demo info | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin.info` |
+| UUID | `1d536c39-f561-340b-7efc-ac2c8440543d` |
+| SHA256 | `bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8` |
+| DATA clock | 211 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 450 MHz |
+
+待测试：
+
+- 该 UUID 尚未完成 demo-only 上板测试；
+- 因 `dot_p_ap` 已合入 `iter_spmv_stream`，HTML 中需要把 raw `iter_spmv` 标成
+  `iter recv + dot` 或等价新语义，不能直接沿用旧 `dot_p_ap` stage 口径；
+- 当前仍不更新正式 `source.diff`，待 demo-only 上板测试确认性能后再决定。
 
 ## 2026-05-31 II=1 controller 实验构建
 

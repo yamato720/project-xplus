@@ -17,6 +17,8 @@ TAPA stream 如何传递，先看同目录的 `two_iteration_dataflow.md`。
    `float_v16`，不再让 controller 从 `double X/P` 逐元素打包。
 2. `AP` 输出侧新增 packed `AP_spmv`，让 controller 直接缓存 Cuper 输出的一包
    `float_v16`，后续 dot/update 再按包读取。
+3. 当前 controller-split demo 又把 `p^T AP` 合入 `iter_spmv_stream` 接收路径，
+   并把 `update_xr` / `update_p` 各自拆成 compute/store 两段。
 
 所以读代码时不要把 `X` 和 `X_spmv`、`P` 和 `P_spmv`、旧 `AP` 和 `AP_spmv`
 混成同一个东西：
@@ -54,8 +56,8 @@ full `CuperPcg(...)` 的阶段可以按“init 专用 / PCG 迭代专用 / init+
 | --- | --- | --- | --- |
 | `init_spmv` | `init_spmv_stream` | 共用 SpMV service 的 init 调用 + init 专用 R 生成 | 通过 `vector_source=X` 读 `X_spmv`，算 `A*x0`，controller 生成 `R=B-A*x0` |
 | `init_zp` | `init_zp_reduce` | init 专用 | 读 `R/M_inv`，初始化 `Z/P`，累计初始 `rz/rr`，并生成第一轮 `P_spmv` |
-| `iter_spmv` | `iter_spmv_stream` | 共用 SpMV service 的 PCG 调用 + 迭代专用 AP 接收 | 通过 `vector_source=P` 读 `P_spmv`，算 `A*p`，controller 把 packed AP 暂存到 `AP_spmv` |
-| `dot_p_ap` | `dot_p_ap` | PCG 迭代专用 | 读 FP64 `P` 和 packed FP32 `AP_spmv`，转 double 后算 `p^T AP` |
+| `iter_spmv` | `iter_spmv_stream` | 共用 SpMV service 的 PCG 调用 + 迭代专用 AP 接收 | 通过 `vector_source=P` 读 `P_spmv`，算 `A*p`，controller 把 packed AP 暂存到 `AP_spmv`，当前 demo 同时计算 `p^T AP` |
+| `dot_p_ap` | `iter_dot_p_ap_lanes` | PCG 迭代专用，嵌在 `iter_spmv_stream` 内 | 读 FP64 `P` 和当前 AP packet，转 double 后算 `p^T AP` |
 | `update_xr` | `update_xr` | PCG 迭代专用 | 更新 FP64 `X/R`，读 `AP_spmv` 时做 FP32->FP64 转换 |
 | `update_z` | `update_z_reduce` | PCG 迭代专用 | 根据新 `R` 更新 `Z`，累计新的 `rz/rr` |
 | `update_p` | `update_p` | PCG 迭代专用 | 更新 FP64 `P`，同时写下一轮 SpMV 需要的 packed FP32 `P_spmv` |
@@ -222,19 +224,21 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
    - 命令 vector loader 读 `P_spmv`。
 5. `iter_spmv_stream`：
    - PCG 迭代专用接收 `A*p`；
-   - 直接写 packed `AP_spmv`，后续 dot/update 会再读它。
-6. `dot_p_ap`：
-   - PCG 迭代专用；
-   - 读 `P` 和 `AP_spmv`，计算 `p_ap = p^T A p`。
+   - 直接写 packed `AP_spmv`；
+   - 当前 controller-split demo 在接收 AP 时同步读 `P` 并计算
+     `p_ap = p^T A p`，不再另开独立 `dot_p_ap` stage。
 7. `update_xr`：
    - PCG 迭代专用；
-   - 读 `X/P/R/AP_spmv`，更新 `X/R`。
+   - 读 `X/P/R/AP_spmv`，先在 `update_xr_compute_lanes` 里计算新 `X/R`，
+     再在 `update_xr_store_lanes` 里写回。
 8. `update_z_reduce`：
    - PCG 迭代专用；
    - 读 `R/M_inv`，更新 `Z`，累计新的 `rz/rr`。
 9. `update_p`：
    - PCG 迭代专用；
-   - 更新 `P = Z + beta * P`，同步更新下一轮 SpMV 需要的 packed `P_spmv`。
+   - 先在 `update_p_compute_lanes` 里计算 `P = Z + beta * P`，再在
+     `update_p_store_lanes` 里写回 `P`，最后同步更新下一轮 SpMV 需要的 packed
+     `P_spmv`。
 10. stop 广播和 metrics 写回：
    - 收尾控制，不属于算法阶段；
    - 这部分和 service drain 会反映到 `unaccounted_controller` 或 `controller 外`。
@@ -254,6 +258,12 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
   `kernel_minus_controller`；
 - `stage-ms`：`init_zp`、`dot_p_ap`、`update_xr`、`update_z`、`update_p`；
 - `[timing-ms] kernel_reported`：host/XRT 看到的完整 kernel 时间。
+
+当前 controller-split demo 的 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
+发 begin/end event，raw stage timer 里的 `dot_p_ap` 可能为 0；`p^T AP` 的真实
+工作被并入 `iter_spmv_stream`。更新 HTML 或比较历史数据时，应把这一项标成
+`iter recv + dot` 或显式写出新旧口径差异，不能直接把 raw `iter_spmv` 当作纯
+SpMV 接收成本。
 
 `1iter kernel` 没有去掉 init；它包含 `init_spmv + init_zp + iter_spmv +
 dot/update + 收尾`。要看迭代增量，应使用 `1iter kernel - init-only kernel`，
