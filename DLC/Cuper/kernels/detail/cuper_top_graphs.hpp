@@ -212,12 +212,12 @@ void CuperPcgSpmv(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 //     Matrix_data 分散到 16 个 HBM bank，支撑 Cuper 的 16 路并行 SpMV。
 void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper 预处理后的稀疏元素/批次索引表，驱动 16 路 SpMV 调度
               tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,   // 16 个 HBM 通道上的 512-bit packed 矩阵数据
-              tapa::mmap<double> B,                                     // PCG 右端项 b，FP64 主状态
-              tapa::mmap<double> M_inv,                                 // Jacobi 预条件器对角逆 M^{-1}
-              tapa::mmap<double> X,                                     // 解向量 x，输入初值 x0，kernel 内更新并写回最终解
-              tapa::mmap<double> R,                                     // 残差向量 r = b - A*x
-              tapa::mmap<double> Z,                                     // 预条件残差 z = M^{-1}*r
-              tapa::mmap<double> P,                                     // PCG 搜索方向 p，FP64 权威状态
+              tapa::mmap<double_v8> B,                                  // PCG 右端项 b，FP64 主状态，512-bit packed
+              tapa::mmap<double_v8> M_inv,                              // Jacobi 预条件器对角逆 M^{-1}，512-bit packed
+              tapa::mmap<double_v8> X,                                  // 解向量 x，输入初值 x0，kernel 内更新并写回最终解
+              tapa::mmap<double_v8> R,                                  // 残差向量 r = b - A*x
+              tapa::mmap<double_v8> Z,                                  // 预条件残差 z = M^{-1}*r
+              tapa::mmap<double_v8> P,                                  // PCG 搜索方向 p，FP64 权威状态
               // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
               // Cuper SpMV 新增的 packed float_v16 缓冲：
               //   X_spmv: host 预打包 x0，初始化 A*x0 时读取

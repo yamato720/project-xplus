@@ -155,7 +155,6 @@ struct PcgStageTimes {
     double init_spmv = 0.0;
     double init_zp = 0.0;
     double iter_spmv = 0.0;
-    double dot_p_ap = 0.0;
     double update_xr = 0.0;
     double update_z = 0.0;
     double update_p = 0.0;
@@ -166,12 +165,12 @@ struct PcgStageTimes {
         return init_spmv + iter_spmv;
     }
 
-    double non_spmv_total() const {
-        return init_zp + dot_p_ap + update_xr + update_z + update_p;
+    double vector_stage_total() const {
+        return init_zp + update_xr + update_z + update_p;
     }
 
     double accounted_stage_total() const {
-        return spmv_total() + non_spmv_total();
+        return spmv_total() + vector_stage_total();
     }
 };
 
@@ -182,16 +181,15 @@ double elapsed_ms(const std::chrono::steady_clock::time_point start,
 
 constexpr double kCuperTapaPcgKernelClockPeriodNs = 3.3;
 constexpr double kCuperTapaPcgKernelClockMhz = 1000.0 / kCuperTapaPcgKernelClockPeriodNs;
-constexpr std::array<PcgStageReport, 7> kPcgStageReports = {{
-    // work_metric_index 对应 Metrics[5..14] 的手工 tick；
+constexpr std::array<PcgStageReport, 6> kPcgStageReports = {{
+    // work_metric_index 对应 Metrics[5..15] 的 packed memory packet work；
     // cycle_metric_index 对应 Metrics[16..24] 的 Pcg_Stage_Timer cycle。
-    {"init_spmv", 5, 16},
-    {"init_zp", 6, 17},
-    {"iter_spmv", 7, 18},
-    {"dot_p_ap", 14, 19},
+    {"init_spmv_recv_r", 5, 16},
+    {"init_zp_reduce_pack", 6, 17},
+    {"iter_spmv_recv_dot", 7, 18},
     {"update_xr", 8, 20},
-    {"update_z", 9, 21},
-    {"update_p", 10, 22},
+    {"update_z_reduce", 9, 21},
+    {"update_p_pack", 10, 22},
 }};
 double clock_mhz_to_period_ns(const double clock_mhz) {
     return 1000.0 / clock_mhz;
@@ -495,6 +493,44 @@ AlignedVector<float_v16> make_zero_float_v16_packets(const int valid_size,
     return output;
 }
 
+AlignedVector<double_v8> pack_double_v8_from_double(const AlignedVector<double>& input,
+                                                    const int valid_size,
+                                                    const int align_packets = 1024) {
+    const int packet_count = (valid_size + 7) >> 3;
+    AlignedVector<double_v8> output(
+        static_cast<std::size_t>(round_up(packet_count, align_packets)));
+    for (double_v8& packet : output) {
+        for (int lane = 0; lane < 8; ++lane) {
+            packet[lane] = 0.0;
+        }
+    }
+
+    for (int packet_index = 0; packet_index < packet_count; ++packet_index) {
+        double_v8 packet;
+        for (int lane = 0; lane < 8; ++lane) {
+            const int index = (packet_index << 3) + lane;
+            packet[lane] = index < valid_size ? input[static_cast<std::size_t>(index)] : 0.0;
+        }
+        output[static_cast<std::size_t>(packet_index)] = packet;
+    }
+    return output;
+}
+
+void unpack_double_v8_to_double(const AlignedVector<double_v8>& input,
+                                const int valid_size,
+                                AlignedVector<double>& output) {
+    const int packet_count = (valid_size + 7) >> 3;
+    for (int packet_index = 0; packet_index < packet_count; ++packet_index) {
+        const double_v8 packet = input[static_cast<std::size_t>(packet_index)];
+        for (int lane = 0; lane < 8; ++lane) {
+            const int index = (packet_index << 3) + lane;
+            if (index < valid_size) {
+                output[static_cast<std::size_t>(index)] = packet[lane];
+            }
+        }
+    }
+}
+
 template <typename T, std::size_t N>
 xrt::bo make_input_bo(xrt::device& device,
                       const std::array<int, N>& memory_groups,
@@ -710,6 +746,12 @@ double run_cuper_pcg_xrt(const CliOptions& options,
                          AlignedVector<double>& z,
                          AlignedVector<double>& p,
                          AlignedVector<double>& legacy_ap,
+                         AlignedVector<double_v8>& b_packed,
+                         AlignedVector<double_v8>& minv_packed,
+                         AlignedVector<double_v8>& x_packed,
+                         AlignedVector<double_v8>& r_packed,
+                         AlignedVector<double_v8>& z_packed,
+                         AlignedVector<double_v8>& p_packed,
                          AlignedVector<float_v16>& ap_spmv,
                          AlignedVector<float_v16>& x_spmv,
                          AlignedVector<float_v16>& p_spmv,
@@ -755,12 +797,12 @@ double run_cuper_pcg_xrt(const CliOptions& options,
     auto matrix13_bo = make_input_bo(device, memory_groups, 14, matrix.matrix_data[13]);
     auto matrix14_bo = make_input_bo(device, memory_groups, 15, matrix.matrix_data[14]);
     auto matrix15_bo = make_input_bo(device, memory_groups, 16, matrix.matrix_data[15]);
-    auto b_bo = make_input_bo(device, memory_groups, 17, b);
-    auto minv_bo = make_input_bo(device, memory_groups, 18, minv);
-    auto x_bo = make_inout_bo(device, memory_groups, 19, x);
-    auto r_bo = make_inout_bo(device, memory_groups, 20, r);
-    auto z_bo = make_inout_bo(device, memory_groups, 21, z);
-    auto p_bo = make_inout_bo(device, memory_groups, 22, p);
+    auto b_bo = make_input_bo(device, memory_groups, 17, b_packed);
+    auto minv_bo = make_input_bo(device, memory_groups, 18, minv_packed);
+    auto x_bo = make_inout_bo(device, memory_groups, 19, x_packed);
+    auto r_bo = make_inout_bo(device, memory_groups, 20, r_packed);
+    auto z_bo = make_inout_bo(device, memory_groups, 21, z_packed);
+    auto p_bo = make_inout_bo(device, memory_groups, 22, p_packed);
     auto ap_spmv_bo = make_inout_bo(device, memory_groups, 23, ap_spmv);
     auto x_spmv_bo = make_input_bo(device, memory_groups, 24, x_spmv);
     auto p_spmv_bo = make_inout_bo(device, memory_groups, 25, p_spmv);
@@ -866,13 +908,14 @@ double run_cuper_pcg_xrt(const CliOptions& options,
               << last_ctrl << std::dec << "\n"
               << std::flush;
 
-    x_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, x.size() * sizeof(double), 0);
+    x_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, x_packed.size() * sizeof(double_v8), 0);
     metrics_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, metrics.size() * sizeof(double), 0);
     status_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, status.size() * sizeof(INDEX_TYPE), 0);
-    const auto x_mapped = x_bo.map<double*>();
+    const auto x_mapped = x_bo.map<double_v8*>();
     const auto metrics_mapped = metrics_bo.map<double*>();
     const auto status_mapped = status_bo.map<INDEX_TYPE*>();
-    std::copy(x_mapped, x_mapped + x.size(), x.begin());
+    std::copy(x_mapped, x_mapped + x_packed.size(), x_packed.begin());
+    unpack_double_v8_to_double(x_packed, dataset.n(), x);
     std::copy(metrics_mapped, metrics_mapped + metrics.size(), metrics.begin());
     std::copy(status_mapped, status_mapped + status.size(), status.begin());
     std::cerr << "[xplus-stage] after xrt readback\n" << std::flush;
@@ -907,6 +950,12 @@ int main(int argc, char** argv) {
         AlignedVector<double> z(static_cast<std::size_t>(round_up(dataset.n(), 1024)), 0.0);
         AlignedVector<double> p(static_cast<std::size_t>(round_up(dataset.n(), 1024)), 0.0);
         AlignedVector<double> legacy_ap(static_cast<std::size_t>(round_up(dataset.n(), 1024)), 0.0);
+        AlignedVector<double_v8> b_packed = pack_double_v8_from_double(b, dataset.n());
+        AlignedVector<double_v8> minv_packed = pack_double_v8_from_double(minv, dataset.n());
+        AlignedVector<double_v8> x_packed = pack_double_v8_from_double(x, dataset.n());
+        AlignedVector<double_v8> r_packed = pack_double_v8_from_double(r, dataset.n());
+        AlignedVector<double_v8> z_packed = pack_double_v8_from_double(z, dataset.n());
+        AlignedVector<double_v8> p_packed = pack_double_v8_from_double(p, dataset.n());
         AlignedVector<float_v16> ap_spmv = make_zero_float_v16_packets(dataset.n());
         AlignedVector<float_v16> x_spmv = pack_float_v16_from_double(x, dataset.n());
         AlignedVector<float_v16> p_spmv = make_zero_float_v16_packets(dataset.n());
@@ -934,12 +983,12 @@ int main(int argc, char** argv) {
                 tapa::read_only_mmap<INDEX_TYPE>(matrix.sp_element_list_ptr),
                 tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(matrix.matrix_data)
                     .reinterpret<ap_uint<512>>(),
-                tapa::read_only_mmap<double>(b),
-                tapa::read_only_mmap<double>(minv),
-                tapa::read_write_mmap<double>(x),
-                tapa::read_write_mmap<double>(r),
-                tapa::read_write_mmap<double>(z),
-                tapa::read_write_mmap<double>(p),
+                tapa::read_only_mmap<double_v8>(b_packed),
+                tapa::read_only_mmap<double_v8>(minv_packed),
+                tapa::read_write_mmap<double_v8>(x_packed),
+                tapa::read_write_mmap<double_v8>(r_packed),
+                tapa::read_write_mmap<double_v8>(z_packed),
+                tapa::read_write_mmap<double_v8>(p_packed),
                 tapa::read_write_mmap<float_v16>(ap_spmv),
                 tapa::read_only_mmap<float_v16>(x_spmv),
                 tapa::read_write_mmap<float_v16>(p_spmv),
@@ -952,6 +1001,7 @@ int main(int argc, char** argv) {
                 effective_max_iters,
                 config.tau);
             kernel_reported_ms = kernel_ns * 1.0e-6;
+            unpack_double_v8_to_double(x_packed, dataset.n(), x);
             std::cerr << "[xplus-stage] after tapa::invoke\n" << std::flush;
         } else {
             kernel_reported_ms = run_cuper_pcg_xrt(options,
@@ -964,6 +1014,12 @@ int main(int argc, char** argv) {
                                                    z,
                                                    p,
                                                    legacy_ap,
+                                                   b_packed,
+                                                   minv_packed,
+                                                   x_packed,
+                                                   r_packed,
+                                                   z_packed,
+                                                   p_packed,
                                                    ap_spmv,
                                                    x_spmv,
                                                    p_spmv,
@@ -1021,7 +1077,6 @@ int main(int argc, char** argv) {
         stage_times.init_spmv = cycles_to_ms(metrics[16], stage_clock_period_ns);
         stage_times.init_zp = cycles_to_ms(metrics[17], stage_clock_period_ns);
         stage_times.iter_spmv = cycles_to_ms(metrics[18], stage_clock_period_ns);
-        stage_times.dot_p_ap = cycles_to_ms(metrics[19], stage_clock_period_ns);
         stage_times.update_xr = cycles_to_ms(metrics[20], stage_clock_period_ns);
         stage_times.update_z = cycles_to_ms(metrics[21], stage_clock_period_ns);
         stage_times.update_p = cycles_to_ms(metrics[22], stage_clock_period_ns);
@@ -1029,8 +1084,9 @@ int main(int argc, char** argv) {
         stage_times.timer_total = cycles_to_ms(metrics[24], stage_clock_period_ns);
 
         std::cout << std::fixed << std::setprecision(0);
-        std::cout << "[stage-work-ticks]"
-                  << " packet_count=" << metrics[4];
+        std::cout << "[stage-work-packets]"
+                  << " float_v16_packets=" << metrics[4]
+                  << " double_v8_packets=" << metrics[15];
         for (const PcgStageReport& stage : kPcgStageReports) {
             std::cout << " " << stage.name << "=" << metrics[stage.work_metric_index];
         }
@@ -1053,8 +1109,7 @@ int main(int argc, char** argv) {
         std::cout << "[stage-ms]"
                   << " init_spmv=" << stage_times.init_spmv
                   << " init_zp=" << stage_times.init_zp
-                  << " iter_spmv=" << stage_times.iter_spmv
-                  << " dot_p_ap=" << stage_times.dot_p_ap
+                  << " iter_spmv_recv_dot=" << stage_times.iter_spmv
                   << " update_xr=" << stage_times.update_xr
                   << " update_z=" << stage_times.update_z
                   << " update_p=" << stage_times.update_p
@@ -1085,7 +1140,7 @@ int main(int argc, char** argv) {
                   << " spmv_avg=" << pcg_spmv_avg_ms
                   << " gflops=" << pcg_spmv_gflops
                   << "\n";
-        const double pcg_non_spmv_total_ms = stage_times.non_spmv_total();
+        const double pcg_vector_total_ms = stage_times.vector_stage_total();
         const double accounted_stage_total_ms = stage_times.accounted_stage_total();
         const double unaccounted_controller_ms =
             clamp_small_negative_ms(stage_times.controller_total - accounted_stage_total_ms);
@@ -1096,9 +1151,8 @@ int main(int argc, char** argv) {
                   << " clock_source=" << stage_clock_source
                   << " controller_total=" << stage_times.controller_total
                   << " spmv_total=" << pcg_spmv_total_ms
-                  << " pcg_non_spmv_total=" << pcg_non_spmv_total_ms
+                  << " pcg_vector_total=" << pcg_vector_total_ms
                   << " init_zp=" << stage_times.init_zp
-                  << " dot_p_ap=" << stage_times.dot_p_ap
                   << " update_xr=" << stage_times.update_xr
                   << " update_z=" << stage_times.update_z
                   << " update_p=" << stage_times.update_p

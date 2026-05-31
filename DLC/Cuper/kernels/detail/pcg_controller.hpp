@@ -24,7 +24,7 @@
 //   - 共用 SpMV service：init_spmv / iter_spmv 都走同一套 Pcg_* loader/core/
 //     accumulator/checker/sort-tree，只是 vector_source 分别选择 X_spmv/P_spmv。
 //   - init 专用：init_spmv 生成初始 R，init_zp 生成 Z/P/P_spmv 并累计初始 rz/rr。
-//   - PCG 迭代专用：iter_spmv、dot_p_ap、update_xr、update_z、update_p。
+    //   - PCG 迭代专用：iter_spmv_recv_dot、update_xr、update_z、update_p。
 //   - 收尾控制：stop 广播、timer 读回、Metrics/Status 写回；它们不属于算法阶段。
 void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     tapa::ostreams<CuperSpmvCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
@@ -34,12 +34,12 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     tapa::ostream<PcgStageEvent> &Stage_Event_out,
                     tapa::istream<ap_uint<64>> &Stage_Ticks_in,
                     tapa::istream<float_v16> &Spmv_in,
-                    tapa::mmap<double> B,
-                    tapa::mmap<double> M_inv,
-                    tapa::mmap<double> X,
-                    tapa::mmap<double> R,
-                    tapa::mmap<double> Z,
-                    tapa::mmap<double> P,
+                    tapa::mmap<double_v8> B,
+                    tapa::mmap<double_v8> M_inv,
+                    tapa::mmap<double_v8> X,
+                    tapa::mmap<double_v8> R,
+                    tapa::mmap<double_v8> Z,
+                    tapa::mmap<double_v8> P,
                     tapa::mmap<float_v16> AP_spmv,
                     tapa::mmap<float_v16> P_spmv,
                     tapa::mmap<double> Metrics,
@@ -47,8 +47,8 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                     const INDEX_TYPE Row_num,
                     const INDEX_TYPE Max_iters,
                     const double Tau) {
-    // B/M_inv/X/R/Z/P 是 FP64 PCG 状态；AP_spmv/P_spmv 是为了贴近 Cuper
-    // SpMV 的 packed FP32 辅助副本。最终解仍写在 X 里。
+    // B/M_inv/X/R/Z/P 是 512-bit packed FP64 PCG 状态；AP_spmv/P_spmv
+    // 是为了贴近 Cuper SpMV 的 packed FP32 辅助副本。最终解仍写在 X 里。
     //
     // AP_spmv 只缓存最近一次 A*p 的 SpMV 输出；P_spmv 缓存当前搜索方向 p。
     // X_spmv 不传入 controller，由 Pcg_Vector_Loader 在 init SpMV 时直接读。
@@ -56,19 +56,21 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
     // packet_count 只描述 PCG 向量长度，和 Cuper 内部 18-bit row 编码
     // 不是一回事。
     const INDEX_TYPE packet_count = pcg_num_float_v16_packets(Row_num);
+    const INDEX_TYPE double_packet_count = pcg_num_double_v8_packets(Row_num);
     INDEX_TYPE status_code = kPcgStatusMaxIter;
     INDEX_TYPE iterations = 0;
     double rz = 0.0;
     double rr = 0.0;
     double p_ap = 0.0;
     double alpha = 0.0;
-    unsigned long long init_spmv_ticks = 0;
-    unsigned long long init_zp_ticks = 0;
-    unsigned long long iter_spmv_ticks = 0;
-    unsigned long long dot_p_ap_ticks = 0;
-    unsigned long long update_xr_ticks = 0;
-    unsigned long long update_z_ticks = 0;
-    unsigned long long update_p_ticks = 0;
+    const unsigned long long float_packet_work = static_cast<unsigned long long>(packet_count);
+    const unsigned long long double_packet_work = static_cast<unsigned long long>(double_packet_count);
+    unsigned long long init_spmv_work_packets = 0;
+    unsigned long long init_zp_work_packets = 0;
+    unsigned long long iter_spmv_work_packets = 0;
+    unsigned long long update_xr_work_packets = 0;
+    unsigned long long update_z_work_packets = 0;
+    unsigned long long update_p_work_packets = 0;
     // controller_total 覆盖从参数检查到 stop 广播、metrics 写回前的主体时间。
     pcg_stage_mark(Stage_Event_out, kPcgStageControllerTotal, kPcgStageBegin);
 
@@ -90,11 +92,14 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
         // 这段的 SpMV 输入/矩阵读取是共用 service；R = B - A*x0 是 init 专用。
         for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
-            ++init_spmv_ticks;
             if (!Spmv_in.empty()) {
                 const INDEX_TYPE packet = received_packets;
                 float_v16 ap_packet;
                 Spmv_in.try_read(ap_packet);
+                const INDEX_TYPE double_packet_index = packet << 1;
+                const double_v8 b_packet_lo = B[double_packet_index];
+                double_v8 r_packet_lo;
+                double_v8 r_packet_hi;
                 VALUE_TYPE ap_lanes[16];
 #pragma HLS array_partition variable=ap_lanes complete
         init_r_unpack_ap:
@@ -106,19 +111,41 @@ void Pcg_Controller(tapa::ostreams<CuperSpmvCommand, 2> &Command_out,
                 // 第一段只消费 A*x0 并生成初始残差 R。上一版 init_vectors 同时读 B/M_inv、
                 // 写 R/Z/P、做 rz/rr 归约，route 最后 4 根冲突线集中在这条大流水。
                 // 拆开后用一次额外 R 读取换取更小的局部 FP64/HBM 访问压力。
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
+                    double r_value = 0.0;
                     if (index < Row_num) {
-                        const double b_value = B[index];
+                        const double b_value = b_packet_lo[lane];
                         const double ap_value = static_cast<double>(ap_lanes[lane]);
-                        const double r_value = b_value - ap_value;
-                        R[index] = r_value;
+                        r_value = b_value - ap_value;
                     }
+                    r_packet_lo[lane] = r_value;
+                }
+                if (double_packet_index + 1 < double_packet_count) {
+                    const double_v8 b_packet_hi = B[double_packet_index + 1];
+        init_r_lanes_hi:
+                    for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS pipeline II=1
+                        const INDEX_TYPE index = (packet << 4) + lane + 8;
+                        double r_value = 0.0;
+                        if (index < Row_num) {
+                            const double b_value = b_packet_hi[lane];
+                            const double ap_value = static_cast<double>(ap_lanes[lane + 8]);
+                            r_value = b_value - ap_value;
+                        }
+                        r_packet_hi[lane] = r_value;
+                    }
+                }
+                R[double_packet_index] = r_packet_lo;
+                if (double_packet_index + 1 < double_packet_count) {
+                    R[double_packet_index + 1] = r_packet_hi;
                 }
                 ++received_packets;
             }
         }
+        // packed work packets: AP stream packets + B reads + R writes.
+        init_spmv_work_packets += float_packet_work + 2ULL * double_packet_work;
         pcg_stage_mark(Stage_Event_out, kPcgStageInitSpmv, kPcgStageEnd);
 
         pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageBegin);
@@ -131,21 +158,60 @@ init_zp_reduce:
 #pragma HLS loop_tripcount min=1 max=500000
             VALUE_TYPE p_lanes[16];
 #pragma HLS array_partition variable=p_lanes complete
+            const INDEX_TYPE double_packet_index = packet << 1;
+            const double_v8 r_packet_lo = R[double_packet_index];
+            const double_v8 minv_packet_lo = M_inv[double_packet_index];
+            double_v8 z_packet_lo;
+            double_v8 p_packet_lo;
+            double_v8 z_packet_hi;
+            double_v8 p_packet_hi;
     init_zp_lanes:
-            for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
                 const INDEX_TYPE index = (packet << 4) + lane;
                 double z_value = 0.0;
                 if (index < Row_num) {
-                    const double r_value = R[index];
-                    const double minv_value = M_inv[index];
+                    const double r_value = r_packet_lo[lane];
+                    const double minv_value = minv_packet_lo[lane];
                     z_value = minv_value * r_value;
-                    Z[index] = z_value;
-                    P[index] = z_value;
                     rz += r_value * z_value;
                     rr += r_value * r_value;
                 }
+                z_packet_lo[lane] = z_value;
+                p_packet_lo[lane] = z_value;
                 p_lanes[lane] = static_cast<VALUE_TYPE>(z_value);
+            }
+            if (double_packet_index + 1 < double_packet_count) {
+                const double_v8 r_packet_hi = R[double_packet_index + 1];
+                const double_v8 minv_packet_hi = M_inv[double_packet_index + 1];
+    init_zp_lanes_hi:
+                for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS pipeline II=1
+                    const INDEX_TYPE index = (packet << 4) + lane + 8;
+                    double z_value = 0.0;
+                    if (index < Row_num) {
+                        const double r_value = r_packet_hi[lane];
+                        const double minv_value = minv_packet_hi[lane];
+                        z_value = minv_value * r_value;
+                        rz += r_value * z_value;
+                        rr += r_value * r_value;
+                    }
+                    z_packet_hi[lane] = z_value;
+                    p_packet_hi[lane] = z_value;
+                    p_lanes[lane + 8] = static_cast<VALUE_TYPE>(z_value);
+                }
+            } else {
+    init_zp_pad_hi:
+                for (INDEX_TYPE lane = 8; lane < 16; ++lane) {
+#pragma HLS unroll
+                    p_lanes[lane] = 0.0f;
+                }
+            }
+            Z[double_packet_index] = z_packet_lo;
+            P[double_packet_index] = p_packet_lo;
+            if (double_packet_index + 1 < double_packet_count) {
+                Z[double_packet_index + 1] = z_packet_hi;
+                P[double_packet_index + 1] = p_packet_hi;
             }
             float_v16 p_packet;
     init_zp_pack_p:
@@ -155,8 +221,8 @@ init_zp_reduce:
             }
             P_spmv[packet] = p_packet;
         }
-        init_zp_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
-                          static_cast<unsigned long long>(packet_count);
+        // packed work packets: R/M_inv reads + Z/P writes + P_spmv write.
+        init_zp_work_packets += 4ULL * double_packet_work + float_packet_work;
         pcg_stage_mark(Stage_Event_out, kPcgStageInitZp, kPcgStageEnd);
 
 pcg_loop:
@@ -179,7 +245,6 @@ pcg_loop:
             // P 和 AP_spmv；AP_spmv 仍保留给 update_xr 使用。
             for (INDEX_TYPE received_packets = 0; received_packets < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
-                ++iter_spmv_ticks;
                 if (!Spmv_in.empty()) {
                     const INDEX_TYPE packet = received_packets;
                     float_v16 ap_packet;
@@ -188,6 +253,8 @@ pcg_loop:
                     // float_v16 拆成 16 个 double 写入 AP HBM，会在 SpMV
                     // 输出侧重新形成 controller 标量瓶颈。
                     AP_spmv[packet] = ap_packet;
+                    const INDEX_TYPE double_packet_index = packet << 1;
+                    const double_v8 p_packet_lo = P[double_packet_index];
                     VALUE_TYPE ap_lanes[16];
 #pragma HLS array_partition variable=ap_lanes complete
             iter_dot_unpack_ap:
@@ -196,19 +263,31 @@ pcg_loop:
                         ap_lanes[lane] = ap_packet[lane];
                     }
             iter_dot_p_ap_lanes:
-                    for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                    for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
                         const INDEX_TYPE index = (packet << 4) + lane;
                         if (index < Row_num) {
-                            p_ap += P[index] * static_cast<double>(ap_lanes[lane]);
+                            p_ap += p_packet_lo[lane] * static_cast<double>(ap_lanes[lane]);
+                        }
+                    }
+                    if (double_packet_index + 1 < double_packet_count) {
+                        const double_v8 p_packet_hi = P[double_packet_index + 1];
+            iter_dot_p_ap_lanes_hi:
+                        for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS pipeline II=1
+                            const INDEX_TYPE index = (packet << 4) + lane + 8;
+                            if (index < Row_num) {
+                                p_ap += p_packet_hi[lane] *
+                                        static_cast<double>(ap_lanes[lane + 8]);
+                            }
                         }
                     }
                     ++received_packets;
                 }
             }
+            // packed work packets: AP stream read + AP_spmv write + P read for fused dot.
+            iter_spmv_work_packets += 2ULL * float_packet_work + double_packet_work;
             pcg_stage_mark(Stage_Event_out, kPcgStageIterSpmv, kPcgStageEnd);
-            dot_p_ap_ticks += static_cast<unsigned long long>(Row_num) * 1ULL +
-                              static_cast<unsigned long long>(packet_count);
 
             if (pcg_invalid(p_ap) || pcg_abs(p_ap) <= kPcgBreakdownEps ||
                 pcg_invalid(rz) || pcg_abs(rz) <= kPcgBreakdownEps) {
@@ -234,52 +313,70 @@ pcg_loop:
             for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
 #pragma HLS loop_tripcount min=1 max=500000
                 const float_v16 ap_packet = AP_spmv[packet];
+                const INDEX_TYPE double_packet_index = packet << 1;
+                const double_v8 x_packet_lo = X[double_packet_index];
+                const double_v8 p_packet_lo = P[double_packet_index];
+                const double_v8 r_packet_lo = R[double_packet_index];
+                double_v8 x_new_packet_lo;
+                double_v8 r_new_packet_lo;
+                double_v8 x_new_packet_hi;
+                double_v8 r_new_packet_hi;
                 VALUE_TYPE ap_lanes[16];
-                double x_new_lanes[16];
-                double r_new_lanes[16];
-                bool valid_lanes[16];
 #pragma HLS array_partition variable=ap_lanes complete
-#pragma HLS array_partition variable=x_new_lanes complete
-#pragma HLS array_partition variable=r_new_lanes complete
-#pragma HLS array_partition variable=valid_lanes complete
         update_xr_unpack_ap:
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
 #pragma HLS unroll
                     ap_lanes[lane] = ap_packet[lane];
                 }
         update_xr_compute_lanes:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     const bool valid = index < Row_num;
-                    valid_lanes[lane] = valid;
                     double x_new = 0.0;
                     double r_new = 0.0;
                     if (valid) {
-                        const double x_value = X[index];
-                        const double p_value = P[index];
-                        const double r_value = R[index];
+                        const double x_value = x_packet_lo[lane];
+                        const double p_value = p_packet_lo[lane];
+                        const double r_value = r_packet_lo[lane];
                         const double ap_value = static_cast<double>(ap_lanes[lane]);
                         x_new = x_value + alpha * p_value;
                         r_new = r_value - alpha * ap_value;
                     }
-                    x_new_lanes[lane] = x_new;
-                    r_new_lanes[lane] = r_new;
+                    x_new_packet_lo[lane] = x_new;
+                    r_new_packet_lo[lane] = r_new;
                 }
-        update_xr_store_lanes:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                if (double_packet_index + 1 < double_packet_count) {
+                    const double_v8 x_packet_hi = X[double_packet_index + 1];
+                    const double_v8 p_packet_hi = P[double_packet_index + 1];
+                    const double_v8 r_packet_hi = R[double_packet_index + 1];
+        update_xr_compute_lanes_hi:
+                    for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
-                    const INDEX_TYPE index = (packet << 4) + lane;
-                    if (valid_lanes[lane]) {
-                        const double x_new = x_new_lanes[lane];
-                        const double r_new = r_new_lanes[lane];
-                        X[index] = x_new;
-                        R[index] = r_new;
+                        const INDEX_TYPE index = (packet << 4) + lane + 8;
+                        double x_new = 0.0;
+                        double r_new = 0.0;
+                        if (index < Row_num) {
+                            const double x_value = x_packet_hi[lane];
+                            const double p_value = p_packet_hi[lane];
+                            const double r_value = r_packet_hi[lane];
+                            const double ap_value = static_cast<double>(ap_lanes[lane + 8]);
+                            x_new = x_value + alpha * p_value;
+                            r_new = r_value - alpha * ap_value;
+                        }
+                        x_new_packet_hi[lane] = x_new;
+                        r_new_packet_hi[lane] = r_new;
                     }
                 }
+                X[double_packet_index] = x_new_packet_lo;
+                R[double_packet_index] = r_new_packet_lo;
+                if (double_packet_index + 1 < double_packet_count) {
+                    X[double_packet_index + 1] = x_new_packet_hi;
+                    R[double_packet_index + 1] = r_new_packet_hi;
+                }
             }
-            update_xr_ticks += static_cast<unsigned long long>(Row_num) * 2ULL +
-                               static_cast<unsigned long long>(packet_count);
+            // packed work packets: AP read + X/P/R reads + X/R writes.
+            update_xr_work_packets += float_packet_work + 5ULL * double_packet_work;
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateXr, kPcgStageEnd);
 
             double rz_new = 0.0;
@@ -291,17 +388,29 @@ pcg_loop:
             // 也不写 P_spmv；后者留给 update_p。
             // 再更新 z 并累计新残差。该段只读 R/M_inv、写 Z，避免和
             // update_xr 的 X/P/AP_spmv 访问以及 alpha 乘法挤在同一条流水里。
-            for (INDEX_TYPE index = 0; index < Row_num; ++index) {
-#pragma HLS loop_tripcount min=1 max=8000000
+            for (INDEX_TYPE packet = 0; packet < double_packet_count; ++packet) {
+#pragma HLS loop_tripcount min=1 max=1000000
+                const double_v8 r_packet = R[packet];
+                const double_v8 minv_packet = M_inv[packet];
+                double_v8 z_packet;
+        update_z_lanes:
+                for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
-                const double r_new = R[index];
-                const double minv_value = M_inv[index];
-                const double z_new = minv_value * r_new;
-                Z[index] = z_new;
-                rz_new += r_new * z_new;
-                rr_new += r_new * r_new;
+                    const INDEX_TYPE index = (packet << 3) + lane;
+                    double z_new = 0.0;
+                    if (index < Row_num) {
+                        const double r_new = r_packet[lane];
+                        const double minv_value = minv_packet[lane];
+                        z_new = minv_value * r_new;
+                        rz_new += r_new * z_new;
+                        rr_new += r_new * r_new;
+                    }
+                    z_packet[lane] = z_new;
+                }
+                Z[packet] = z_packet;
             }
-            update_z_ticks += static_cast<unsigned long long>(Row_num) * 1ULL;
+            // packed work packets: R/M_inv reads + Z write.
+            update_z_work_packets += 3ULL * double_packet_work;
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateZ, kPcgStageEnd);
 
             if (pcg_invalid(rz_new) || pcg_invalid(rr_new)) {
@@ -326,33 +435,52 @@ pcg_loop:
             for (INDEX_TYPE packet = 0; packet < packet_count; ++packet) {
 #pragma HLS loop_tripcount min=1 max=500000
                 VALUE_TYPE p_lanes[16];
-                double p_new_lanes[16];
-                bool valid_lanes[16];
 #pragma HLS array_partition variable=p_lanes complete
-#pragma HLS array_partition variable=p_new_lanes complete
-#pragma HLS array_partition variable=valid_lanes complete
+                const INDEX_TYPE double_packet_index = packet << 1;
+                const double_v8 z_packet_lo = Z[double_packet_index];
+                const double_v8 p_packet_lo_old = P[double_packet_index];
+                double_v8 p_packet_lo_new;
+                double_v8 p_packet_hi_new;
         update_p_compute_lanes:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
                     const INDEX_TYPE index = (packet << 4) + lane;
                     const bool valid = index < Row_num;
-                    valid_lanes[lane] = valid;
                     double p_new = 0.0;
                     if (valid) {
-                        const double z_value = Z[index];
-                        const double p_value = P[index];
+                        const double z_value = z_packet_lo[lane];
+                        const double p_value = p_packet_lo_old[lane];
                         p_new = z_value + beta * p_value;
                     }
-                    p_new_lanes[lane] = p_new;
+                    p_packet_lo_new[lane] = p_new;
                     p_lanes[lane] = static_cast<VALUE_TYPE>(p_new);
                 }
-        update_p_store_lanes:
-                for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
+                if (double_packet_index + 1 < double_packet_count) {
+                    const double_v8 z_packet_hi = Z[double_packet_index + 1];
+                    const double_v8 p_packet_hi_old = P[double_packet_index + 1];
+        update_p_compute_lanes_hi:
+                    for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS pipeline II=1
-                    const INDEX_TYPE index = (packet << 4) + lane;
-                    if (valid_lanes[lane]) {
-                        P[index] = p_new_lanes[lane];
+                        const INDEX_TYPE index = (packet << 4) + lane + 8;
+                        double p_new = 0.0;
+                        if (index < Row_num) {
+                            const double z_value = z_packet_hi[lane];
+                            const double p_value = p_packet_hi_old[lane];
+                            p_new = z_value + beta * p_value;
+                        }
+                        p_packet_hi_new[lane] = p_new;
+                        p_lanes[lane + 8] = static_cast<VALUE_TYPE>(p_new);
                     }
+                } else {
+        update_p_pad_hi:
+                    for (INDEX_TYPE lane = 8; lane < 16; ++lane) {
+#pragma HLS unroll
+                        p_lanes[lane] = 0.0f;
+                    }
+                }
+                P[double_packet_index] = p_packet_lo_new;
+                if (double_packet_index + 1 < double_packet_count) {
+                    P[double_packet_index + 1] = p_packet_hi_new;
                 }
                 float_v16 p_packet;
         update_p_pack_p:
@@ -362,8 +490,8 @@ pcg_loop:
                 }
                 P_spmv[packet] = p_packet;
             }
-            update_p_ticks += static_cast<unsigned long long>(Row_num) * 2ULL +
-                              static_cast<unsigned long long>(packet_count);
+            // packed work packets: Z/P reads + P write + P_spmv write.
+            update_p_work_packets += 3ULL * double_packet_work + float_packet_work;
             pcg_stage_mark(Stage_Event_out, kPcgStageUpdateP, kPcgStageEnd);
 
             rz = rz_new;
@@ -400,7 +528,7 @@ read_stage_timer_metrics:
     // Metrics/Status 是 host 侧判断运行结果和调试数值稳定性的最小输出。
     // Metrics 布局：
     //   [0..3]  数值状态：rz, rr, p_ap, alpha
-    //   [4..14] work-tick 估算：packet_count 和各阶段手工计数
+    //   [4..15] packed work：float_v16/double_v8 包数量和各阶段 memory packet work
     //   [16..24] stage timer 实测 cycle：init/iter SpMV、PCG 更新、总时间
     // Status[0] 是 kPcgStatus*，Status[1] 是实际完成的 PCG 迭代数。
     Metrics[0] = rz;
@@ -408,18 +536,19 @@ read_stage_timer_metrics:
     Metrics[2] = p_ap;
     Metrics[3] = alpha;
     Metrics[4] = static_cast<double>(packet_count);
-    Metrics[5] = static_cast<double>(init_spmv_ticks);
-    Metrics[6] = static_cast<double>(init_zp_ticks);
-    Metrics[7] = static_cast<double>(iter_spmv_ticks);
-    Metrics[8] = static_cast<double>(update_xr_ticks);
-    Metrics[9] = static_cast<double>(update_z_ticks);
-    Metrics[10] = static_cast<double>(update_p_ticks);
-    Metrics[11] = static_cast<double>(init_spmv_ticks + init_zp_ticks +
-                                      iter_spmv_ticks + dot_p_ap_ticks + update_xr_ticks +
-                                      update_z_ticks + update_p_ticks);
+    Metrics[5] = static_cast<double>(init_spmv_work_packets);
+    Metrics[6] = static_cast<double>(init_zp_work_packets);
+    Metrics[7] = static_cast<double>(iter_spmv_work_packets);
+    Metrics[8] = static_cast<double>(update_xr_work_packets);
+    Metrics[9] = static_cast<double>(update_z_work_packets);
+    Metrics[10] = static_cast<double>(update_p_work_packets);
+    Metrics[11] = static_cast<double>(init_spmv_work_packets + init_zp_work_packets +
+                                      iter_spmv_work_packets + update_xr_work_packets +
+                                      update_z_work_packets + update_p_work_packets);
     Metrics[12] = static_cast<double>(Row_num);
     Metrics[13] = static_cast<double>(Max_iters);
-    Metrics[14] = static_cast<double>(dot_p_ap_ticks);
+    Metrics[14] = 0.0;  // p^T AP is fused into Metrics[7] / kPcgStageIterSpmv.
+    Metrics[15] = static_cast<double>(double_packet_count);
     Metrics[16] = static_cast<double>(stage_cycles[kPcgStageInitSpmv].to_uint64());
     Metrics[17] = static_cast<double>(stage_cycles[kPcgStageInitZp].to_uint64());
     Metrics[18] = static_cast<double>(stage_cycles[kPcgStageIterSpmv].to_uint64());

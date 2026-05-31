@@ -37,8 +37,10 @@ static constexpr INDEX_TYPE kPcgStopToken = -1;
 static constexpr INDEX_TYPE kPcgStageBegin = 0;
 static constexpr INDEX_TYPE kPcgStageEnd = 1;
 static constexpr INDEX_TYPE kPcgStageStop = 2;
-// Metrics[16..24] 的 cycle 统计对应这些 stage。work-tick 统计在
-// Metrics[5..14]，两者都用于定位 full-PCG 版到底慢在 SpMV 还是 PCG 周边。
+// Metrics[16..24] 的 cycle 统计对应这些 stage。当前 packed-double
+// 架构里 p^T AP 已融合进 iter_spmv 接收路径，kPcgStageDotPAp 保留为
+// 兼容占位，不再单独发 begin/end 事件。Metrics[5..15] 存的是各阶段
+// 按当前数据通路估算的 packed memory packet work，不是实测 cycle。
 static constexpr INDEX_TYPE kPcgStageInitSpmv = 0;
 static constexpr INDEX_TYPE kPcgStageInitZp = 1;
 static constexpr INDEX_TYPE kPcgStageIterSpmv = 2;
@@ -57,6 +59,11 @@ static constexpr double kPcgBreakdownEps = 1.0e-30;
 inline INDEX_TYPE pcg_num_float_v16_packets(const INDEX_TYPE element_count) {
 #pragma HLS inline
     return Cuper_NumFloatV16Packets(element_count);
+}
+
+inline INDEX_TYPE pcg_num_double_v8_packets(const INDEX_TYPE element_count) {
+#pragma HLS inline
+    return Cuper_NumDoubleV8Packets(element_count);
 }
 
 inline INDEX_TYPE pcg_num_accumulator_init_groups(const INDEX_TYPE row_num) {
