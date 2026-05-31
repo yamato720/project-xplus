@@ -28,8 +28,11 @@ demo 槽。这个新文件已完成 demo-only 上板测试；2026-05-29 的 demo
 只作为历史记录保留，不再对应当前同名 `.xclbin`。
 
 随后又生成了 controller-split 实验 demo，并再次覆盖同名 full-PCG demo 槽。该
-新文件只完成了软件级验证、XO/HLS 和完整 `hw` bitstream 构建，尚未完成 demo-only
-上板测试；旧 II=1 demo 的测试结论不能套用到当前 UUID。
+新文件已完成软件级验证、XO/HLS、完整 `hw` bitstream 构建和 demo-only 上板测试；
+旧 II=1 demo 的测试结论只作为历史对照，不能套用到当前 UUID。2026-05-31 又补跑
+一组当前 UUID 的 full-run 完整 PCG，不传 `MAX_ITERS=1`，并用
+`KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒超时；该组已确认到
+`thermal2_n262144` 多轮收敛。
 
 代码里仍要明确区分 single SpMV 基线和 full-PCG 性能路径：
 
@@ -187,17 +190,30 @@ HLS 报告显示：
     `395bitstream/cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`：
     UUID `1d536c39-f561-340b-7efc-ac2c8440543d`，SHA256
     `bc58605b36c98b29d84ce14939b95f8fc6b84bb7a505007fda95458545a349b8`，
-    DATA/KERNEL/HBM clock `211/500/450 MHz`。该 UUID 尚未完成 demo-only
-    上板测试。
+    DATA/KERNEL/HBM clock `211/500/450 MHz`。
+11. 2026-05-31 controller-split 实验 demo-only 上板测试完成：
+    `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+    `thermal2_n262144` 和完整 `thermal2` 的 init-only / 1iter 全部返回。
+    完整 `thermal2` 1iter `kernel_reported=954.0779 ms`，比上一 II=1 demo 的
+    `1767.8254 ms` 明显改善；`thermal2_n262144` 1iter `211.3790 ms`，
+    仍略慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。本版
+    `dot_p_ap` 已合入 `iter_spmv` 计时，分段数据不能和旧 `dot_p_ap` 独立阶段
+    直接逐列比较。
+12. 2026-05-31 controller-split 实验 full-run 完整 PCG 补测完成到
+    `thermal2_n262144`：`thermal2_n16` 到 `thermal2_n262144` 分别跑到
+    `1/60/81/96/104/113/120` 次并收敛；`thermal2_n262144`
+    `kernel_reported=15263.805830 ms`，明显快于 2026-05-29 旧 demo 的
+    `39491.638 ms`，接近 TAPA 标准版旧记录 `14418.306 ms`。完整 `thermal2`
+    禁用 host 60 秒超时后约 490 秒仍为 `ctrl=0x0`，按用户要求停止，记录为未完成。
 
 仍需完成：
 
-1. 对当前 controller-split UUID 做 demo-only 上板测试，并更新 HTML 与
-   `testing.md`。
-2. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
+1. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
    破坏 SpMV 成功边界和 diff。
-3. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
+2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
    退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
-4. 继续分析当前 controller/update 路径里 `update_z_reduce`、`iter_dot_p_ap_lanes`
+3. 继续分析当前 controller/update 路径里 `update_z_reduce`、`iter_dot_p_ap_lanes`
    和标量 FP64 HBM 访问的大规模瓶颈；
    只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。
+4. 如后续仍要验证完整 `thermal2` full-run，需要按长跑任务单独安排，不再用 host
+   默认 60 秒超时判断；本轮只确认禁用 host 超时后长时间仍未返回。

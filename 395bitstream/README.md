@@ -11,8 +11,8 @@ cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
 和 `cuper-tapa-pcg` full-PCG 候选；新 demo 进入同一主线槽位时优先覆盖旧 demo
 文件。四个标准版只有在用户明确确认满意后才会归档旧版并晋级替换。当前
 `395bitstream/` 保留四个标准 bitstream、single SpMV demo 槽和 full-PCG demo
-槽；full-PCG demo 槽已在 2026-05-31 用 controller-split 实验构建覆盖，等待
-demo-only 上板测试。
+槽；full-PCG demo 槽已在 2026-05-31 用 controller-split 实验构建覆盖，并已完成
+demo-only 上板测试和一组 partial full-run 完整 PCG 测试。
 
 如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
 
@@ -25,7 +25,7 @@ demo-only 上板测试。
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
-| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 controller-split 实验 demo，待 demo-only 上板测试 |
+| `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-31 controller-split 实验 demo，已完成 demo-only 上板测试 |
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -93,12 +93,31 @@ HBM clock 为 450 MHz。构建日志为
 `cuper-tapa-pcg-controller-split-build/`，版本记录见
 `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
 
-2026-05-31 已完成 controller-split demo 的 `hw` bitstream 构建并同步到本目录，
-尚未完成该 UUID 的 demo-only 上板测试。该版主要把 `dot_p_ap` 融入
-`iter_spmv_stream` 接收路径，并把 `update_xr` / `update_p` 拆成 compute/store
-两段，HLS 报告中这两段内部均达到 II=1；`update_z_reduce` 与
-`iter_dot_p_ap_lanes` 仍保留 FP64 reduction 的 II=5 代价。测试时不要复用下面
-历史 II=1 demo 的实测结果。
+2026-05-31 已完成 controller-split demo 的 `hw` bitstream 构建、同步和
+demo-only 上板测试。日志在
+`logs/codex_controller_split_demo_test_20260531_140333/`。该版主要把
+`dot_p_ap` 融入 `iter_spmv_stream` 接收路径，并把 `update_xr` / `update_p`
+拆成 compute/store 两段，HLS 报告中这两段内部均达到 II=1；
+`update_z_reduce` 与 `iter_dot_p_ap_lanes` 仍保留 FP64 reduction 的 II=5 代价。
+
+本轮没有重跑四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、
+`thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2` 的 init-only 与
+`MAX_ITERS=1` 均返回，direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。完整
+`thermal2` 上 init-only `kernel_reported=361.421363 ms`，1iter
+`kernel_reported=954.077900 ms`。相对上一 II=1 controller 实验 UUID
+`0170fa86-6e62-cfc9-aa66-2d330dd72cf2`，1iter 明显改善；但共同成功点仍略慢于
+当前 TAPA full-PCG 标准版和上一 demo，因此该 demo 仍不建议按性能目标晋级为
+标准版。注意本版 `dot_p_ap` 已合入 `iter_spmv` 计时，不能直接沿用旧分段口径。
+
+随后又补跑一组完整 PCG full-run，不传 `MAX_ITERS=1`，并用
+`KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒轮询超时。日志在
+`logs/codex_controller_split_fullrun_20260531_142400/`。
+`thermal2_n16` 到 `thermal2_n262144` 分别跑到
+`1/60/81/96/104/113/120` 次并收敛；`thermal2_n262144` 的
+`kernel_reported=15263.805830 ms`，接近 TAPA 标准版旧记录
+`14418.306 ms`，明显快于 2026-05-29 旧 demo 的 `39491.638 ms`。完整
+`thermal2` 禁用 host 超时后约 490 秒仍为 `ctrl=0x0`，已按用户要求停止；
+该点记录为未完成，不作为收敛失败结论。
 
 上一版 II=1 controller 实验 demo 已被覆盖；其构建目录为
 `cuper-tapa-pcg-ii1-build/`，版本记录见
