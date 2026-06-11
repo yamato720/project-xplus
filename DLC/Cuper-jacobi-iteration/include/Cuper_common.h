@@ -725,6 +725,12 @@ void Create_SpElement_list_for_all_channels(const vector<vector<SpElement> > &Sp
     INDEX_TYPE max_len = SpElement_list_ptr[SpElement_list_ptr.size() - 1];
     INDEX_TYPE Matrix_fpga_data_column_size = 8 * max_len;
     INDEX_TYPE Matrix_fpga_data_channel_size = ((Matrix_fpga_data_column_size + 511) / 512) * 512;
+    // XRT/TAPA cannot create a zero-byte BO. A diagonal-only R matrix legitimately
+    // has Matrix_len=0, so keep the kernel length at zero but allocate one padded
+    // 512-bit beat per HBM channel for the host mmap.
+    if (Matrix_fpga_data_channel_size == 0) {
+        Matrix_fpga_data_channel_size = 8;
+    }
 
     for(INDEX_TYPE c = 0; c < HBM_CHANNEL_NUM; ++c) {
         Matrix_fpga_data[c].assign(Matrix_fpga_data_channel_size, 0);

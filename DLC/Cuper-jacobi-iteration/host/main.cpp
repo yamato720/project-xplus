@@ -225,6 +225,9 @@ INDEX_TYPE RunJacobiCpu(const INDEX_TYPE n,
                         vector<VALUE_TYPE>& X_ref,
                         VALUE_TYPE& final_diff,
                         INDEX_TYPE& final_buffer) {
+    // Hardware debug runs fixed-count Jacobi iterations. Keep the CPU reference
+    // on the same contract so verification does not depend on tau early-exit.
+    (void)tau;
     // CPU reference 使用和 FPGA 相同的双缓冲语义：
     // read_from_x1=0 表示读 x0 写 x1，下一轮再读 x1 写 x0。
     vector<VALUE_TYPE> x0(n, 0.0f);
@@ -255,10 +258,6 @@ INDEX_TYPE RunJacobiCpu(const INDEX_TYPE n,
 
         final_diff = diff_max;
         final_buffer = read_from_x1 ? 0 : 1;
-        if (diff_max <= tau) {
-            X_ref = x_next;
-            return iter + 1;
-        }
         read_from_x1 = read_from_x1 ? 0 : 1;
     }
 

@@ -22,6 +22,9 @@ void Jacobi_Controller(
     const INDEX_TYPE Row_num,
     const INDEX_TYPE Max_iters,
     const float Tau) {
+    // Current hardware debug contract is fixed-count Jacobi. Tau is retained in
+    // the ABI but no longer drives an early convergence break.
+    (void)Tau;
     // read_from_x1 指向本轮旧解 buffer；write_to_x1 每轮取反。
     // last_written_x1 记录最后一次成功写入的新解位置，最终写到 Status[1]。
     INDEX_TYPE read_from_x1 = 0;
@@ -68,11 +71,6 @@ jacobi_iter_loop:
             status = kJacobiStatusBreakdown;
             break;
         }
-        if (result.diff_max <= Tau) {
-            status = kJacobiStatusConverged;
-            break;
-        }
-
         read_from_x1 = write_to_x1;
     }
 
