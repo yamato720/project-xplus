@@ -60,6 +60,7 @@ ROOT_DIR := $(abspath .)
 BUILD_DIR ?= $(ROOT_DIR)/build
 CUPER_TAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-build
 CUPER_TAPA_PCG_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-u55c-20260528-demo-build
+CUPER_JACOBI_BUILD_DIR ?= $(ROOT_DIR)/cuper-jacobi-iteration-build
 CUPER_NOTAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-build
 CUPER_NOTAPA_SPMV_4CH_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-4ch-build
 CUPER_TAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-fpga-u55c-20260525-build
@@ -82,6 +83,7 @@ SCRIPT_DIR := $(ROOT_DIR)/scripts
 REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 CUPER_DIR := $(ROOT_DIR)/DLC/Cuper
+CUPER_JACOBI_DIR := $(ROOT_DIR)/DLC/Cuper-jacobi-iteration
 CUPER_TAPA_KERNEL_HEADERS := $(wildcard $(CUPER_DIR)/kernels/detail/*.hpp)
 CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
@@ -222,6 +224,7 @@ endif
 export XILINX_XRT := $(XILINX_XRT)
 
 .PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
+.PHONY: cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-hw-tmux cuper-jacobi-run-hw
 
 all: run-local
 
@@ -285,6 +288,16 @@ help:
 	@echo "  make cuper-link-xclbin"
 	@echo "  make cuper-hw-tmux"
 	@echo "  make cuper-run-hw MATRIX=data/matrices/sit100/sit100.mtx"
+	@echo ""
+	@echo "DLC/Cuper-jacobi-iteration Jacobi tool:"
+	@echo "  make cuper-jacobi-launch"
+	@echo "  make cuper-jacobi-build-host"
+	@echo "  make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx"
+	@echo "  make cuper-jacobi-regression-sw MODE=quick"
+	@echo "  make cuper-jacobi-build-xo"
+	@echo "  make cuper-jacobi-link-xclbin"
+	@echo "  make cuper-jacobi-hw-tmux"
+	@echo "  make cuper-jacobi-run-hw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx"
 
 env:
 	@test -f "$(XPLATFORM)" || (echo "ERROR: platform not found: $(XPLATFORM)" && exit 1)
@@ -364,6 +377,30 @@ cuper-hw-tmux:
 
 cuper-run-hw:
 	@$(MAKE) -C "$(CUPER_DIR)" run-hw BUILD_DIR="$(CUPER_TAPA_SPMV_BUILD_DIR)" MATRIX="$(or $(MATRIX),data/matrices/sit100/sit100.mtx)"
+
+cuper-jacobi-launch cuper-jacobi-launcher:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" launch BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-build-host:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-run-sw:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))"
+
+cuper-jacobi-regression-sw:
+	@$(MAKE) --no-print-directory -C "$(CUPER_JACOBI_DIR)" regression-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(MODE),MODE="$(MODE)") $(if $(CASE),CASE="$(CASE)") $(if $(CASES),CASES="$(CASES)") $(if $(NO_BUILD),NO_BUILD="$(NO_BUILD)") $(if $(ALLOW_MISSING),ALLOW_MISSING="$(ALLOW_MISSING)") $(if $(TIMEOUT_SEC),TIMEOUT_SEC="$(TIMEOUT_SEC)") $(if $(TAU),TAU="$(TAU)")
+
+cuper-jacobi-build-xo:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-xo BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-link-xclbin:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-xclbin BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-hw-tmux:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" hw-tmux BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(FORCE),FORCE=$(FORCE))
+
+cuper-jacobi-run-hw:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-hw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))"
 
 $(LOCAL_HOST): $(ARCHIVED_HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(ARCHIVED_HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(ARCHIVED_INCLUDE_DIR)/cg_kernels.hpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(ARCHIVED_INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/main.cpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)

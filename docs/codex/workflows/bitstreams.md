@@ -3,18 +3,19 @@
 ## 1. bitstream 同步目录
 
 `395bitstream/` 放当前要同步到服务器和用于对比的最新标准版本；需要测试新候选时，
-可以临时放 demo。同步目录的上限是“四个标准成品 + 两个当前 demo 候选槽”：
+可以临时放 demo。同步目录的上限是“五个标准成品 + 三个当前 demo 候选槽”：
 
-- 四个标准成品分别对应四条主线；
-- 两个 demo 槽位用 `-demo` 后缀标识，目前分别服务 `cuper-tapa-spmv` 和
-  `cuper-tapa-pcg`；
+- 五个标准成品分别对应五条主线；
+- 三个 demo 槽位用 `-demo` 后缀标识，目前分别服务 `cuper-tapa-spmv`、
+  `cuper-tapa-pcg` 和 `cuper-tapa-jacobi`；
 - 新生成的 demo 进入 `395bitstream/` 时，优先覆盖同主线旧 demo 候选槽，不新增一串
-  历史 demo 文件；不同主线 demo 可以同时保留，上限是两个。用户要求归档后，demo
-  可以移入 `bitstream_archive/`，同步目录回到只保留四个标准成品。
+  历史 demo 文件；不同主线 demo 可以同时保留，上限是三个。用户要求归档后，demo
+  可以移入 `bitstream_archive/`，同步目录回到只保留五个标准成品。
 
 要求：
 
-1. 四条主线各自保留一个当前首选标准 `.xclbin`。
+1. 五条主线各自保留一个当前首选标准 `.xclbin`；尚未生成标准 bitstream 的主线要在
+   `395bitstream/README.md` 写清楚“暂无标准 bitstream”，不能用旧文件占位。
 2. 文件名保持稳定、简洁，不往文件名里塞 `debug`、`fix`、频率、UUID 等额外信息。
 3. 版本差异写进 `395bitstream/README.md` 和 `.xclbin.info`，不要靠改文件名表达。
 4. 对比报告 HTML 也放在 `395bitstream/`，文件名要能看出测试对象和日期。
@@ -29,12 +30,13 @@
 
 ## 2. demo bitstream 规则
 
-新生成的 bitstream 在用户明确认可前，一律只是候选版，不允许直接替换四条主线
+新生成的 bitstream 在用户明确认可前，一律只是候选版，不允许直接替换五条主线
 的标准文件。
 
-1. 候选 bitstream 必须仍归入四条基础版本之一：
+1. 候选 bitstream 必须仍归入五条基础版本之一：
    - `cuper-tapa-pcg`
    - `cuper-tapa-spmv`
+   - `cuper-tapa-jacobi`
    - `cuper-notapa-pcg`
    - `cuper-notapa-spmv`
 2. 候选 bitstream 放进 `395bitstream/` 时，文件名必须在 `.xclbin` 前加入
@@ -43,6 +45,7 @@
 ```text
 cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin
 cuper-notapa-spmv-u55c-20260527-demo.xclbin
+cuper-tapa-jacobi-u55c-20260610-demo.xclbin
 ```
 
 3. 候选版必须同时放入对应 `.xclbin.info`：
@@ -53,17 +56,18 @@ cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 
 4. demo 文件可以在 `395bitstream/` 中短期存在，用于服务器同步和对比；但
    `395bitstream/README.md` 必须明确它是 demo，不是当前标准。
-5. `395bitstream/` 最多保留两个当前 demo 候选槽。新 demo 可以直接覆盖同主线旧
-   demo 文件和 `.xclbin.info`，但不能覆盖四条主线标准文件；不同主线 demo
-   可以共存，默认是 `cuper-tapa-spmv` 一个、`cuper-tapa-pcg` 一个。归档后同步目录
+5. `395bitstream/` 最多保留三个当前 demo 候选槽。新 demo 可以直接覆盖同主线旧
+   demo 文件和 `.xclbin.info`，但不能覆盖五条主线标准文件；不同主线 demo
+   可以共存，默认是 `cuper-tapa-spmv` 一个、`cuper-tapa-pcg` 一个、
+   `cuper-tapa-jacobi` 一个。归档后同步目录
    可以没有 demo 文件。
-6. demo 上板测试默认只跑新 demo 本身；同主线当前标准 bitstream 和其它三条标准
+6. demo 上板测试默认只跑新 demo 本身；同主线当前标准 bitstream 和其它标准
    bitstream 默认复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志，不要
-   自动重跑四大标准版本。只有用户要求、标准 bitstream/host 变化、demo 结果与旧记录
+   自动重跑全部标准版本。只有用户要求、标准 bitstream/host 变化、demo 结果与旧记录
    矛盾，或旧记录缺少同口径失败边界时，才重跑标准/旧基线。
 7. 只有当用户明确表示“满意/替换/设为标准”后，才允许按归档流程把当前标准
    归档，并把 demo 晋级为稳定标准文件名。
-8. demo 晋级后，标准文件名继续保持四条主线的简洁命名，不保留 `demo`、
+8. demo 晋级后，标准文件名继续保持五条主线的简洁命名，不保留 `demo`、
    `debug`、`fix` 等额外后缀；差异写入 README 和 `.info`。
 9. demo 的数据和结论必须进入 `395bitstream/` 下的 HTML 报告，不能只写在
    `logs/` 目录。
@@ -113,7 +117,7 @@ SHA256
 1. 确认新构建成功，日志里应有 `impl Complete` 或等价成功信息。
 2. 先以 `-demo.xclbin` 形式放入 `395bitstream/`，同步 `.xclbin.info`。
 3. 按 `docs/codex/testing.md` 先做 demo-only 上板测试，并用已有标准/基线记录做
-   静态对照；不要自动重跑四大标准版本。
+   静态对照；不要自动重跑全部标准版本。
 4. 用户明确确认 demo 结果满意后，才进入标准替换流程。
 5. 对新 `.xclbin` 生成或复制 `.xclbin.info`。
 6. 计算新旧文件 `sha256sum`，必要时记录 UUID。

@@ -12,6 +12,7 @@
 | Cuper-PCG 软件版 | Cuper-PCG 版 | host | Cuper 风格 FP32 软件 SpMV | 验证 Cuper 数据格式和 PCG 外层流程 |
 | Cuper-PCG TAPA 版 | Cuper-PCG TAPA 版 | host | `DLC/Cuper` TAPA kernel | 当前最新 TAPA Cuper 硬件实验 |
 | Cuper-PCG TAPA 全 FPGA 版 | Cuper-PCG TAPA FPGA 版 | FPGA TAPA kernel 内 | `DLC/Cuper` TAPA Cuper SpMV task graph | 当前正在实现的满血 Cuper + FPGA 内 PCG 版本 |
+| Cuper-Jacobi TAPA 全 FPGA 版 | Cuper-Jacobi TAPA 版 | FPGA TAPA kernel 内 | `DLC/Cuper-jacobi-iteration` TAPA Cuper SpMV service | 第五条 Cuper 主线，普通 Jacobi iteration，不是 Jacobi 预条件 PCG |
 | Cuper-PCG control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | Cuper column-batch/row-tile SpMV | 把 Cuper SpMV 和 PCG 控制合进一个 kernel 的实验版 |
 | Cuper-PCG fullcuper control-kernel 版 | Cuper-PCG control-kernel 版 | FPGA kernel 内 | 手拆 TAPA Cuper 思路后的 16 HBM/512-bit/8-lane SpMV | 当前最接近满血 Cuper 进入 PCG kernel 的实验版 |
 
@@ -23,6 +24,7 @@
 | --- | --- | --- | --- |
 | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper(...)` | 原始 TAPA Cuper SpMV | host | 只做 SpMV，不做 PCG 收敛、`alpha/beta` 或向量更新 |
 | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg(...)` | TAPA Cuper + FPGA 内 PCG 新版 | FPGA | 保留 TAPA Cuper 16 路 HBM SpMV task graph，并新增 FPGA 内 PCG controller |
+| `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration(...)` | TAPA Cuper + FPGA 内 Jacobi iteration | FPGA | host 拆 `A=D+R`，kernel 计算 `x_next=D^{-1}(b-Rx_old)`；不是 PCG |
 | `host/cuper_tapa_pcg_main.cpp` | TAPA Cuper SpMV + host PCG | host | 服务器实测大矩阵很快的旧 TAPA 对照版 |
 | `host/cuper_tapa_pcg_fpga_main.cpp` | 调用 `CuperPcg` 的 host | FPGA | host 只准备 Cuper 矩阵格式、向量 BO、启动一次 TAPA kernel |
 | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | no-TAPA single SpMV 16ch 路线 | host | 单次只做 `y=A*x`，用于和 TAPA SpMV 直接对比 |
@@ -41,8 +43,8 @@ CuperPcg  : TAPA Cuper SpMV + FPGA 内 PCG，给当前满血 Cuper 移植实验�
 
 ## 当前 Cuper 主线构建目录
 
-为了避免四条 Cuper 主线互相覆盖 `build/hw`、`build/sw_emu` 和 `_x_temp`，
-当前 Makefile 默认把它们拆到四个独立目录：
+为了避免五条 Cuper 主线互相覆盖 `build/hw`、`build/sw_emu` 和 `_x_temp`，
+当前 Makefile 默认把相关构建拆到各自独立目录：
 
 | 主线 | 默认构建目录 | 典型产物 |
 | --- | --- | --- |
@@ -50,9 +52,10 @@ CuperPcg  : TAPA Cuper SpMV + FPGA 内 PCG，给当前满血 Cuper 移植实验�
 | no-TAPA Cuper / single SpMV | `cuper-notapa-spmv-build/` | `hw/cuper_packed_spmv_kernel.xclbin` |
 | no-TAPA Cuper / single SpMV 4ch 实验 | `cuper-notapa-spmv-4ch-build/` | `hw/cuper_packed_spmv_4ch_kernel.xclbin` |
 | TAPA Cuper / FPGA-PCG | `cuper-tapa-fpga-pcg-build/` | `hw/CuperPcg.xo`, `hw/CuperPcg.xclbin` |
+| TAPA Cuper / Jacobi iteration | `cuper-jacobi-iteration-build/` | `CuperJacobiIteration.xo`, `CuperJacobiIteration.xclbin`, `cuper_jacobi_host` |
 | no-TAPA Cuper / FPGA-PCG | `cuper-notapa-fpga-pcg-build/` | `hw/cuper_pcg_control_kernel.xclbin` |
 
-历史目录 `build/` 仍保留给 archived/default Project-XPlus 路线使用；当前四个
+历史目录 `build/` 仍保留给 archived/default Project-XPlus 路线使用；当前五条
 Cuper 主线不再默认写入 `build/`。
 
 ## 1. 多 kernel 普通版
@@ -341,7 +344,96 @@ log: logs/cuper_tapa_pcg_hw_20260522_224057.log
 - 预期目标是保持 TAPA Cuper 大矩阵 SpMV 吞吐，同时去掉 host 每轮 PCG 控制和向量往返。
 - 风险主要在综合/实现耗时、资源、时序，以及 PCG controller 是否限制原 TAPA Cuper 的流水。
 
-## 7. Cuper-PCG control-kernel 版
+## 7. Cuper-Jacobi TAPA 全 FPGA 版
+
+定位：
+
+```text
+host launch 一次 CuperJacobiIteration
+FPGA TAPA kernel 内复用 Cuper SpMV service，完成普通 Jacobi iteration：
+x_next = D^{-1}(b - R*x_old)
+```
+
+主要源码：
+
+```text
+DLC/Cuper-jacobi-iteration/host/main.cpp
+DLC/Cuper-jacobi-iteration/include/Cuper.h
+DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp
+DLC/Cuper-jacobi-iteration/kernels/detail/jacobi_controller.hpp
+DLC/Cuper-jacobi-iteration/kernels/detail/jacobi_vector_loader.hpp
+DLC/Cuper-jacobi-iteration/kernels/detail/jacobi_update_service.hpp
+DLC/Cuper-jacobi-iteration/cfg/connectivity.cfg
+```
+
+TAPA kernel 顶层参数：
+
+```cpp
+CuperJacobiIteration(
+  SpElement_list_ptr,
+  Matrix_data_0..15,
+  B,
+  Diag_inv,
+  X0,
+  X1,
+  Status,
+  Metrics,
+  Batch_num,
+  Matrix_len,
+  Row_num,
+  Column_num,
+  Max_iters,
+  Tau
+)
+```
+
+特点：
+
+- 这是第五条 Cuper 主线，主线简称 `cuper-tapa-jacobi`。
+- 它做普通 Jacobi iteration，不是 Jacobi 预条件子 PCG。
+- host 侧拆 `A = D + R`，kernel 内只对 `R` 做 SpMV。
+- `Jacobi_Vector_Loader` 读取 `X0/X1` 时把旧解取负，使 Cuper service 输出
+  `-R*x_old`。
+- `Jacobi_Update_Service` 读取 `B/Diag_inv/x_old`，计算
+  `x_next=(b+(-R*x_old))*diag_inv`，并写入另一个解向量 buffer。
+- `X0/X1` 做双缓冲，`Status[1]` 返回最终结果所在 buffer。
+- 当前 demo 的矩阵 HBM 仍是 `Matrix_data_0..15 -> HBM[0..15]`；向量和状态额外放在
+  `B -> HBM[20]`、`Diag_inv -> HBM[21]`、`X0 -> HBM[22]`、`X1 -> HBM[23]`、
+  `Status/Metrics -> HBM[24]`。
+- 当前还没有压回 16 个 HBM；已有 `cuper-tapa-jacobi-u55c-20260611-demo.xclbin`
+  调试 artifact，但 routed timing 未收敛，还不是标准 bitstream。
+
+常用命令：
+
+```bash
+make cuper-jacobi-build-host
+MAX_ITERS=2 make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+make cuper-jacobi-build-xo
+make cuper-jacobi-link-xclbin
+```
+
+当前已验证状态：
+
+```text
+software/TAPA simulation:
+cant.mtx MAX_ITERS=2: Error Num=0, Final diff=0.73218
+thermal2_n65536 MAX_ITERS=1: Error Num=0, Final diff=1.11631
+thermal2_n262144 MAX_ITERS=1: 早期 software run 通过，Final diff=1.41496
+hardware demo artifact:
+cuper-tapa-jacobi-u55c-20260611-demo.xclbin: UUID a7c95d3c-ec98-c287-67be-d81f71f7c95e,
+SHA256 a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172,
+routed timing fail WNS=-1.203 ns
+```
+
+版本记录：
+
+```text
+DLC/Cuper-jacobi-iteration/docs/testing.md
+docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/
+```
+
+## 8. Cuper-PCG control-kernel 版
 
 定位：
 
@@ -419,10 +511,13 @@ make cuper-control-xrt-host
 3. kernel 名是 `pcg_control_kernel`
    - 是 Project-XPlus 默认 control-kernel 版。
    - PCG 在 FPGA kernel 内，但 SpMV 不是 TAPA Cuper。
-4. 看到 `host/cuper_pcg_solver.hpp`
+4. kernel 名是 `CuperJacobiIteration`
+   - 是 `DLC/Cuper-jacobi-iteration` 的普通 Jacobi iteration 主线。
+   - 它用 Cuper SpMV service 计算 `-R*x_old`，不计算 PCG 的 `alpha/beta`。
+5. 看到 `host/cuper_pcg_solver.hpp`
    - 这里是 host-side PCG 主循环的公共实现。
    - Cuper 软件版和 Cuper TAPA 版都会用到它。
-5. 看到 `DLC/Cuper/kernels/Cuper.cpp`
+6. 看到 `DLC/Cuper/kernels/Cuper.cpp`
    - 这是 TAPA Cuper SpMV task graph。
    - 不包含 `alpha / beta / residual / m_inv / status` 这些 PCG control-kernel 状态。
 
@@ -431,3 +526,5 @@ make cuper-control-xrt-host
 - 看默认 HLS/XRT 主线：从 `pcg_control_kernel` 相关文档和源码开始。
 - 看最新 TAPA 硬件结果：从 `Cuper-PCG TAPA 版` 开始，但要记住它是 `TAPA SpMV + host PCG`。
 - 看“PCG 是否进 kernel”：只看 kernel 名和参数。带 `control` 的 PCG kernel 才是 PCG 在 FPGA 内部；纯 `Cuper` 不是。
+- 看普通 Jacobi iteration：从 `DLC/Cuper-jacobi-iteration/docs/testing.md` 和
+  `CuperJacobiIteration` 开始，不要按 PCG 公式解释。

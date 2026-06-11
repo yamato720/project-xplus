@@ -22,7 +22,7 @@
 | HTML、analysis、XO/Vitis 报告和报告口径 | `docs/codex/workflows/reports.md` |
 | `docs/bitstream_summaries/<版本>/`、`source.diff`、阅读指南 | `docs/codex/workflows/version_records.md` |
 | demo-only 动态测试、数据集、失败边界、标准基线复用 | `docs/codex/testing.md` |
-| 四条实现线的长期说明 | `docs/design/implementation_versions_zh.md` |
+| 五条实现线的长期说明 | `docs/design/implementation_versions_zh.md` |
 
 涉及 bitstream、构建、运行脚本时，也要查：
 
@@ -33,15 +33,16 @@ scripts/launcher.py
 bitstream_archive/README.md
 ```
 
-## 2. 四条主线
+## 2. 五条主线
 
-Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路径可以保留，但不能
+Project-XPlus 当前只把下面五条作为主要模式。兼容/旧实验路径可以保留，但不能
 混成主线命名。
 
 | 主线简称 | 含义 | 典型 bitstream 名 |
 | --- | --- | --- |
 | `cuper-tapa-pcg` | TAPA Cuper SpMV + FPGA 内 PCG，全流程 kernel | `cuper-tapa-pcg-fpga-u55c-YYYYMMDD.xclbin` |
 | `cuper-tapa-spmv` | TAPA Cuper single SpMV，PCG 不在 FPGA 内全流程 | `cuper-tapa-spmv-u55c-YYYYMMDD.xclbin` |
+| `cuper-tapa-jacobi` | TAPA Cuper SpMV service + FPGA 内 Jacobi iteration，不是 Jacobi 预条件 PCG | `cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin` |
 | `cuper-notapa-pcg` | no-TAPA HLS Cuper/PCG control kernel，全流程 kernel | `cuper-notapa-pcg-fpga-u55c-YYYYMMDD.xclbin` |
 | `cuper-notapa-spmv` | no-TAPA single SpMV kernel | `cuper-notapa-spmv-u55c-YYYYMMDD.xclbin` |
 
@@ -49,21 +50,23 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
 
 - `pcg-fpga` 表示 PCG 主循环、dot、alpha/beta、向量更新和收敛判断在 FPGA kernel 内。
 - `spmv` 表示只测/只构造 SpMV kernel，host 可以控制 PCG 或只跑 single SpMV。
-- `host-PCG`、旧 CSR 多 kernel、packed16hbm legacy 等都属于兼容或历史路线，不加入四条主线命名。
-- `395bitstream/` 的同步槽位是四个标准 bitstream，必要时再加最多两个当前 demo
-  候选；demo 槽位分别服务 `cuper-tapa-spmv` 和 `cuper-tapa-pcg`。新 demo 允许覆盖
-  同主线旧 demo 文件，但不能覆盖四条标准文件。用户要求归档后，demo 可从
+- `jacobi` 表示 kernel 内执行普通 Jacobi 迭代 `x_next=D^{-1}(b-Rx_old)`；它不是
+  Jacobi 预条件子 PCG，也不计算 `alpha/beta`。
+- `host-PCG`、旧 CSR 多 kernel、packed16hbm legacy 等都属于兼容或历史路线，不加入五条主线命名。
+- `395bitstream/` 的同步槽位是五个标准 bitstream，必要时再加最多三个当前 demo
+  候选；demo 槽位分别服务 `cuper-tapa-spmv`、`cuper-tapa-pcg` 和
+  `cuper-tapa-jacobi`。新 demo 允许覆盖同主线旧 demo 文件，但不能覆盖五条标准文件。用户要求归档后，demo 可从
   `395bitstream/` 移入 `bitstream_archive/`。
 
 ## 3. 高优先级规则
 
 1. 新 bitstream 在用户明确认可前只能作为 demo，文件名必须带 `-demo` 后缀。
-2. demo 不允许直接覆盖四条主线标准 bitstream；晋级前必须按
+2. demo 不允许直接覆盖五条主线标准 bitstream；晋级前必须按
    `workflows/bitstreams.md` 归档旧版。
 3. 允许用最新 demo 覆盖 `395bitstream/` 中同主线旧 demo 候选槽；覆盖后必须更新
    `395bitstream/README.md` 和对应版本记录，说明旧 demo 结论已变成历史记录。
-   不同主线 demo 可以同时保留，上限是两个 demo 槽位；归档后同步目录可以只保留
-   四个标准 bitstream。
+   不同主线 demo 可以同时保留，上限是三个 demo 槽位；归档后同步目录可以只保留
+   五个标准 bitstream。
 4. 硬件构建不要使用裸 `build/` 混放；构建目录使用当前主线或 bitstream 名加
    `-build` 后缀。
 5. 每次生成 `TARGET=hw` bitstream 前，必须先做同一 top/ABI 的软件级验证：
@@ -86,6 +89,8 @@ Project-XPlus 当前只把下面四条作为主要模式。兼容/旧实验路�
    `docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/`；
    full-PCG controller/dot/update 优化记录维护在
    `docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+   Cuper Jacobi iteration 主线记录维护在
+   `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
 9. 迭代优化时先测试、后写正式 `source.diff`。每轮 demo 必须更新
    `README.md`、`changes.md`、`testing.md` 和 HTML 结论；但只有 demo-only
    上板测试确认核心性能提升，或用户明确要求保留功能边界修复补丁时，才更新版本目录
@@ -102,6 +107,15 @@ make cuper-tapa-pcg-fpga-host
 make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
 ```
 
+Cuper Jacobi software smoke：
+
+```bash
+make cuper-jacobi-build-host
+MAX_ITERS=2 make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+make cuper-jacobi-regression-sw MODE=quick
+```
+
 提交或结束代码/文档改动前：
 
 ```bash
@@ -110,7 +124,7 @@ git status --short
 ```
 
 硬件测试和 demo 对比按 `docs/codex/testing.md` 执行。新 demo 默认只跑 demo
-本身，四大标准版本默认复用既有记录；不要只说“理论上可以”。
+本身，标准版本默认复用既有记录；不要只说“理论上可以”。
 
 ## 5. 提交与推送纪律
 

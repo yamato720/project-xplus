@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-$(cd "$ROOT_DIR/../.." && pwd)/cuper-jacobi-iteration-build}"
+
+# shellcheck source=env_u55c.sh
+source "$ROOT_DIR/scripts/env_u55c.sh"
+
+mkdir -p "$BUILD_DIR"
+
+OUTPUT_XO="${1:-$BUILD_DIR/CuperJacobiIteration.xo}"
+WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_CuperJacobiIteration}"
+CLOCK_PERIOD="${CLOCK_PERIOD:-2.0}"
+JOBS="${JOBS:-$(nproc)}"
+
+cmd=(
+  tapa -w "$WORK_DIR" compile
+  -f "$ROOT_DIR/kernels/Cuper.cpp"
+  -t CuperJacobiIteration
+  -p "$DEVICE"
+  --clock-period "$CLOCK_PERIOD"
+  -j "$JOBS"
+  --enable-synth-util
+  -c "-I$ROOT_DIR/include"
+  -c "-I$ROOT_DIR/src"
+  -o "$OUTPUT_XO"
+)
+
+printf 'Running:'
+printf ' %q' "${cmd[@]}"
+printf '\n'
+
+"${cmd[@]}"

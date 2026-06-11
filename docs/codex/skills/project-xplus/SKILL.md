@@ -45,7 +45,7 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 
 - Follow `docs/codex/coding.md` as the entry point. It links to detailed workflow docs under `docs/codex/workflows/`.
 - Follow `docs/codex/testing.md` for demo testing and required datasets. New demo testing is
-  demo-only by default; do not rerun the four standard bitstreams unless the user explicitly
+  demo-only by default; do not rerun the standard bitstreams unless the user explicitly
   asks, standard bitstream/host changed, or old records are insufficient to interpret a mismatch.
 - When updating the HTML report for a TAPA full-PCG demo, keep current diagnostic sections such
   as `TAPA PCG 分段时间` and `Init 与 1iter 差值` on the latest demo-only measurements.
@@ -61,7 +61,8 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - For bitstream/build/TAPA/report/version-record work, read the matching `docs/codex/workflows/*.md` file before editing.
 - Keep version records in `docs/bitstream_summaries/<version>/`.
 - For code-changing demo candidates, maintain `README.md`, `changes.md`, `testing.md`, and, when useful, `code_reading_guide.md`. Update official `source.diff` only after demo-only board testing confirms a performance improvement, or when the user explicitly asks to preserve a functional-boundary fix; do not overwrite the last effective `source.diff` for failed or slower demos.
-- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion or asks to archive them. `395bitstream/` may keep up to two demo slots: one `cuper-tapa-spmv` single-SpMV candidate and one `cuper-tapa-pcg` full-PCG candidate. New demos overwrite only the same-mainline demo slot; archived demos move to `bitstream_archive/`.
+- Store synchronized candidate bitstreams in `395bitstream/` with a `-demo` suffix until the user explicitly approves promotion or asks to archive them. Project-XPlus now has five Cuper mainlines. `395bitstream/` may keep up to three demo slots: one `cuper-tapa-spmv` single-SpMV candidate, one `cuper-tapa-pcg` full-PCG candidate, and one `cuper-tapa-jacobi` Jacobi-iteration candidate. New demos overwrite only the same-mainline demo slot; archived demos move to `bitstream_archive/`.
+- Cuper Jacobi candidates use names like `cuper-tapa-jacobi-u55c-YYYYMMDD-demo.xclbin` and must not be confused with Jacobi-preconditioned PCG. There is no Jacobi standard xclbin yet.
 - Do not replace standard bitstreams without archiving the old standard and updating `395bitstream/README.md`.
 - Before starting any `TARGET=hw` bitstream build, run the matching software-level
   validation first (`sw_emu`, TAPA software simulation, or a documented host/local smoke
@@ -76,6 +77,16 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
   through full `thermal2` and is close to full/native `Cuper(...)` on shared successful points.
   Treat it as the single-SpMV regression baseline and boundary check, not the primary
   optimization target.
+- `DLC/Cuper-jacobi-iteration` is the fifth Cuper mainline (`cuper-tapa-jacobi`), not
+  Jacobi-preconditioned PCG. Its top is `CuperJacobiIteration(...)`: host splits `A=D+R`,
+  the vector loader feeds `-x_old`, the Cuper service produces `-R*x_old`, and the update
+  stage writes `x_next=(b+(-R*x_old))*diag_inv` into `X0/X1`. It is wired into the root
+  `Makefile` through `cuper-jacobi-*` targets and currently reports `[jacobi-stage-cycles]`
+  / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current records are software/TAPA
+  simulation plus one debug xclbin artifact only:
+  `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`. That artifact is not
+  timing-clean (routed WNS -1.203 ns) and has not been board-tested, so there is still no
+  Jacobi standard xclbin.
 - The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
   update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,
   `update_p`, `P_spmv` / `AP_spmv` consumption, controller HBM access patterns, stage
@@ -98,6 +109,13 @@ docs/bitstream_summaries/2026-05-28-cuper-tapa-spmv-single-optimization/
 docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/
 ```
 
+- Keep Cuper Jacobi iteration records in:
+
+```text
+docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/
+DLC/Cuper-jacobi-iteration/docs/testing.md
+```
+
 ## Common Commands
 
 Host smoke:
@@ -105,6 +123,15 @@ Host smoke:
 ```bash
 make cuper-tapa-pcg-fpga-host
 make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
+```
+
+Cuper Jacobi smoke:
+
+```bash
+make cuper-jacobi-build-host
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+make cuper-jacobi-regression-sw MODE=quick
 ```
 
 Hardware builds should run in tmux and keep the shell open after completion. Use existing Makefile tmux targets when available.

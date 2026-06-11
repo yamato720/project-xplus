@@ -1,19 +1,21 @@
 # 395bitstream 对比说明
 
-这个目录放 U55C 上需要保留/对比的 Project-XPlus Cuper xclbin。文件名按四条主线统一：
+这个目录放 U55C 上需要保留/对比的 Project-XPlus Cuper xclbin。文件名按五条主线统一：
 
 ```text
 cuper-{tapa|notapa}-{spmv|pcg-fpga}-u55c-YYYYMMDD.xclbin
+cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 ```
 
-同步目录常态可以保留六个成品槽位：四个标准 bitstream，加两个带 `-demo` 后缀的
-当前候选 bitstream。两个 demo 槽位分别用于 `cuper-tapa-spmv` single SpMV 候选
-和 `cuper-tapa-pcg` full-PCG 候选；新 demo 进入同一主线槽位时优先覆盖旧 demo
-文件。四个标准版只有在用户明确确认满意后才会归档旧版并晋级替换。当前
-`395bitstream/` 保留四个标准 bitstream、一个 single SpMV demo 槽和一个
-full-PCG demo 槽。
+同步目录常态可以保留八个成品槽位：五个标准 bitstream，加三个带 `-demo` 后缀的
+当前候选 bitstream。三个 demo 槽位分别用于 `cuper-tapa-spmv` single SpMV 候选、
+`cuper-tapa-pcg` full-PCG 候选和 `cuper-tapa-jacobi` Jacobi iteration 候选；
+新 demo 进入同一主线槽位时优先覆盖旧 demo 文件。五个标准版
+只有在用户明确确认满意后才会归档旧版并晋级替换。当前 `395bitstream/` 保留四个
+已有标准 bitstream、一个 single SpMV demo 槽、一个 full-PCG demo 槽和一个
+Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 
-如果某个文件带 `legacy`，说明它不是当前四条主线的首选版本，只作为历史对照保留。
+如果某个文件带 `legacy`，说明它不是当前五条主线的首选版本，只作为历史对照保留。
 
 ## 当前文件
 
@@ -23,8 +25,45 @@ full-PCG demo 槽。
 | `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
 | `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
+| 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260611-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | demo 候选，routed timing 未收敛，未晋级标准 |
+
+TAPA Cuper / Jacobi iteration 当前主线记录：
+
+```text
+DLC/Cuper-jacobi-iteration/
+```
+
+这条主线的顶层是 `CuperJacobiIteration`，普通 Jacobi 迭代公式为
+`x_next=D^{-1}(b-Rx_old)`，不是 Jacobi 预条件子 PCG。当前代码已经接入根
+`Makefile` 的 `cuper-jacobi-*` 目标，并完成 software/TAPA simulation smoke：
+`cant.mtx` `MAX_ITERS=2`、`thermal2_n65536` `MAX_ITERS=1` 均为当前 timed 版通过，
+`thermal2_n262144` 早期 software run 通过但还需用 timed/root target 补跑。
+当前已有一个 demo 候选进入 Jacobi demo 槽，但还没有上板测试数据，也不是标准
+bitstream。版本记录见
+`docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
+
+TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
+
+```text
+cuper-tapa-jacobi-u55c-20260611-demo.xclbin
+```
+
+这版是 `CuperJacobiIteration` 第一版硬件 demo artifact。它不替换任何标准文件；
+当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。demo xclbin UUID 为
+`a7c95d3c-ec98-c287-67be-d81f71f7c95e`，SHA256 为
+`a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172`。
+最终 xclbin info 中 DATA clock 为 220 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 442 MHz。构建目录为 `cuper-jacobi-iteration-build/`。
+
+注意这版实现阶段完成并已成功封装 `.xclbin`，但 routed timing 未收敛：
+WNS `-1.203 ns`，TNS `-22607.805 ns`，failing endpoints `58206`；
+主要失败在 `clk_kernel_00_unbuffered_net`，`hbm_aclk` 也有 WNS `-0.040 ns`。
+因此它只作为调试/同步 demo artifact，不建议晋级标准。原始 tmux 构建在最后
+`xclbinutil` 包装阶段因本地 XRT 2.18 缺 Boost 1.83 失败；之后使用 Vitis 2022.2
+自带 `xclbinutil` 从包装阶段恢复成功。
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 
@@ -67,7 +106,7 @@ HBM clock 为 418 MHz。构建日志为
 
 2026-05-29 已按 demo-only 口径上板测试当前 UUID
 `c95c1dfc-20ca-9152-279e-bafdf35fdc3d`，日志在
-`logs/codex_two_demo_test_20260529_1300/`。本轮没有重跑四个标准 bitstream。
+`logs/codex_two_demo_test_20260529_1300/`。本轮没有重跑当时已有四个标准 bitstream。
 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
 和完整 `thermal2` 均返回且 diff 通过；完整 `thermal2` 的
 `spmv_avg=1.781541 ms`，`gflops=9.632462`。共同成功点上它比 standalone TAPA
@@ -92,7 +131,7 @@ HBM clock 为 405 MHz。构建日志为
 
 2026-05-31 已完成该 demo 的 init-only 与 `MAX_ITERS=1` demo-only 上板测试，
 日志在 `logs/codex_packed_timing_demo_test_20260531_195109_proper/`。本轮没有重跑
-四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+当时已有四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
 `thermal2_n262144` 和完整 `thermal2` 的 init-only 与 1iter 均返回，direct ctrl
 均为 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 上 init-only
 `kernel_reported=302.744196 ms`，1iter `kernel_reported=944.123210 ms`；
@@ -128,7 +167,7 @@ demo-only 上板测试。日志在
 拆成 compute/store 两段，HLS 报告中这两段内部均达到 II=1；
 `update_z_reduce` 与 `iter_dot_p_ap_lanes` 仍保留 FP64 reduction 的 II=5 代价。
 
-本轮没有重跑四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、
+本轮没有重跑当时已有四个标准 bitstream。`thermal2_n16`、`thermal2_n65536`、
 `thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2` 的 init-only 与
 `MAX_ITERS=1` 均返回，direct ctrl 均为 `0x4 -> 0xe`，数值校验通过。完整
 `thermal2` 上 init-only `kernel_reported=361.421363 ms`，1iter
@@ -154,7 +193,7 @@ demo-only 上板测试。日志在
 `ec3a98b09d662611ce50c4c484cb6b55ad2e7dbcd712a0b6d7833b38e4579fc8`，
 DATA/KERNEL/HBM 为 `223/500/444 MHz`。2026-05-31 已完成该旧 UUID 的
 demo-only 上板测试，日志在
-`logs/codex_ii1_demo_test_20260531_011314/`。本轮没有重跑四个标准 bitstream。
+`logs/codex_ii1_demo_test_20260531_011314/`。本轮没有重跑当时已有四个标准 bitstream。
 `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
 和完整 `thermal2` 的 init-only 与 `MAX_ITERS=1` 均返回，direct ctrl 均为
 `0x4 -> 0xe`，数值校验通过。完整 `thermal2` 上 init-only
@@ -239,8 +278,10 @@ make run-cuper-pcg-tapa-fpga \
 
 - `spmv` 版只比较 Cuper SpMV kernel。TAPA 版和 no-TAPA 版都可以用 `--spmv-only` 跑纯 SpMV。
 - `pcg-fpga` 版把 PCG 控制、dot、alpha/beta、向量更新和收敛判断放进 FPGA kernel。
-- TAPA single SpMV 的旧兼容 host-PCG 路径仍可用，但不算当前四条主线里的 FPGA-PCG。
+- TAPA single SpMV 的旧兼容 host-PCG 路径仍可用，但不算当前五条主线里的 FPGA-PCG。
 - no-TAPA single SpMV 的 host-PCG 兼容路径也仍可用，主要用于复用 `cuper_packed_spmv_kernel` 做对照。
+- TAPA Jacobi iteration 是普通 Jacobi 主线，不计算 PCG 的 `alpha/beta`，也不等同于默认
+  Jacobi-PCG 预条件路线。
 - legacy packed16hbm 版已从本同步目录移出，只在 `bitstream_archive/legacy-packed16hbm/README.md` 留文字记录；二进制文件在 U55C 服务器上保留。
 
 对比时至少记录：

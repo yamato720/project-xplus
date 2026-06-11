@@ -42,9 +42,11 @@
    - 本轮运行类型：single SpMV、full-PCG init-only、full-PCG 1iter 或其它；
    - full-PCG demo 写 init-only / 1iter 的返回状态和关键时间；single SpMV demo
      写 `spmv_avg`、diff、rc、timeout 边界，并明确“本轮未跑 PCG，无 init/1iter
-     过程”。
-2. `Bitstream 信息` 是精简总览，不是构建历史清单。该表只保留四个标准
-   bitstream，加 demo 的配对对比行：每个仍需对比的 demo 组只放上一 demo 与本次
+     过程”；Jacobi iteration demo 写 `Status`、`Final buffer`、`Iterations`、
+     `Final diff`、`jacobi-stage-*` 和 `Error Num`。
+2. `Bitstream 信息` 是精简总览，不是构建历史清单。该表只保留当前主线标准
+   bitstream，加 demo 的配对对比行；暂无标准 bitstream 的主线要写清楚“暂无标准”。
+   每个仍需对比的 demo 组只放上一 demo 与本次
    demo 两行。当前测试对象必须用醒目标识，例如 `本次 demo` tag 和整行浅色底。
    如果同一个 demo 槽位已被新文件覆盖，上一 demo 行必须按历史 UUID/SHA 标清楚，
    不要让读者误以为当前目录里仍同时存在两个同名 `.xclbin`。

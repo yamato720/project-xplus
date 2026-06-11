@@ -16,9 +16,10 @@
 
 - 这里测的是 Cuper 路线，不是默认 CSR/control-kernel 路线。
 - 有些 timeout / failed 是当前已知边界，不一定是新问题。
-- 测试新 demo 时，默认只跑新 demo 本身。四条标准 bitstream 和旧基线数据默认
+- 测试新 demo 时，默认只跑新 demo 本身。已有标准 bitstream 和旧基线数据默认
   复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志；不要每次新 demo
-  都重跑四大标准版本。
+  都重跑全部标准版本。当前 `cuper-tapa-jacobi` 还没有标准 bitstream；已有一个
+  timing 未收敛的 demo artifact，正式上板数据仍待补。
 - demo 的测试数据和结论必须写回 `395bitstream/` 下的 HTML 报告；不能只留在
   `logs/` 目录里。
 - `Project-XS/data/README.md` 当前只说明 generated 数据目录；真正用于本轮对比的
@@ -27,7 +28,8 @@
 
 ## 1. 测试对象
 
-四个主要 bitstream 路径固定从 `395bitstream/` 读取：
+当前已有标准 bitstream 的主线路径固定从 `395bitstream/` 读取。第五条
+`cuper-tapa-jacobi` 已作为主线登记，但当前还没有标准 xclbin。
 
 | 简称 | bitstream | kernel | 用途 |
 | --- | --- | --- | --- |
@@ -35,6 +37,7 @@
 | no-TAPA SpMV | `395bitstream/cuper-notapa-spmv-u55c-20260524.xclbin` | `cuper_packed_spmv_4ch_kernel` | 4ch no-TAPA single SpMV baseline |
 | no-TAPA full-PCG | `395bitstream/cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | `cuper_pcg_control_kernel` | no-TAPA 全流程 FPGA-PCG 代理 |
 | TAPA full-PCG | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | `CuperPcg` | TAPA Cuper + FPGA 内 PCG timed-debug 版 |
+| TAPA Jacobi iteration | 暂无标准 bitstream | `CuperJacobiIteration` | TAPA Cuper SpMV service + FPGA 内普通 Jacobi iteration |
 
 检查 bitstream 基本信息：
 
@@ -59,11 +62,12 @@ rg -n "UUID|Frequency|Achieved Freq|Kernel:" 395bitstream/*.xclbin.info
 
 新生成的 bitstream 不能直接成为标准版。它必须先作为 demo 版放在
 `395bitstream/`，用 `-demo` 后缀命名。测试时默认采用 demo-only 上板实测，
-再用已有标准/基线记录做静态对照；不要自动重跑四大标准版本。
-`395bitstream/` 最多允许两个 demo 槽位并存：一个用于 `cuper-tapa-spmv`
-single SpMV 候选，一个用于 `cuper-tapa-pcg` full-PCG 候选。新 demo 只覆盖同主线
-旧 demo，不能覆盖四条标准 bitstream。用户要求归档后，demo 可移入
-`bitstream_archive/`，同步目录回到只保留四个标准 bitstream。
+再用已有标准/基线记录做静态对照；不要自动重跑全部标准版本。
+`395bitstream/` 最多允许三个 demo 槽位并存：一个用于 `cuper-tapa-spmv`
+single SpMV 候选，一个用于 `cuper-tapa-pcg` full-PCG 候选，一个用于
+`cuper-tapa-jacobi` Jacobi iteration 候选。新 demo 只覆盖同主线旧 demo，
+不能覆盖五条标准 bitstream。用户要求归档后，demo 可移入 `bitstream_archive/`，
+同步目录回到只保留五个标准 bitstream。
 
 命名规则：
 
@@ -72,13 +76,16 @@ single SpMV 候选，一个用于 `cuper-tapa-pcg` full-PCG 候选。新 demo �
 395bitstream/cuper-tapa-pcg-fpga-u55c-20260527-demo.xclbin.info
 395bitstream/cuper-tapa-spmv-u55c-20260527-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260527-demo.xclbin.info
+395bitstream/cuper-tapa-jacobi-u55c-20260610-demo.xclbin
+395bitstream/cuper-tapa-jacobi-u55c-20260610-demo.xclbin.info
 ```
 
-四条基础版本仍然是唯一分类。任何 demo 都必须属于其中之一：
+五条基础版本仍然是唯一分类。任何 demo 都必须属于其中之一：
 
 ```text
 cuper-tapa-pcg
 cuper-tapa-spmv
+cuper-tapa-jacobi
 cuper-notapa-pcg
 cuper-notapa-spmv
 ```
@@ -87,7 +94,7 @@ cuper-notapa-spmv
 
 1. 默认只跑新 demo：例如新的 `cuper-tapa-pcg-...-demo.xclbin` 只对该 demo
    跑本节规定的数据集和模式。
-2. 同主线当前标准 bitstream、其它三条标准 bitstream、以及旧跨主线基线默认
+2. 同主线当前标准 bitstream、其它已有标准 bitstream、以及旧跨主线基线默认
    复用当前 HTML、`docs/bitstream_summaries/` 和已归档日志里的数据，只做静态对照，
    不做自动重跑。
 3. 只有下面情况才重跑标准/旧基线：
@@ -106,6 +113,11 @@ cuper-notapa-spmv
    diff、rc、timeout 边界。对 TAPA full-PCG 候选，至少跑
    `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`、
    完整 `thermal2` 的 init-only 与 1iter。若数据异常，再补中间规模。
+   对 `cuper-tapa-jacobi` 候选，先跑 software/TAPA simulation 的 `cant.mtx`、
+   `thermal2_n65536`、`thermal2_n262144`，硬件 demo 出现后再按同样数据集补上板
+   `MAX_ITERS=1/2`，记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
+   `[jacobi-timing-work]`、`[jacobi-stage-cycles]`、`[jacobi-stage-ms]` 和
+   `Error Num`。
 6. demo 的测试报告必须写清楚：
    - demo 路径、UUID、SHA256
    - 本轮是否 demo-only；如果复用旧标准数据，要写明旧标准日志/HTML来源
@@ -375,6 +387,45 @@ done
 - 成功点一般是 `iter=1 max_iter`，小矩阵也可能数值上提前满足收敛。
 - 控制寄存器应从启动前 `0x4` 到完成后 `0xe`。
 - 完整 `thermal2` 当前预期失败：direct register 启动后 `ctrl=0x0`。
+
+### 5.6 TAPA Jacobi iteration software/TAPA simulation
+
+`cuper-tapa-jacobi` 是第五条 Cuper 主线，源码在
+`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有第一版
+`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 调试 artifact，但
+routed timing 未收敛，也还没有上板数据。已记录的是 host + TAPA software run。
+它做普通 Jacobi iteration：
+`x_next=D^{-1}(b-Rx_old)`，不是 Jacobi 预条件子 PCG。
+
+当前 smoke 命令：
+
+```bash
+make cuper-jacobi-build-host
+MAX_ITERS=2 make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n262144
+```
+
+当前已记录数据：
+
+| Dataset | 规模 | 迭代 | 当前状态 | 关键输出 |
+| --- | --- | ---: | --- | --- |
+| `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 timed 版已通过 | `Final diff=0.73218`, `Error Num=0`, `float_v16_packets=3904`, `spmv_update=143582 cycles` |
+| `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 timed 版已通过 | `Final diff=1.11631`, `Error Num=0`, `float_v16_packets=4096`, `spmv_update=41698 cycles` |
+| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 已通过，需用 timed/root target 补跑 | `Final diff=1.41496`, `Error Num=0` |
+
+Jacobi 测试至少记录：
+
+- `Status[0..2]`：退出状态、最终 buffer、完成迭代数。
+- `Metrics[0..7]`：`final_diff`、迭代数、每轮包数、累计包数、SpMV+update cycle、
+  controller total cycle、timer total cycle、平均每轮 SpMV+update cycle。
+- host 输出：`[jacobi-timing-work]`、`[jacobi-stage-cycles]`、
+  `[jacobi-stage-ms]`、`Error Num`。
+- 是否为 software/TAPA simulation、`sw_emu` 还是 `hw` 上板。
+
+后续硬件 demo 生成后，先作为 `395bitstream/cuper-tapa-jacobi-u55c-YYYYMMDD-demo.xclbin`
+进入 Jacobi demo 槽，只跑 demo-only；标准 Cuper SpMV/PCG bitstream 默认复用既有记录。
+当前 2026-06-11 demo 的最小上板 smoke 仍待补，且需先注意 timing fail 风险。
 
 ## 6. 预期结果表
 

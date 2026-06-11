@@ -56,10 +56,11 @@ Project-XPlus/docs/codex/testing.md
 Project-XPlus/395bitstream/README.md
 ```
 
-`395bitstream/` 最多允许两个 demo 槽位并存：`cuper-tapa-spmv` single SpMV
-候选和 `cuper-tapa-pcg` full-PCG 候选。新 demo 只覆盖同主线旧 demo，四个标准
-bitstream 仍需用户明确确认后才能归档替换。用户要求归档 demo 后，demo 移入
-`bitstream_archive/`，同步目录可以只保留四个标准 bitstream。
+`395bitstream/` 最多允许三个 demo 槽位并存：`cuper-tapa-spmv` single SpMV
+候选、`cuper-tapa-pcg` full-PCG 候选和 `cuper-tapa-jacobi` Jacobi iteration
+候选。新 demo 只覆盖同主线旧 demo，五条标准 bitstream 仍需用户明确确认后才能
+归档替换；当前 Jacobi 主线还没有标准 xclbin。用户要求归档 demo 后，demo 移入
+`bitstream_archive/`，同步目录可以只保留标准 bitstream。
 
 当前 skill 目标边界是：single SpMV demo 不再承载 PCG service/control 优化。
 `CuperPcgSpmv(...)` 保留历史 kernel 名和 demo 构建入口，但内部应走和
