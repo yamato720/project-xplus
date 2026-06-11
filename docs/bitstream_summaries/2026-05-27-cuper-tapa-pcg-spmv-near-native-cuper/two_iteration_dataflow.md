@@ -31,12 +31,12 @@ host 先准备两类数据。
 
 | 数据 | HBM | 类型 | 初始状态 |
 | --- | --- | --- | --- |
-| `B` | HBM[16] | `double` | 右端项 `b` |
-| `M_inv` | HBM[17] | `double` | Jacobi 对角逆 |
-| `X` | HBM[18] | `double` | 初始解 `x0`，kernel 内更新为最终解 |
-| `R` | HBM[19] | `double` | 置零，kernel 内写残差 |
-| `Z` | HBM[20] | `double` | 置零，kernel 内写预条件残差 |
-| `P` | HBM[21] | `double` | 置零，kernel 内写搜索方向 |
+| `B` | HBM[16] | `double_v8` | 右端项 `b`，512-bit packed |
+| `M_inv` | HBM[17] | `double_v8` | Jacobi 对角逆，512-bit packed |
+| `X` | HBM[18] | `double_v8` | 初始解 `x0`，kernel 内更新为最终解 |
+| `R` | HBM[19] | `double_v8` | 置零，kernel 内写残差 |
+| `Z` | HBM[20] | `double_v8` | 置零，kernel 内写预条件残差 |
+| `P` | HBM[21] | `double_v8` | 置零，kernel 内写搜索方向 |
 | `AP_spmv` | HBM[22] | `float_v16` | 置零，缓存最近一次 `A*p` |
 | `X_spmv` | HBM[24] | `float_v16` | host 把 `X(double)` 降成 packed FP32 |
 | `P_spmv` | HBM[25] | `float_v16` | 置零，kernel 内维护当前 `p` 的 FP32 副本 |
@@ -46,12 +46,16 @@ host 先准备两类数据。
 这里的混精边界是：
 
 ```text
-PCG 主状态：B/M_inv/X/R/Z/P 是 FP64 double
+PCG 主状态：B/M_inv/X/R/Z/P 是 FP64 double_v8 packed
 Cuper SpMV：矩阵值、输入向量和输出向量是 FP32 float_v16
 ```
 
 因此 host 会先把 `X` 打成 `X_spmv`。矩阵值也在 host 侧按 `VALUE_TYPE=float`
 写入 Cuper 矩阵格式。
+
+注意：早期 packed feed/AP 版本里的 `B/M_inv/X/R/Z/P` 还是标量 `double*`；
+当前 packed timing demo 已经改成 `double_v8*`。下面为了说明单个元素语义仍写
+`X[index]`、`P[index]`，实际 HBM 访问按 8 个 double 一包进行。
 
 ## 1. 顶层 task graph
 
@@ -208,28 +212,30 @@ Pcg_Mult_Sort_Tree
   -> Pcg_Controller
 ```
 
-controller 收到的 `float_v16` 现在语义是 `AP0 = A*p0`。当前实现把它先缓存到
-HBM：
+controller 收到的 `float_v16` 现在语义是 `AP0 = A*p0`。当前实现把它缓存到
+HBM，同时在接收路径里同步计算 `p^T AP`：
 
 ```text
 AP_spmv = AP0 packed FP32    写 HBM[22]
+p_ap0 += P0 * AP0            fused 在 iter_spmv_stream 内
 ```
 
-注意：这里没有直接把 `AP0` 接到 `dot_p_ap/update_xr`。当前路径是：
+注意：这里没有直接把 `AP0` 旁路给 `update_xr`。当前路径是：
 
 ```text
-Pcg_Spmv_Stream -> controller -> AP_spmv(HBM) -> controller 后续阶段再读
+Pcg_Spmv_Stream -> controller -> AP_spmv(HBM) -> update_xr 后续再读
 ```
 
-这也是目前 full-PCG 里值得继续优化的一个数据通路点。
+`dot_p_ap` 不再作为独立 stage 重新扫描 `P/AP_spmv`；它已经合并进
+`iter_spmv_recv_dot` 计时。`AP_spmv` 的 HBM 往返仍是 `update_xr` 的数据通路点。
 
 ## 5. 第 1 次 PCG 迭代：计算 `alpha0`
 
-`dot_p_ap` 读两个来源：
+`p^T AP` 已在上一段接收 `AP0` 时累计。接收路径读两个来源：
 
 ```text
 P0(HBM[21], FP64)
-AP_spmv0(HBM[22], FP32 packed)
+AP0 stream packet(FP32 packed)
 ```
 
 每个 lane 会做 FP32 -> FP64：
@@ -245,7 +251,8 @@ p_ap0   += P0[index] * ap_value
 alpha0 = rz0 / p_ap0
 ```
 
-这一段只更新 controller 内部标量 `p_ap` 和 `alpha`，不会改变向量 HBM。
+这一段只更新 controller 内部标量 `p_ap` 和 `alpha`，不会改变向量 HBM；在
+stage 计时里它归入 `iter_spmv_recv_dot`，不再有独立 `dot_p_ap` 字段。
 
 ## 6. 第 1 次 PCG 迭代：更新 `X1/R1`
 
@@ -365,15 +372,16 @@ P_spmv1(HBM[25], FP32 packed)
   -> Pcg_Controller
 ```
 
-controller 收到 `AP1` 后覆盖：
+controller 收到 `AP1` 后覆盖 `AP_spmv`，并在同一接收阶段累计 `p_ap1`：
 
 ```text
 AP_spmv(HBM[22]) = AP1 packed FP32
+p_ap1 += P1 * AP1
 ```
 
 ## 10. 第 2 次 PCG 迭代：计算 `alpha1`、更新向量
 
-`dot_p_ap`：
+fused dot：
 
 ```text
 p_ap1 = P1^T AP1
@@ -426,27 +434,26 @@ iterations = 2
 | --- | --- | --- | --- | --- |
 | init `A*x0` | `X_spmv` | `A*x0` stream | `B`、`A*x0` | `R0` |
 | init `z/p` | 不走 SpMV | 无 | `R0`、`M_inv` | `Z0`、`P0`、`P_spmv0` |
-| iter0 `A*p0` | `P_spmv0` | `AP0` stream | `AP0` stream | `AP_spmv=AP0` |
-| iter0 dot | 无 | 无 | `P0`、`AP_spmv(AP0)` | `p_ap0/alpha0` 标量 |
+| iter0 `A*p0` + dot | `P_spmv0` | `AP0` stream | `AP0` stream、`P0` | `AP_spmv=AP0`、`p_ap0/alpha0` 标量 |
 | iter0 update xr | 无 | 无 | `X0/R0/P0/AP0` | `X1/R1` |
 | iter0 update z | 无 | 无 | `R1/M_inv` | `Z1`、`rz1/rr1` |
 | iter0 update p | 无 | 无 | `Z1/P0` | `P1`、`P_spmv1` |
-| iter1 `A*p1` | `P_spmv1` | `AP1` stream | `AP1` stream | `AP_spmv=AP1` |
-| iter1 dot | 无 | 无 | `P1`、`AP_spmv(AP1)` | `p_ap1/alpha1` 标量 |
+| iter1 `A*p1` + dot | `P_spmv1` | `AP1` stream | `AP1` stream、`P1` | `AP_spmv=AP1`、`p_ap1/alpha1` 标量 |
 | iter1 update xr | 无 | 无 | `X1/R1/P1/AP1` | `X2/R2` |
 | iter1 update z | 无 | 无 | `R2/M_inv` | `Z2`、`rz2/rr2` |
 | iter1 update p | 无 | 无 | `Z2/P1` | `P2`、`P_spmv2` |
 
 ## 12. 关键结论
 
-1. `X/R/Z/P` 是 FP64 主状态，最终结果只看 `X`。
+1. `X/R/Z/P` 是 packed `double_v8` FP64 主状态，最终结果只看 `X`。
 2. `X_spmv/P_spmv/AP_spmv` 是为了适配 Cuper FP32 `float_v16` SpMV 的辅助缓冲。
 3. `X_spmv` 只在初始化 `A*x0` 读取，kernel 内不再更新。
 4. `P_spmv` 每轮在 `update_p` 末尾更新，下一轮 SpMV 读取它。
-5. `AP_spmv` 每轮被最新 `A*p` 覆盖，供当前轮 `dot_p_ap/update_xr` 读取。
-6. 当前 full-PCG 不是把 SpMV 输出直接旁路到 dot/update，而是先写 `AP_spmv`
-   HBM，再由 dot/update 读回。
+5. `AP_spmv` 每轮被最新 `A*p` 覆盖，供当前轮 `update_xr` 读取；`p^T AP`
+   在接收 `A*p` 时同步计算。
+6. 当前 full-PCG 不是把 SpMV 输出直接旁路到 `update_xr`，而是先写 `AP_spmv`
+   HBM，再由 `update_xr` 读回。
 7. 优化共用 SpMV service 会同时影响 init 的 `A*x0` 和每轮的 `A*p`；优化
-   `dot_p_ap/update_xr/update_z/update_p` 只影响 PCG 迭代部分。
+   `iter_spmv_recv_dot/update_xr/update_z/update_p` 只影响 PCG 迭代部分。
 8. 两次迭代不是简单两倍 `1iter`，因为初始化只做一次，而 `P_spmv/AP_spmv`
    每轮覆盖复用。

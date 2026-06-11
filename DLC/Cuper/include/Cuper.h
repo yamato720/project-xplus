@@ -23,6 +23,8 @@
 constexpr INDEX_TYPE PE_NUM                 = 8;
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 16;
 constexpr INDEX_TYPE ROW_HBM_NUM            = 4;
+// SparseSlice 的二维块边长。当前为 16 * 4 = 64，也就是 host 会先把
+// 矩阵按 64 x 64 的 slice 块归类，再继续映射到 PE/HBM。
 constexpr INDEX_TYPE Slice_SIZE             = HBM_CHANNEL_NUM * ROW_HBM_NUM;
 constexpr INDEX_TYPE BATCH_SIZE             = 8192 / Slice_SIZE;
 constexpr INDEX_TYPE WINDOWS                = 10;

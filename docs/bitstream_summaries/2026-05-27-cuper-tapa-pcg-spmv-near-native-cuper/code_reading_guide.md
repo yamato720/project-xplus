@@ -60,7 +60,7 @@ full `CuperPcg(...)` 的阶段可以按“init 专用 / PCG 迭代专用 / init+
 | `init_spmv` | `init_spmv_stream` | 共用 SpMV service 的 init 调用 + init 专用 R 生成 | 通过 `vector_source=X` 读 `X_spmv`，算 `A*x0`，controller 生成 `R=B-A*x0` |
 | `init_zp` | `init_zp_reduce` | init 专用 | 读 `R/M_inv`，初始化 `Z/P`，累计初始 `rz/rr`，并生成第一轮 `P_spmv` |
 | `iter_spmv` | `iter_spmv_stream` | 共用 SpMV service 的 PCG 调用 + 迭代专用 AP 接收 | 通过 `vector_source=P` 读 `P_spmv`，算 `A*p`，controller 把 packed AP 暂存到 `AP_spmv`，当前 demo 同时计算 `p^T AP` |
-| `dot_p_ap` | `iter_dot_p_ap_lanes` | PCG 迭代专用，嵌在 `iter_spmv_stream` 内 | 读 FP64 `P` 和当前 AP packet，转 double 后算 `p^T AP` |
+| `dot_p_ap` / `p^T AP` | `iter_dot_p_ap_lanes` | PCG 迭代专用子循环，嵌在 `iter_spmv_stream` 内 | 读 FP64 `P` 和当前 AP packet，转 double 后算 `p^T AP`；当前不再有独立 stage timer |
 | `update_xr` | `update_xr` | PCG 迭代专用 | 更新 FP64 `X/R`，读 `AP_spmv` 时做 FP32->FP64 转换 |
 | `update_z` | `update_z_reduce` | PCG 迭代专用 | 根据新 `R` 更新 `Z`，累计新的 `rz/rr` |
 | `update_p` | `update_p` | PCG 迭代专用 | 更新 FP64 `P`，同时写下一轮 SpMV 需要的 packed FP32 `P_spmv` |
@@ -68,8 +68,9 @@ full `CuperPcg(...)` 的阶段可以按“init 专用 / PCG 迭代专用 / init+
 `Pcg_SpElement_list_ptr_Loader`、`Pcg_Vector_Loader`、`Pcg_Matrix_Loader[0..15]`、
 `Pcg_Core[0..15]`、`Pcg_Accumulator[0..15]`、`Pcg_Vector_Checker[0..7]` 和
 `Pcg_Mult_Sort_Tree` 是 init 和迭代共用的 SpMV service。若优化这些共享模块，
-理论上会同时影响 `init_spmv` 和 `iter_spmv`；若只改 `dot_p_ap/update_xr/update_p`
-这类 controller 阶段，主要影响 1iter/多 iter 增量，不会等比例加速 init-only。
+理论上会同时影响 `init_spmv` 和 `iter_spmv`；若只改
+`iter_spmv_recv_dot/update_xr/update_z/update_p` 这类 controller 阶段，主要影响
+1iter/多 iter 增量，不会等比例加速 init-only。
 
 ## 推荐阅读顺序
 
@@ -255,77 +256,90 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
 | Metrics | 含义 |
 | --- | --- |
 | `[0..3]` | `rz/rr/p_ap/alpha` |
-| `[4..15]` | packed memory packet work，不是实测 cycle |
+| `[4]` | `float_v16` packet 数 |
+| `[5..15]` | packed memory packet work / packet 数，不是实测 cycle |
 | `[16..24]` | `Pcg_Stage_Timer` 统计 cycle |
 
 板上看性能时，优先对比：
 
 - `pcg-spmv-ms`：full-PCG 内嵌 SpMV 的 `spmv_total/spmv_avg`；
-- `pcg-control-ms`：`pcg_non_spmv_total`、`unaccounted_controller`、
+- `pcg-control-ms`：`pcg_vector_total`、`unaccounted_controller`、
   `kernel_minus_controller`；
-- `stage-ms`：`init_zp`、`dot_p_ap`、`update_xr`、`update_z`、`update_p`；
+- `stage-ms`：`init_spmv`、`init_zp`、`iter_spmv_recv_dot`、`update_xr`、
+  `update_z`、`update_p`；
 - `[timing-ms] kernel_reported`：host/XRT 看到的完整 kernel 时间。
 
 当前 packed timing demo 的 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
-发 begin/end event，raw stage timer 里的 `dot_p_ap` 可能为 0；`p^T AP` 的真实
-工作被并入 `iter_spmv_stream`。更新 HTML 或比较历史数据时，应把这一项标成
-`iter recv + dot` 或显式写出新旧口径差异，不能直接把 raw `iter_spmv` 当作纯
-SpMV 接收成本。
+发 begin/end event，host 也不再把 `dot_p_ap` 作为独立 `stage-ms` 字段打印；
+`p^T AP` 的真实工作被并入 `iter_spmv_stream`。更新 HTML 或比较历史数据时，
+应把这一项标成 `iter recv + dot` 或显式写出新旧口径差异，不能直接把 raw
+`iter_spmv` 当作纯 SpMV 接收成本。
 
 `1iter kernel` 没有去掉 init；它包含 `init_spmv + init_zp + iter_spmv +
 dot/update + 收尾`。要看迭代增量，应使用 `1iter kernel - init-only kernel`，
-再结合 `pcg-control-ms` 判断增量落在 SpMV、PCG 非 SpMV 还是 controller 外。
+再结合 `pcg-control-ms` 判断增量落在 SpMV、`pcg_vector_total` 还是
+controller 外。
 
 ## 当前最大规模观测锚点
 
-下面这组数据来自 2026-05-29 full-PCG demo-only 分层重跑：
+下面这组数据来自 2026-05-31 packed timing demo-only 上板测试：
 
 ```text
-logs/pcg_breakdown_20260529_hostsplit/
+logs/codex_packed_timing_demo_test_20260531_195109_proper/
 dataset: thermal2
 N = 1,228,045
 nnz = 8,580,313
 ```
 
-这是目前最好观察优化方向的最大数据点。单位均为 ms：
+这是目前观察 packed `double_v8` 架构优化方向的最大数据点。单位均为 ms：
 
 | 指标 | 数值 | 读法 |
 | --- | ---: | --- |
-| `init-only kernel` | 421.5857 | 只跑初始化路径，包含 `A*x0 + init_zp + 收尾` |
-| `1iter kernel` | 1960.0357 | 完整 `init + 1 次 PCG 迭代 + 收尾`，没有去掉 init |
-| `kernel delta` | 1538.4499 | `1iter kernel - init-only kernel`，近似第 1 次迭代增量 |
-| `controller_total` | 1948.9022 | FPGA 内 controller 计到的主体时间 |
-| `controller 外` | 11.1335 | `kernel_reported - controller_total`，主要是边界/drain/同步余量 |
-| `SpMV 本身` | 184.6013 | `init_spmv + iter_spmv`，full-PCG 内两次 SpMV 合计 |
-| `full-PCG SpMV 单次均值` | 92.3007 | `SpMV 本身 / 2`，仍远慢于 single SpMV demo |
-| `single SpMV demo` | 1.781541 | 当前 one-shot `CuperPcgSpmv` 完整 `thermal2` 的 `spmv_avg` |
-| `PCG 非 SpMV` | 1735.0604 | `init_zp + dot_p_ap + update_xr + update_z + update_p` |
-| `unaccounted ctrl` | 29.2405 | 已命名 stage 之外的 controller 内部余量 |
+| `init-only kernel` | 302.7442 | 只跑初始化路径，包含 `A*x0 + init_zp + 收尾` |
+| `1iter kernel` | 944.1232 | 完整 `init + 1 次 PCG 迭代 + 收尾`，没有去掉 init |
+| `kernel delta` | 641.3790 | `1iter kernel - init-only kernel`，近似第 1 次迭代增量 |
+| `controller_total` | 920.2593 | FPGA 内 controller 计到的主体时间 |
+| `controller 外` | 23.8639 | `kernel_reported - controller_total`，主要是边界/drain/同步余量 |
+| `init_spmv + iter_spmv_recv_dot` | 189.3382 | init SpMV 加迭代 AP 接收和 fused dot |
+| `pcg_vector_total` | 730.9200 | `init_zp + update_xr + update_z + update_p` |
+| `SpMV/recv/dot 占 controller` | 20.6% | 当前不是 controller 内最大项 |
+| `pcg_vector_total 占 controller` | 79.4% | 当前 controller 内主瓶颈 |
+| `unaccounted ctrl` | 约 0.001 | 已命名 stage 之外的 controller 内部余量很小 |
 
 主要阶段：
 
 | 阶段 | 数值 | 归属 |
 | --- | ---: | --- |
-| `init_zp` | 230.7390 | init 专用 |
-| `dot_p_ap` | 187.2422 | PCG 迭代专用 |
-| `update_xr` | 718.4058 | PCG 迭代专用 |
-| `update_p` | 598.6733 | PCG 迭代专用 |
-| `update_z` | 未单列 | PCG 迭代专用；当前聚合 HTML 没有单独展示，不能按“0 成本”解读 |
+| `init_spmv` | 89.7385 | 共用 SpMV service 的 init 调用 |
+| `init_zp` | 197.2362 | init 专用，含 FP64 `rz/rr` reduction |
+| `iter_spmv_recv_dot` | 99.5997 | PCG 迭代专用，含 `A*p` 接收、`AP_spmv` 写入和 `p^T AP` |
+| `update_xr` | 211.3258 | PCG 迭代专用 |
+| `update_z` | 169.0716 | PCG 迭代专用，含 FP64 `rz/rr` reduction |
+| `update_p` | 153.2865 | PCG 迭代专用，同步维护 `P_spmv` |
 
 这组数据给出的优化方向：
 
-1. `PCG 非 SpMV` 占 `1iter kernel` 约 88.5%，当前最大瓶颈在
-   `Pcg_Controller` 内的 FP64 向量更新和归约，不在 controller 外。
-2. `kernel delta` 中约 97.8% 来自 PCG 非 SpMV 增量；如果要降低多迭代时间，
-   优先处理 `update_xr`、`update_p`、`dot_p_ap`。
-3. full-PCG 内 SpMV 单次均值约 `92.30 ms`，而 one-shot single SpMV demo 是
-   `1.78 ms`；这说明 service/control/输出消费路径仍然没有把 Cuper SpMV 喂饱，
-   但它不是当前 `1iter kernel` 的最大占比项。
-4. `update_z` 源码中会读 `R/M_inv`、写 `Z` 并累计 `rz/rr`，完整规模下不应天然为
-   0；若原始 `[pcg-control-ms] update_z` 仍接近 0，应优先排查 stage timer 或
-   HTML 聚合脚本口径，而不是把它当作优化已经完成。
-5. `controller 外` 只有约 `11.13 ms`，大矩阵上不是主瓶颈；优化应先落到
-   controller 里的 HBM 读写、FP32/FP64 转换、副本同步和归约结构。
+1. `B/M_inv/X/R/Z/P` 已改成 512-bit packed `double_v8` 端口，但完整规模下
+   `pcg_vector_total` 仍占 controller 约 79.4%；单纯把端口吃宽还没有解决
+   controller/vector 阶段的吞吐问题。
+2. `init_spmv + iter_spmv_recv_dot` 占 controller 约 20.6%。这里的
+   `iter_spmv_recv_dot` 已包含 `p^T AP`，不能按纯 SpMV 本体解读；当前更合理的
+   判断是瓶颈仍主要在 SpMV 之外。
+3. 优先继续看 `update_xr`、`init_zp/update_z` reduction 和 `update_p`，其次看
+   `iter_spmv_recv_dot` 内 fused dot 的 FP64 recurrence。
+4. `controller 外` 约 `23.86 ms`，比向量阶段小得多；优化应先落到 controller
+   里的 HBM 读写、FP32/FP64 转换、副本同步、stage 串行和归约结构。
+5. 共同成功点 `thermal2_n262144` 仍是当前 packed timing demo `210.3193 ms`
+   慢于 TAPA full-PCG 标准版 `188.8202 ms`，所以它还不是标准替换候选。
+
+2026-05-31 main reduction 实验补充：
+
+- `init_zp` / `update_z` 的 `rz/rr` 已改成 8-bank per-lane accumulator，
+  对应 HLS 约从 II=5 改到 `init_zp` II=4、`update_z` II=2；
+- 同样方法试到 `p^T AP` 时，`iter_spmv_stream` 会变成 II=11，整体接收 AP
+  更慢，所以不要照搬；
+- `update_xr/update_p` 当前 lane 子循环仍可到 II=1，真正问题在外层 packet
+  stage 串行和 HBM 往返，不是单纯给 lane 再加 unroll。
 
 ## Host 侧怎么读
 
@@ -355,10 +369,11 @@ LEGACY_ABI=1
 
 - `pcg-spmv-ms spmv_avg` 是否接近 single SpMV 回归基线；
 - `controller_total` 是否下降；
-- `pcg_non_spmv_total` 是否下降；
-- `dot_p_ap`、`update_xr`、`update_p` 是否下降；
+- `pcg_vector_total` 是否下降；
+- `iter_spmv_recv_dot`、`init_zp/update_z`、`update_xr/update_p` 是否下降；
 - `kernel_reported` 是否下降；
 - 完整 `thermal2` 的 `ctrl=0x0` 失败边界是否变化。
 
 如果 `pcg-spmv-ms` 快了但 `kernel_reported` 几乎不变，说明瓶颈已经转移到
-PCG 非 SpMV 阶段、task graph 同步、service drain，或当前仍未命名的外围时间。
+controller vector/update 阶段、task graph 同步、service drain，或当前仍未命名的
+外围时间。

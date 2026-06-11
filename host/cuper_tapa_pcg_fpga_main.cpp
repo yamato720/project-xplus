@@ -1082,6 +1082,8 @@ int main(int argc, char** argv) {
         stage_times.update_p = cycles_to_ms(metrics[22], stage_clock_period_ns);
         stage_times.controller_total = cycles_to_ms(metrics[23], stage_clock_period_ns);
         stage_times.timer_total = cycles_to_ms(metrics[24], stage_clock_period_ns);
+        const double update_z_stage_ms = cycles_to_ms(metrics[25], stage_clock_period_ns);
+        const double update_p_stage_ms = cycles_to_ms(metrics[26], stage_clock_period_ns);
 
         std::cout << std::fixed << std::setprecision(0);
         std::cout << "[stage-work-packets]"
@@ -1105,6 +1107,18 @@ int main(int argc, char** argv) {
         std::cout << " controller_total=" << metrics[23]
                   << " timer_total=" << metrics[24]
                   << "\n";
+        std::cout << "[worker-cycles]"
+                  << " update_z_stage=" << std::setprecision(0) << metrics[25]
+                  << " update_p_stage=" << metrics[26]
+                  << "\n";
+        std::cout << "[worker-counts]"
+                  << " update_z_commands=" << metrics[27]
+                  << " update_p_commands=" << metrics[28]
+                  << " update_z_double_v8_packets=" << metrics[29]
+                  << " update_p_packed_packets=" << metrics[30]
+                  << " update_z_breakdowns=" << metrics[33]
+                  << " update_p_done=" << metrics[34]
+                  << "\n";
         std::cout << std::scientific << std::setprecision(12);
         std::cout << "[stage-ms]"
                   << " init_spmv=" << stage_times.init_spmv
@@ -1115,6 +1129,10 @@ int main(int argc, char** argv) {
                   << " update_p=" << stage_times.update_p
                   << " controller_total=" << stage_times.controller_total
                   << " timer_total=" << stage_times.timer_total
+                  << "\n";
+        std::cout << "[worker-ms]"
+                  << " update_z_stage=" << update_z_stage_ms
+                  << " update_p_stage=" << update_p_stage_ms
                   << "\n";
         const double pcg_spmv_calls = 1.0 + static_cast<double>(status[1]);
         // metrics[18]/iter_spmv 已经是所有 PCG 迭代 A*p 的累计时间；

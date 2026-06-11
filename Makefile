@@ -64,6 +64,7 @@ CUPER_JACOBI_BUILD_DIR ?= $(ROOT_DIR)/cuper-jacobi-iteration-build
 CUPER_NOTAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-build
 CUPER_NOTAPA_SPMV_4CH_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-spmv-4ch-build
 CUPER_TAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-fpga-u55c-20260525-build
+CUPER_TAPA_PCG_SLR_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-slr-split-build
 CUPER_NOTAPA_FPGA_PCG_BUILD_DIR ?= $(ROOT_DIR)/cuper-notapa-fpga-pcg-build
 # Compatibility alias for older commands; new no-TAPA FPGA-PCG builds use the
 # explicit cuper-notapa-fpga-pcg-build directory.
@@ -89,6 +90,12 @@ CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
 CUPER_SPMV_4CH_CFG := $(CFG_DIR)/connectivity_cuper_spmv_4ch_u55c.cfg
 CUPER_TAPA_PCG_CFG := $(CFG_DIR)/connectivity_cuper_tapa_pcg_u55c.cfg
+CUPER_TAPA_PCG_SLR_CFG ?= $(CFG_DIR)/connectivity_cuper_tapa_pcg_slr_split_u55c.cfg
+CUPER_TAPA_PCG_SLR_HOOK ?= $(SCRIPT_DIR)/vivado_cuper_tapa_pcg_slr_split.tcl
+# Default to observe-only. The forced SLR split variants are useful experiments,
+# but the current full-PCG design is easier to route when Vivado can place the
+# wide SpMV/update/control graph freely.
+CUPER_TAPA_PCG_SLR_MODE ?= observe
 CUPER_TAPA_PCG_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_tapa_pcg_spmv_u55c.cfg
 VIVADO_LINK_DIR := $(TARGET_BUILD_DIR)/_x_temp/link/vivado/vpl
 VIVADO_REPORT_DIR := $(TARGET_BUILD_DIR)/_x_temp/reports/link
@@ -199,6 +206,8 @@ VPP_FLAGS += -t $(TARGET) --platform $(XPLATFORM) --save-temps
 VPP_FLAGS += --temp_dir $(TARGET_BUILD_DIR)/_x_temp
 VPP_FLAGS += -I$(INCLUDE_DIR) -I$(KERNEL_DIR) -I$(ARCHIVED_KERNEL_DIR) -I$(ARCHIVED_INCLUDE_DIR)
 VPP_LDFLAGS += --config $(ARCHIVED_CFG_DIR)/connectivity_u55c.cfg
+CUPER_TAPA_PCG_LINKHOOK_ARGS ?=
+CUPER_TAPA_PCG_LINKHOOK_DEPS ?=
 ifeq ($(TARGET),hw)
 ifeq ($(ENABLE_VIVADO_ANALYSIS),1)
 VPP_LDFLAGS += --config $(VIVADO_ANALYSIS_CFG)
@@ -223,8 +232,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw clean clean-reports
-.PHONY: cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-hw-tmux cuper-jacobi-run-hw
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
 
 all: run-local
 
@@ -480,8 +488,8 @@ $(CUPER_SPMV_XCLBIN): $(CUPER_SPMV_XO) $(CUPER_SPMV_CFG) | $(TARGET_BUILD_DIR) e
 $(CUPER_SPMV_4CH_XCLBIN): $(CUPER_SPMV_4CH_XO) $(CUPER_SPMV_4CH_CFG) | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_SPMV_4CH_CFG) -o $@ $(CUPER_SPMV_4CH_XO)
 
-$(CUPER_TAPA_PCG_XCLBIN): $(CUPER_TAPA_PCG_XO) $(CUPER_TAPA_PCG_CFG) | $(TARGET_BUILD_DIR) env
-	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_CFG) -o $@ $(CUPER_TAPA_PCG_XO)
+$(CUPER_TAPA_PCG_XCLBIN): $(CUPER_TAPA_PCG_XO) $(CUPER_TAPA_PCG_CFG) $(CUPER_TAPA_PCG_LINKHOOK_DEPS) | $(TARGET_BUILD_DIR) env
+	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_CFG) $(CUPER_TAPA_PCG_LINKHOOK_ARGS) -o $@ $(CUPER_TAPA_PCG_XO)
 
 $(CUPER_TAPA_PCG_SPMV_XCLBIN): $(CUPER_TAPA_PCG_SPMV_XO) $(CUPER_TAPA_PCG_SPMV_CFG) | $(TARGET_BUILD_DIR) env
 	$(VITIS_ENV_CMD) cd $(TARGET_BUILD_DIR) && $(VPP) -l $(VPP_FLAGS) --config $(CUPER_TAPA_PCG_SPMV_CFG) -o $@ $(CUPER_TAPA_PCG_SPMV_XO)
@@ -539,6 +547,13 @@ build-cuper-tapa-pcg:
 
 build-cuper-tapa-pcg-hw:
 	$(MAKE) build-cuper-tapa-pcg TARGET=hw
+
+build-cuper-tapa-pcg-slr-split-hw:
+	CUPER_PCG_SLR_MODE="$(CUPER_TAPA_PCG_SLR_MODE)" $(MAKE) _build-cuper-tapa-pcg TARGET=hw \
+		BUILD_DIR="$(CUPER_TAPA_PCG_SLR_BUILD_DIR)" \
+		CUPER_TAPA_PCG_CFG="$(CUPER_TAPA_PCG_SLR_CFG)" \
+		CUPER_TAPA_PCG_LINKHOOK_DEPS="$(CUPER_TAPA_PCG_SLR_HOOK)" \
+		CUPER_TAPA_PCG_LINKHOOK_ARGS="--linkhook.do_first vpl.impl.place_design,$(CUPER_TAPA_PCG_SLR_HOOK)"
 
 _build-cuper-tapa-pcg-spmv: $(CUPER_TAPA_PCG_SPMV_XCLBIN)
 
@@ -635,6 +650,24 @@ cuper-tapa-pcg-hw-tmux:
 	echo "session: project-xplus-cuper-tapa-pcg-hw"; \
 	echo "log: $$log"; \
 	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-hw"; \
+	echo "tail: tail -f $$log"
+
+cuper-tapa-pcg-slr-split-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-tapa-pcg-slr-split-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-tapa-pcg-slr-split-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-slr-split-hw"; \
+		exit 1; \
+	fi
+	@stamp=$$(date +%Y%m%d_%H%M%S); \
+	log="$(LOG_DIR)/cuper_tapa_pcg_slr_split_hw_$${stamp}.log"; \
+	tmux new-session -d -s "project-xplus-cuper-tapa-pcg-slr-split-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) build-cuper-tapa-pcg-slr-split-hw CUPER_TAPA_PCG_SLR_BUILD_DIR='$(CUPER_TAPA_PCG_SLR_BUILD_DIR)' CUPER_TAPA_PCG_SLR_CFG='$(CUPER_TAPA_PCG_SLR_CFG)' CUPER_TAPA_PCG_SLR_HOOK='$(CUPER_TAPA_PCG_SLR_HOOK)' CUPER_TAPA_PCG_SLR_MODE='$(CUPER_TAPA_PCG_SLR_MODE)' 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-tapa-pcg-slr-split-hw"; \
+	echo "log: $$log"; \
+	echo "build_dir: $(CUPER_TAPA_PCG_SLR_BUILD_DIR)"; \
+	echo "xclbin: $(CUPER_TAPA_PCG_SLR_BUILD_DIR)/hw/CuperPcg.xclbin"; \
+	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-slr-split-hw"; \
 	echo "tail: tail -f $$log"
 
 cuper-tapa-pcg-spmv-hw-tmux:

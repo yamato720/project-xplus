@@ -26,6 +26,53 @@ struct PcgStageEvent {
     INDEX_TYPE op;
 };
 
+struct PcgVectorCommand {
+    // controller 发给 PCG 向量 worker 的阶段命令。
+    // stop 非 0 表示退出常驻 worker；row_num 是本轮向量长度；
+    // scalar 用于 alpha/beta 这类阶段标量，未使用时保持 0。
+    INDEX_TYPE stop;
+    INDEX_TYPE row_num;
+    double scalar;
+};
+
+struct PcgUpdateZResult {
+    // update_z worker 完成后返回新的归约标量。
+    // breakdown 非 0 表示 rz/rr 已经产生 NaN。
+    double rz;
+    double rr;
+    INDEX_TYPE breakdown;
+};
+
+struct PcgUpdateZReadPacket {
+    // update_z 的 HBM shell -> compute 数据包。
+    // compute 只看 stream，不直接访问 R/M_inv HBM。
+    double_v8 r;
+    double_v8 minv;
+};
+
+struct PcgUpdateZWritePacket {
+    // update_z compute -> HBM writer 数据包。
+    double_v8 z;
+};
+
+struct PcgUpdatePReadPacket {
+    // update_p 的 HBM shell -> compute 数据包。一个包对应一个
+    // float_v16 P_spmv 输出，也就是最多两个 double_v8 Z/P 输入。
+    double_v8 z_lo;
+    double_v8 p_lo;
+    double_v8 z_hi;
+    double_v8 p_hi;
+    INDEX_TYPE has_hi;
+};
+
+struct PcgUpdatePWritePacket {
+    // update_p compute -> HBM writer 数据包。
+    double_v8 p_lo;
+    double_v8 p_hi;
+    float_v16 p_spmv;
+    INDEX_TYPE has_hi;
+};
+
 // Status[0] 的编码。host 只把 converged/max_iter 当作正常返回；
 // breakdown 表示 p_ap、rz、tau 等数值异常或非法输入。
 static constexpr INDEX_TYPE kPcgStatusConverged = 0;
@@ -53,6 +100,9 @@ static constexpr INDEX_TYPE kPcgStageCount = 8;
 // packed 向量输入来源。X 只用于初始化 A*x0，P 用于每轮 A*p。
 static constexpr INDEX_TYPE kPcgVectorSourceX = 0;
 static constexpr INDEX_TYPE kPcgVectorSourceP = 1;
+// FP64 reduction banking. Each lane gets several independent accumulators so
+// the outer packet loop is not limited by one scalar FP adder recurrence.
+static constexpr INDEX_TYPE kPcgReductionBanks = 8;
 // PCG 分母过小直接判 breakdown，避免 alpha/beta 生成 inf/NaN 后污染全向量。
 static constexpr double kPcgBreakdownEps = 1.0e-30;
 
@@ -134,6 +184,25 @@ inline void pcg_send_spmv_stop(
     pcg_broadcast_spmv_command(Command_out,
                                Matrix_Command_out,
                                pcg_make_spmv_stop_command());
+}
+
+inline PcgVectorCommand pcg_make_vector_command(const INDEX_TYPE row_num,
+                                                const double scalar) {
+#pragma HLS inline
+    PcgVectorCommand command;
+    command.stop = 0;
+    command.row_num = row_num;
+    command.scalar = scalar;
+    return command;
+}
+
+inline PcgVectorCommand pcg_make_vector_stop_command() {
+#pragma HLS inline
+    PcgVectorCommand command;
+    command.stop = 1;
+    command.row_num = 0;
+    command.scalar = 0.0;
+    return command;
 }
 
 inline double pcg_abs(const double value) {

@@ -5,12 +5,12 @@
 - 主线：`cuper-tapa-pcg`
 - 状态：2026-05-31 packed timing 实验 demo 已完成 `hw` bitstream 构建和
   demo-only init-only / 1iter 上板测试；未替换当前标准版
-- 持续目标：优化 full `CuperPcg(...)` 的 controller/dot/update 路径，降低
+- 持续目标：优化 full `CuperPcg(...)` 的 controller/vector/update 路径，降低
   `1iter kernel_reported` 和 `controller_total`
 - 当前 demo 方向：single SpMV one-shot demo 已接近满血 `Cuper(...)` 并能跑完整
-  `thermal2`，后续作为回归基线；主优化转向 full-PCG 中的 `dot_p_ap`、
-  `update_xr`、`update_p`、`P_spmv` / `AP_spmv` 消费、HBM 访问和 service
-  drain/stop 开销。
+  `thermal2`，后续作为回归基线；主优化转向 full-PCG 中的
+  `iter_spmv_recv_dot`、`update_xr`、`update_z`、`update_p`、HBM 往返和 service
+  drain/stop 开销。其中 `iter_spmv_recv_dot` 已包含 `p^T AP`。
 - 记录策略：该目录是当前目标的唯一持续记录目录；后续围绕此目标的源码改动、
   demo bitstream 和测试结论继续更新这里，不再每版新建目录。正式 `source.diff`
   只在测试确认性能提升，或用户明确要求保留功能边界修复补丁后更新
@@ -36,6 +36,8 @@
 - `receive_path_demo.md`
 - `receive_path_changes.md`
 - `receive_path_source.diff`
+- `slr_utilization_history.md` 记录 2026-05-24 到 2026-06-02 几代 Cuper/TAPA
+  构建的 SLR 使用、SLL 连接和 route 失败归因。
 
 这些历史文件对应旧 demo UUID `9474ef8e-571b-ae13-f898-890e3af8ae5e`，不再对应
 后续任何同名 `cuper-tapa-pcg-fpga-u55c-20260529-demo.xclbin`。
@@ -52,7 +54,8 @@ full-PCG demo 槽已换成 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` packe
 
 ## 这一版做了什么
 
-这一版不是单纯调频率，而是改 `CuperPcg` full-PCG 内部 SpMV 的周边数据路径：
+这一版不是单纯调频率，而是改 `CuperPcg` full-PCG 内部 SpMV 的周边数据路径和
+controller 主状态访问：
 
 1. 新增 `X_spmv` / `P_spmv` 两个 packed `float_v16` HBM 向量入口。
 2. `Pcg_Vector_Loader` 不再等待 controller 从 `double X/P` 逐元素打包，而是直接
@@ -60,8 +63,11 @@ full-PCG demo 槽已换成 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` packe
 3. 新增 `AP_spmv` packed `float_v16` HBM 缓冲。
 4. `iter_spmv` 收到 Cuper 的 `A*p` 输出后直接写 `AP_spmv[packet]`，避免先拆成
    16 个 double 写入旧 `AP`。
-5. `dot_p_ap` 和 `update_xr` 改为按 `AP_spmv` 包读取，再在 lane 内转 double。
-6. host 默认 ABI 更新到 `AP_spmv/X_spmv/P_spmv`，同时保留 `--legacy-abi`，方便
+5. 当前 packed timing 版把 `p^T AP` 合入 `iter_spmv_stream`，接收 `A*p` 时同步
+   读 packed `P` 并做 FP64 累加；`AP_spmv` 仍供 `update_xr` 后续读取。
+6. `B/M_inv/X/R/Z/P` 主状态从标量 `double` mmap 改为 packed `double_v8` mmap，
+   每个 HBM packet 一次承载 8 个 FP64 lane。
+7. host 默认 ABI 更新到 `AP_spmv/X_spmv/P_spmv`，同时保留 `--legacy-abi`，方便
    用旧 host 路径跑当前标准 bitstream。
 
 ## 预期收益
@@ -69,15 +75,16 @@ full-PCG demo 槽已换成 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` packe
 历史 packed feed/AP 目标收益曾首先看 `iter_spmv`，其次才看
 `controller_total` 和 `kernel_reported`。2026-05-29 single SpMV demo 已显示
 SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG 的
-`controller_total`、`dot_p_ap`、`update_xr`、`update_p` 和
+`controller_total`、`iter_spmv_recv_dot`、`init_zp`、`update_xr`、`update_z`、
+`update_p` 和
 `1iter kernel_reported`。
 
 如果板上实测有效，合理表现应是：
 
 - `1iter kernel_reported` 下降；
 - `controller_total` 下降；
-- `dot_p_ap`、`update_xr`、`update_p` 至少一个大头阶段明显下降；
-- `AP path = iter recv + dot_p_ap` 不应恶化；
+- `iter_spmv_recv_dot`、`update_xr`、`update_z`、`update_p` 至少一个大头阶段明显下降；
+- `iter recv + dot` 不应恶化；
 - 完整 `thermal2` 仍能返回，数值 diff 仍通过。
 
 ## 当前验证结论
@@ -148,6 +155,16 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
   1iter `kernel_reported=944.123210 ms`，比归档 controller-split demo 的
   `954.0779 ms` 略快；`thermal2_n262144` 的 1iter 为
   `210.319328 ms`，仍慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。
+  当前 `B/M_inv/X/R/Z/P` 已是 512-bit `double_v8` 端口，但完整 `thermal2`
+  1iter 中 controller 内 `pcg_vector_total=730.9200 ms`，`init_spmv +
+  iter_spmv_recv_dot=189.3382 ms`；瓶颈仍主要在 controller/vector 阶段，而不是
+  raw SpMV 本体。
+- 2026-05-31 main reduction 源码实验完成到软件仿真和 XO/HLS 报告：
+  `init_zp` / `update_z` 的 `rz/rr` FP64 reduction 改成 8-bank 累加器。
+  `thermal2_n16` 与 `thermal2_n1024` 的 1iter 软件仿真通过；HLS 中
+  `init_zp` packet loop 从 II=5 降到 II=4，`update_z` packet loop 从 II=5
+  降到 II=2。`p^T AP` banked reduction 试验会把 `iter_spmv_stream` 拉到
+  II=11，已撤回；`2.1` 保持为存档对照，实际改动在 `main` 工作区。
 
 尚未完成：
 
@@ -174,8 +191,9 @@ SpMV 本体接近满血 Cuper，因此当前收益应优先体现在 full-PCG �
 - 结论：它是“full-PCG packed timing 实验候选”，不是标准替换候选。
 
 下一步不要继续把主要精力放在 single SpMV 本体上；它作为回归基线保留。full-PCG
-优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径，先拆
-`dot_p_ap`、`update_xr`、`update_p` 的 HBM 读写和 lane 内 FP64 计算，再看
-controller/service 收尾同步。更新 HTML 时，`TAPA PCG 分段时间` 和
+优化应直接面向 `detail/pcg_controller.hpp` 及相关 service/timer 路径。当前
+`init_zp/update_z` reduction 已有局部改善，下一步更应看 `update_xr/update_p`
+是否能从单 controller 串行阶段拆出去，以及 AP stream 能否直接喂给后续 dot/update，
+减少 `AP_spmv` 写回再读。更新 HTML 时，`TAPA PCG 分段时间` 和
 `Init 与 1iter 差值` 必须展示当前 full-PCG demo-only 数据；single SpMV demo 只进入
 SpMV/demo-only 和 SpMV 对比区域。

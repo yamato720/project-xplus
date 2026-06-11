@@ -189,6 +189,11 @@ timeout 300s "$host" data/suitesparse/Schmid/csr/<dataset> \
 - 完整 `thermal2` 的 1iter 中 `iter recv + dot=99.5997 ms`、
   `update_xr=211.3258 ms`、`update_z=169.0716 ms`、`update_p=153.2865 ms`、
   `init_zp=197.2362 ms`。SpMV/接收路径下降，但向量更新和归约仍是主项。
+- 当前 `B/M_inv/X/R/Z/P` 已走 512-bit packed `double_v8` 端口，不再是每次只搬
+  一个 double；但完整 `thermal2` 1iter 中 `pcg_vector_total=730.9200 ms`，
+  `init_spmv + iter_spmv_recv_dot=189.3382 ms`。这说明端口宽度已经修过，
+  剩余瓶颈仍主要在 controller 内 stage 串行、FP64 reduction、HBM 往返和
+  lane-wise compute/store，而不是 raw SpMV 本体。
 - 暂不建议晋级为标准版，也不更新正式 `source.diff`。
 
 ## 2026-05-31 controller-split 实验构建

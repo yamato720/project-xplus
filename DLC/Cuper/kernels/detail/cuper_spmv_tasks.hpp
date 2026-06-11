@@ -2,6 +2,21 @@
 
 // Private implementation header for kernels/Cuper.cpp.
 // It contains task definitions and should not be included by another translation unit.
+//
+// 本文件是纯 Cuper one-shot SpMV 数据通路：
+//
+//   SpElement_list_ptr + Matrix_data[0..15] + X
+//       -> loader
+//       -> 16 级 Core 链
+//       -> Accumulator
+//       -> Vector_Checker
+//       -> Mult_Sort_Tree
+//       -> Y_out
+//
+// 它不包含 PCG 的 r/z/p/m_inv/alpha/beta/status，也没有 command/stop service
+// 协议。full CuperPcg 的 `pcg_spmv_service.hpp` 会复用这里的底层 helper，但
+// 常驻服务控制在 Pcg_* task 中实现；standalone `Cuper(...)` 和当前
+// `CuperPcgSpmv(...)` single-SpMV demo 走的是本文件的一次性 task graph。
 
 #include <algorithm>
 #include <cstdint>
@@ -12,6 +27,11 @@
 #include "Cuper.h"
 
 struct Matrix_Mult_X {
+    // Core 输出给 Accumulator 的一拍局部乘积包。
+    //
+    // 一个 512-bit Matrix_data beat 解出 8 个 64-bit SpElement slot；每个 slot
+    // 产生一个 row 编码和一个 value * x[col] 的局部乘积。row[17]=1 表示 padding，
+    // Accumulator 会跳过。
     ap_uint<18> row[8];
     float_v8 val;
 };
@@ -25,6 +45,8 @@ inline void Async_Read(tapa::async_mmap<T1> &A,
                       ) {
 
 #pragma HLS inline
+    // 通用 async_mmap 读壳：尽量发读地址，并在 read_data 可用时转发到 stream。
+    // i_request 记录已发起请求数，i_response 记录已收到并写入 FIFO 的数据数。
     if((i_request < A_len) && !A.read_addr.full()) {
         A.read_addr.try_write(i_request);
         ++i_request;
@@ -41,6 +63,8 @@ inline void Cuper_ReadSpElementPtrPackets(const INDEX_TYPE packet_count,
                                           tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
                                           tapa::ostream<INDEX_TYPE> &PE_Param) {
 #pragma HLS inline
+    // 读取 batch 边界表 SpElement_list_ptr[0..Batch_num]，写入 PE_Param 链首。
+    // 这是一份全局共享索引表，不属于任何 Matrix_data channel。
 cuper_read_sp_element_ptr_packets:
     for (INDEX_TYPE i_request = 0, i_response = 0; i_response < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=800
@@ -57,6 +81,7 @@ inline void Cuper_ReadFloatV16Packets(const INDEX_TYPE packet_count,
                                       tapa::async_mmap<float_v16> &Vector_in,
                                       tapa::ostream<float_v16> &Vector_X_Stream) {
 #pragma HLS inline
+    // 读取 packed 输入向量。每个 float_v16 对应 16 个连续 x 元素。
 cuper_read_float_v16_packets:
     for (INDEX_TYPE i_request = 0, i_response = 0; i_response < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
@@ -73,6 +98,8 @@ inline void Cuper_ReadMatrixPackets(const INDEX_TYPE packet_count,
                                     tapa::async_mmap<ap_uint<512>> &Matrix_data,
                                     tapa::ostream<ap_uint<512>> &Matrix_A_Stream) {
 #pragma HLS inline
+    // 读取单个 HBM channel 的 packed 矩阵流。每个 ap_uint<512> beat
+    // 包含 8 个 64-bit SpElement slot。
 cuper_read_matrix_packets:
     for (INDEX_TYPE i_request = 0, i_response = 0; i_response < packet_count;) {
 #pragma HLS loop_tripcount min=1 max=10000
@@ -93,6 +120,15 @@ void SpElement_list_ptr_Loader(const INDEX_TYPE Batch_num,
                                tapa::ostream<INDEX_TYPE> &PE_Param
                               ) {
 
+    // standalone Cuper 的参数/边界 loader。
+    //
+    // 先向 Core 链广播一次全局参数：
+    //   Batch_num, Row_num, Iteration_num, Column_num
+    // 随后每次 SpMV iteration 都读取 Batch_num + 1 个 batch 边界：
+    //   SpElement_list_ptr[0..Batch_num]
+    //
+    // Core 和 Accumulator 后续用相邻边界 [ptr[b], ptr[b+1]) 判断第 b 个
+    // column-batch 要消费哪些 Matrix_data beat。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
 
     PE_Param.write(Batch_num);
@@ -117,6 +153,9 @@ void Vector_Loader(const INDEX_TYPE Iteration_num,
                    tapa::ostream<float_v16> &Vector_X_Stream
                   ) {
 
+    // 输入向量 loader。每次 SpMV iteration 都从 X 读取完整 Column_num 长度
+    // 的 packed float_v16 向量，并送入 Vector_X_Stream[0]。16 个 Core 会
+    // 串接转发同一份 X，每级只缓存当前 batch 需要的列窗口。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE Batch_num_X    = Cuper_NumFloatV16Packets(Column_num);
 
@@ -136,6 +175,9 @@ void Matrix_Loader(const INDEX_TYPE Iteration_num,
                    tapa::ostream<ap_uint<512>> &Matrix_A_Stream
                   ) {
 
+     // 单 HBM channel 的矩阵 loader。Cuper 顶层会 join 出 16 个实例，
+     // 分别读取 Matrix_data_0..15；每个实例每轮读取 Matrix_len 个
+     // 512-bit beat。
      const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
 
 iter:
@@ -168,6 +210,19 @@ inline void Cuper_Core_Compute_Round(
     tapa::ostream<INDEX_TYPE> &Vector_Y_Param,
     tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream) {
 #pragma HLS inline
+    // 单个 Core 的一次 SpMV round。
+    //
+    // 数据组织：
+    //   1. 从 PE_Param_in 读取本轮第 0 个 batch 的 start_32；
+    //   2. 对每个 column batch：
+    //      - 从 Vector_X_Stream_in 读取当前列窗口，缓存到 local_X，并转发给下级 Core；
+    //      - 从 PE_Param_in 读取 end_32；
+    //      - 消费 Matrix_A_Stream[start_32, end_32) 中的 512-bit beat；
+    //      - 每个 beat 解出 8 个 SpElement，计算 val * local_X[col]；
+    //      - 输出 Matrix_Mult_X(row[8], val[8]) 给对应 Accumulator。
+    //
+    // PE_Param 和 Vector_X_Stream 都会继续转发到下一 Core，Matrix_A_Stream
+    // 只属于当前 Core/HBM channel。
     VALUE_TYPE local_X[X_BRAM_DEPTH][Slice_WIDTH];
 
 #pragma HLS bind_storage variable=local_X latency=2
@@ -264,6 +319,9 @@ void Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
           tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream
          ) {
 
+    // Core task 壳。读取并转发全局参数，然后按 Iteration_num 重复调用
+    // Cuper_Core_Compute_Round。默认 X_TABLE 未开启时，这是纯 one-shot/repeat
+    // SpMV Core；没有 PCG command 或 stop token。
     const INDEX_TYPE Batch_num     = PE_Param_in.read();
     const INDEX_TYPE Row_num       = PE_Param_in.read();
     const INDEX_TYPE Iteration_num = PE_Param_in.read();
@@ -378,6 +436,8 @@ inline void Adder(ap_uint<18> addr,
                  ) {
 
 #pragma HLS inline
+    // 非 PINGPONG 路径：一个 64-bit URAM word 同时保存偶/奇两个 FP32 部分和。
+    // addr[0] 选择低/高 32 bit，addr[17:1] 是局部累加地址。
 
     ap_uint<64> part_val_u64     = local_part_Y[addr(17, 1)];
     ap_uint<32> part_val_d0_u32  = part_val_u64(31,  0);
@@ -406,6 +466,8 @@ inline void Adder_p(ap_uint<17> addr,
                    ) {
 
 #pragma HLS inline
+    // PINGPONG 路径：偶/奇行已经拆到 ping/pong 两个数组中，所以 addr
+    // 只作为局部 URAM 索引。
     ap_uint<32> part_val_u32     = local_part_Y[addr];                                      
         
     VALUE_TYPE part_val_plus_new = tapa::bit_cast<VALUE_TYPE>(part_val_u32) + val_new;  
@@ -433,6 +495,12 @@ inline void Cuper_Accumulator_Compute_Round(
     ap_uint<64> local_part_Y_ping[8][URAM_DEPTH]) {
 #endif
 #pragma HLS inline
+    // 单个 Accumulator 的一次 SpMV round。
+    //
+    // 它先清零本地部分和数组，再按 batch 边界消费 Matrix_Mult_X：
+    //   row[17] == 0: 有效局部乘积，累加到 row 编码对应的槽位；
+    //   row[17] == 1: padding，跳过。
+    // 最后按 Cuper 输出顺序吐出 float_v2，后续 checker/sort-tree 会过滤和拼包。
     const INDEX_TYPE num_v_init = Cuper_NumAccumulatorInitGroups(Row_num);
     const INDEX_TYPE num_v_out = Cuper_NumAccumulatorOutputs(Row_num);
 
@@ -515,6 +583,9 @@ void Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                  tapa::ostream<float_v2>      &Vector_Y_Stream
                 ) {
     
+    // Accumulator task 壳。每个 HBM channel/Core 对应一个 Accumulator 实例。
+    // Vector_Y_Param 提供 Batch_num/Row_num/Iteration_num 以及每个 batch 的
+    // start/end；Matrix_Mult_Vector_Stream 提供局部乘积。
     const INDEX_TYPE Batch_num      = Vector_Y_Param.read();
     const INDEX_TYPE Row_num        = Vector_Y_Param.read();
     const INDEX_TYPE Iteration_num  = Vector_Y_Param.read();
@@ -571,6 +642,8 @@ inline bool Cuper_TryForwardCheckerValue(
     tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
     tapa::ostream<float_v2> &Vector_Y_Stream_Aftck) {
 #pragma HLS inline
+    // Checker 的一个非阻塞转发步骤。它按 16 路 Accumulator 输出的固定顺序
+    // 轮询 float_v2，丢弃超出真实 Row_num 的 padding 输出。
     if (!Vector_Y_Stream[c_idx].empty() && !Vector_Y_Stream_Aftck.full()) {
         float_v2 tmp;
         Vector_Y_Stream[c_idx].try_read(tmp);
@@ -594,6 +667,8 @@ inline bool Cuper_TryForwardCheckerValue(
 inline bool Cuper_TryPackFloatV16(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
                                   tapa::ostream<float_v16> &Vector_Y_Stream_Ans) {
 #pragma HLS inline
+    // Sort tree 的一个非阻塞拼包步骤：8 路 float_v2 -> 1 路 float_v16，
+    // 恢复成连续 16 个 y 元素的输出包。
     bool all_ready = true;
 cuper_pack_ready_check:
     for (int i = 0; i < 8; ++i) {
@@ -625,6 +700,8 @@ void Vector_Checker(const INDEX_TYPE Iteration_num,
                     tapa::ostream<float_v2> &Vector_Y_Stream_Aftck
                    ) {
 
+    // 过滤 accumulator 为对齐产生的多余 float_v2。num_pe_output 是硬件内部
+    // 对齐后的输出数，num_out 是真实 Row_num 需要的 float_v16 包数。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_pe_output = Cuper_NumCheckerPeOutputs(Row_num);
     const INDEX_TYPE num_out = Cuper_NumFloatV16Packets(Row_num);
@@ -645,6 +722,8 @@ out:
 void Mult_Sort_Tree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
                     tapa::ostream<float_v16>    &Vector_Y_Stream_Ans
                    ) {
+    // 常驻拼包 task。Cuper 顶层用 detach 启动它；Vector_Writer 写够 Row_num
+    // 对应的输出包后，kernel 的 join task 自然完成。
     for(;;) {
 #pragma HLS pipeline II=1
         (void)Cuper_TryPackFloatV16(Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans);
@@ -655,6 +734,8 @@ void Vector_Writer(const INDEX_TYPE Iteration_num,
                    tapa::istream<float_v16> &Vector_Y_Stream_Ans,
                    tapa::async_mmap<float_v16> &Y_out
                   ) {
+    // 最终写回 task。每轮 SpMV 写 Cuper_NumFloatV16Packets(Row_num) 个
+    // float_v16 到 Y_out；最后一个包的尾部 lane 可能是 padding。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_ite_Y = Cuper_NumFloatV16Packets(Row_num);
     
@@ -683,6 +764,7 @@ iter:
 }
 
 void Destroy_int(tapa::istream<INDEX_TYPE> &PE_Param) {
+    // 消费 16 级 Core 链尾的 PE_Param，避免最后一级 Core 因尾流无人读而反压。
     for(;;) {
 #pragma HLS pipeline II=1
         INDEX_TYPE tmp; 
@@ -691,6 +773,7 @@ void Destroy_int(tapa::istream<INDEX_TYPE> &PE_Param) {
 }
 
 void Destroy_float_v16(tapa::istream<float_v16> &Vector_X_Stream) {
+    // 消费 16 级 Core 链尾的 X 向量流，避免最后一级 Core 因尾流无人读而反压。
     for(;;) {
 #pragma HLS pipeline II=1
         float_v16 tmp; 

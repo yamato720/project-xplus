@@ -49,7 +49,7 @@ packed `double_v8`，并把 `Metrics[5..15]` 明确为 packed memory packet work
 | 形态 | 入口/文件 | 作用 |
 | --- | --- | --- |
 | 满血 Cuper SpMV | `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` | 当前 standalone TAPA Cuper SpMV 标准基准 |
-| full-PCG controller/update | `CuperPcg(...)` / `detail/pcg_controller.hpp` + `detail/pcg_spmv_service.hpp` | 当前性能优化对象，重点是 `dot_p_ap`、`update_xr`、`update_p` 和 service/timer 开销 |
+| full-PCG controller/update | `CuperPcg(...)` / `detail/pcg_controller.hpp` + `detail/pcg_spmv_service.hpp` | 当前性能优化对象，重点是 fused `iter_spmv_recv_dot`、`init_zp/update_z` reduction、`update_xr/update_p` 和 service/timer 开销 |
 
 ## 代码改动
 
@@ -68,8 +68,10 @@ packed `double_v8`，并把 `Metrics[5..15]` 明确为 packed memory packet work
 
 - `CuperPcg` 顶层把旧 `double* AP` 替换为 `float_v16* AP_spmv`。
 - `iter_spmv` 收到 `Spmv_in` 后直接写 `AP_spmv[packet]`。
-- `dot_p_ap` 和 `update_xr` 改成按包读取 `AP_spmv`，lane 内转 double 参与
-  FP64 计算。
+- 早期 packed feed/AP 版中，`dot_p_ap` 和 `update_xr` 改成按包读取
+  `AP_spmv`，lane 内转 double 参与 FP64 计算。
+- 当前 packed timing 版中，`p^T AP` 已合入 `iter_spmv_stream` 接收路径；
+  `AP_spmv` 仍写入 HBM，供 `update_xr` 读取。
 - connectivity 中 `CuperPcg_1.AP` 改为 `CuperPcg_1.AP_spmv`，仍放在 HBM[22]。
 
 ### host ABI
@@ -146,14 +148,62 @@ HLS 报告显示：
 DATA/KERNEL/HBM clock 为 `172/500/405 MHz`。它比归档 controller-split demo
 频率低，但完整 `thermal2` 1iter 仍从 `954.0779 ms` 降到 `944.1232 ms`。
 
+完整 `thermal2` 1iter 的关键拆分为：
+
+| 项 | ms | 占 controller |
+| --- | ---: | ---: |
+| `controller_total` | 920.2593 | 100.0% |
+| `init_spmv + iter_spmv_recv_dot` | 189.3382 | 20.6% |
+| `pcg_vector_total` | 730.9200 | 79.4% |
+| `init_zp` | 197.2362 | 21.4% |
+| `update_xr` | 211.3258 | 23.0% |
+| `update_z` | 169.0716 | 18.4% |
+| `update_p` | 153.2865 | 16.7% |
+| `kernel_minus_controller` | 23.8639 | 不属于 controller |
+
+因此当前结论是：端口宽度已经从“每次一个 double”改成 512-bit packed
+`double_v8`，但有效瓶颈没有转成 raw SpMV 本体。剩余大头仍是 controller 内阶段
+串行、FP64 reduction recurrence、HBM 往返和 lane-wise compute/store 组合。
+
+### 2026-05-31 main reduction 实验
+
+本轮在 `main` 上继续做一个较小范围的 controller 修改，`2.1` 只作为存档/对照分支：
+
+- 给 `init_zp` 和 `update_z` 的 `rz/rr` FP64 reduction 增加
+  `kPcgReductionBanks=8` 的分银行累加器；
+- packet loop 改成按 lane unroll、按 bank 累加，loop 尾部再归约到标量；
+- 不保留更激进的 `update_xr/update_p` 外层全展开/外层 pipeline 实验，因为此前
+  HLS 报告显示它会把 `iter_spmv_stream/update_xr/update_p` 拉差；
+- 试过给 `p^T AP` 也做同样的 banked reduction，但 `iter_spmv_stream` 会变成
+  II=11，接收 AP 流本身被拖慢，因此撤回。
+
+当前保留版本的软件仿真通过 `thermal2_n16` 和 `thermal2_n1024`
+`MAX_ITERS=1 TAU=1e-100 DIFF_TOL=1e-3`。XO/HLS 报告入口：
+`cuper-tapa-pcg-main-reduction-xo-build/hw_emu/tapa_CuperPcg/report/Pcg_Controller/csynth.rpt`。
+
+关键 HLS 变化：
+
+| loop | packed timing 基线 | 当前 main reduction |
+| --- | ---: | ---: |
+| `init_zp` packet loop | II=5 | II=4 |
+| `update_z` packet loop | II=5 | II=2 |
+| `iter_dot_p_ap_lanes` | II=5 | II=5 |
+| `update_xr_compute_lanes` | II=1 | II=1 |
+| `update_p_compute_lanes` | II=1 | II=1 |
+
+结论：这个 patch 是保守的 reduction 局部改善，不是全局控制器拆分。下一步如果继续
+提速，主力仍应放在把 `update_xr/update_p` 从单 controller 串行阶段里拆出去，或把
+AP stream 直接喂给后续 dot/update 流程，减少 `AP_spmv` 写回再读。
+
 ## 预期影响
 
 当前后续预期改善：
 
 - 降低 `1iter kernel_reported`；
 - 降低 `controller_total`；
-- 降低 `dot_p_ap`、`update_xr`、`update_p` 这几个大头阶段；
-- 保持 `AP path = iter recv + dot_p_ap` 不恶化；
+- 降低 `iter_spmv_recv_dot`、`init_zp/update_z`、`update_xr/update_p`
+  这几个大头阶段；
+- 保持 `iter recv + dot` 不恶化；
 - 保持完整 `thermal2` 可返回和数值 diff 通过。
 
 潜在代价：
@@ -253,10 +303,11 @@ DATA/KERNEL/HBM clock 为 `172/500/405 MHz`。它比归档 controller-split demo
 
 1. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
    破坏 SpMV 成功边界和 diff。
-2. 直接分析 full `CuperPcg(...)` 的 `dot_p_ap`、`update_xr`、`update_p` 大规模
-   退化，不再用 single SpMV 本体解释 full-PCG 1iter 倒挂。
-3. 继续分析当前 controller/update 路径里 `update_z_reduce`、`iter_dot_p_ap_lanes`
-   和 packed FP64 HBM 访问的大规模瓶颈；
+2. 直接分析 full `CuperPcg(...)` 的 `iter_spmv_recv_dot`、`init_zp/update_z`、
+   `update_xr/update_p` 大规模退化，不再用 single SpMV 本体解释 full-PCG 1iter
+   倒挂。
+3. 继续分析当前 controller/update 路径里 FP64 reduction recurrence、stage
+   串行化和 packed FP64 HBM 访问的大规模瓶颈；
    只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。
 4. 如后续仍要验证完整 `thermal2` full-run，需要按长跑任务单独安排，不再用 host
    默认 60 秒超时判断；本轮只确认禁用 host 超时后长时间仍未返回。
