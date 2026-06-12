@@ -15,3 +15,5 @@
 - 当前测试流程和已记录数据：`testing.md`
 - 上板 `Finish` 挂住的排障和修改建议：`hardware_finish_hang_fix_suggestions.md`
 - `Finish` 不返回且根因待定时的下一版 debug 改进方案：`deadlock_debug_improvement_plan.md`
+- 2026-06-12 tail-drain demo 仍 `Finish` 不返回后的候选原因与细粒度监测点：
+  `finish_nonreturn_monitoring_points.md`
