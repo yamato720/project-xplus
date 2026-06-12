@@ -9,6 +9,7 @@ source "$ROOT_DIR/scripts/env_u55c.sh"
 
 INPUT_XO="${1:-$BUILD_DIR/CuperJacobiIteration.xo}"
 OUTPUT_XCLBIN="${2:-$BUILD_DIR/CuperJacobiIteration.xclbin}"
+CONNECTIVITY_CFG="$ROOT_DIR/cfg/connectivity.cfg"
 
 if [[ ! -f "$INPUT_XO" ]]; then
   echo "Missing XO: $INPUT_XO" >&2
@@ -18,11 +19,21 @@ fi
 
 mkdir -p "$BUILD_DIR/logs" "$BUILD_DIR/reports" "$BUILD_DIR/vpp_tmp"
 
+if [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
+  CONNECTIVITY_CFG="$BUILD_DIR/connectivity_deadlock_debug.cfg"
+  cp "$ROOT_DIR/cfg/connectivity.cfg" "$CONNECTIVITY_CFG"
+  {
+    echo
+    echo "# Optional deadlock debug output buffer."
+    echo "sp=CuperJacobiIteration_1.Debug:HBM[24]"
+  } >> "$CONNECTIVITY_CFG"
+fi
+
 cmd=(
   v++ --link
   --target hw
   --platform "$XPLATFORM"
-  --config "$ROOT_DIR/cfg/connectivity.cfg"
+  --config "$CONNECTIVITY_CFG"
   --temp_dir "$BUILD_DIR/vpp_tmp"
   --log_dir "$BUILD_DIR/logs"
   --report_dir "$BUILD_DIR/reports"

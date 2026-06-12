@@ -391,7 +391,7 @@ done
 ### 5.6 TAPA Jacobi iteration software/TAPA simulation
 
 `cuper-tapa-jacobi` 是第五条 Cuper 主线，源码在
-`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有第一版
+`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有 deadlock-debug ABI
 `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 调试 artifact，但
 routed timing 未收敛，也还没有上板数据。已记录的是 host + TAPA software run。
 它做普通 Jacobi iteration：
@@ -410,14 +410,14 @@ MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2
 
 | Dataset | 规模 | 迭代 | 当前状态 | 关键输出 |
 | --- | --- | ---: | --- | --- |
-| `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 timed 版已通过 | `Final diff=0.73218`, `Error Num=0`, `float_v16_packets=3904`, `spmv_update=143582 cycles` |
-| `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 timed 版已通过 | `Final diff=1.11631`, `Error Num=0`, `float_v16_packets=4096`, `spmv_update=41698 cycles` |
-| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 已通过，需用 timed/root target 补跑 | `Final diff=1.41496`, `Error Num=0` |
+| `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 deadlock-debug 单 `X` ABI 已通过 | `Final buffer=0`, `Final diff=0`, `Error Num=0`, `float_v16_packets=3904`, `spmv_update=103856 cycles` |
+| `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 deadlock-debug 单 `X` ABI 已通过 | `Final buffer=0`, `Final diff=0`, `Error Num=0`, `float_v16_packets=4096`, `spmv_update=36081 cycles` |
+| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 已通过，需用当前 root target 补跑 | `Final diff=1.41496`, `Error Num=0` |
 
 Jacobi 测试至少记录：
 
 - `Status[0..2]`：退出状态、最终 buffer、完成迭代数。
-- `Metrics[0..7]`：`final_diff`、迭代数、每轮包数、累计包数、SpMV+update cycle、
+- `Metrics[0..7]`：当前固定迭代版的 `Metrics[0]` 暂为占位 0，之后是迭代数、每轮包数、累计包数、SpMV+update cycle、
   controller total cycle、timer total cycle、平均每轮 SpMV+update cycle。
 - host 输出：`[jacobi-timing-work]`、`[jacobi-stage-cycles]`、
   `[jacobi-stage-ms]`、`Error Num`。

@@ -15,7 +15,6 @@ REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 HOST_DIR := $(ROOT_DIR)/host
 INCLUDE_DIR := $(ROOT_DIR)/include
-SRC_DIR := $(ROOT_DIR)/src
 KERNEL_DIR := $(ROOT_DIR)/kernels
 CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
@@ -29,7 +28,7 @@ help:
 	@echo "Cuper Jacobi iteration TAPA service-SpMV subproject"
 	@echo ""
 	@echo "本子项目也可从 Project-XPlus 根 Makefile 的 cuper-jacobi-* target 调用。"
-	@echo "当前阶段：保留可重复触发的 Cuper single-SpMV service，并接 Jacobi update/timing debug。"
+	@echo "当前阶段：保留可重复触发的 Cuper single-SpMV service，并在 Cuper 输出端融合 Jacobi 更新。"
 	@echo ""
 	@echo "Useful paths:"
 	@echo "  ROOT_DIR    = $(ROOT_DIR)"
@@ -37,7 +36,6 @@ help:
 	@echo "  KERNEL_DIR  = $(KERNEL_DIR)"
 	@echo "  INCLUDE_DIR = $(INCLUDE_DIR)"
 	@echo "  CFG_DIR     = $(CFG_DIR)"
-	@echo "  SRC_DIR     = $(SRC_DIR)"
 	@echo "  DATA_DIR    = $(DATA_DIR)"
 	@echo "  BUILD_DIR   = $(BUILD_DIR)"
 	@echo "  REPORT_DIR  = $(REPORT_DIR)"
@@ -61,25 +59,25 @@ clean:
 	rm -rf "$(BUILD_DIR)"
 
 launch launcher:
-	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
 
 build-host:
-	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/build_host.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/build_host.sh"
 
 run-sw:
-	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
 
 regression-sw:
-	@BUILD_DIR="$(BUILD_DIR)" CASES="$(strip $(CASE) $(CASES))" "$(PYTHON)" "$(SCRIPT_DIR)/regression_sw.py" --mode "$(or $(MODE),quick)" $(if $(NO_BUILD),--no-build) $(if $(ALLOW_MISSING),--allow-missing) $(if $(TIMEOUT_SEC),--timeout-sec "$(TIMEOUT_SEC)") $(if $(TAU),--tau "$(TAU)")
+	@BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") CASES="$(strip $(CASE) $(CASES))" "$(PYTHON)" "$(SCRIPT_DIR)/regression_sw.py" --mode "$(or $(MODE),quick)" $(if $(NO_BUILD),--no-build) $(if $(ALLOW_MISSING),--allow-missing) $(if $(TIMEOUT_SEC),--timeout-sec "$(TIMEOUT_SEC)") $(if $(TAU),--tau "$(TAU)")
 
 build-xo:
-	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/build_xo_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/build_xo_u55c.sh"
 
 link-xclbin:
-	BUILD_DIR="$(BUILD_DIR)" "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
 
 hw-tmux:
-	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
 
 run-hw:
-	BUILD_DIR="$(BUILD_DIR)" "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"

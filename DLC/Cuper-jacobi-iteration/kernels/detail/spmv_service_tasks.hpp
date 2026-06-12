@@ -42,8 +42,9 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
     }
 }
 
-// 单路 HBM 矩阵 loader。顶层会 join 出 16 个实例，各自读取自己的 Matrix_data[channel]。
+// 单路 HBM 矩阵预取 loader。顶层会 join 出 16 个实例，各自读取自己的 Matrix_data[channel]。
 // Matrix_len 是每路都要读取的 512-bit beat 数，由 host 预处理后的最大边界给出。
+// 它只把矩阵 beat 灌入 Matrix_A_Stream FIFO；Core 是否启动由 PE_Param/X command 决定。
 void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
                               tapa::async_mmap<ap_uint<512>> &Matrix_data,
                               tapa::istream<CuperSpmvServiceCommand> &Command_in,
@@ -108,7 +109,8 @@ void SpmvService_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
 }
 
 // Accumulator 按 Cuper 内部 row 编码累加每路 Core 的局部乘积。
-// 它输出的是按硬件对齐顺序排列的 float_v2，后面还需要 checker/sort 恢复连续 SpMV 结果。
+// 它输出的是按硬件对齐顺序排列的 float_v2；Jacobi update stage 直接消费该顺序，
+// 并在做 x_next 更新时顺手丢弃 padding。
 void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                              tapa::istream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
                              tapa::ostream<float_v2>      &Vector_Y_Stream) {
@@ -154,63 +156,5 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                                         Vector_Y_Stream,
                                         local_part_Y_ping);
 #endif
-    }
-}
-
-// Checker 过滤 accumulator 为对齐产生的 padding 输出。
-// 这里是常驻 task：没有数据时会同时检查 Stop_in，避免 controller stop 后仍然空等。
-void SpmvService_VectorChecker(const INDEX_TYPE Row_num,
-                               tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
-                               tapa::ostream<float_v2> &Vector_Y_Stream_Aftck,
-                               tapa::istream<INDEX_TYPE> &Stop_in) {
-    const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(Row_num);
-    const INDEX_TYPE num_out = spmv_service_num_float_v16_packets(Row_num);
-
-    for (;;) {
-#pragma HLS loop_flatten off
-    wait_round:
-        for (;;) {
-#pragma HLS pipeline II=1
-            // 以第 0 路输出作为“一轮已有数据”的轻量触发；真正转发时
-            // Cuper_TryForwardCheckerValue 会按固定顺序轮询各路输入。
-            if (!Vector_Y_Stream[0].empty()) {
-                break;
-            }
-            if (!Stop_in.empty()) {
-                INDEX_TYPE stop;
-                Stop_in.try_read(stop);
-                return;
-            }
-        }
-    out:
-        for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < num_pe_output;) {
-#pragma HLS loop_tripcount min=1 max=1800
-#pragma HLS pipeline II=1
-            (void)Cuper_TryForwardCheckerValue(num_pe_output,
-                                                num_out,
-                                                i,
-                                                c_idx,
-                                                o_idx,
-                                                Vector_Y_Stream,
-                                                Vector_Y_Stream_Aftck);
-        }
-    }
-}
-
-// Sort tree 把 8 路 float_v2 checker 输出重新拼成连续 float_v16 的 SpMV 结果包。
-// 输出直接进入 Jacobi_Update_Service，不再写 standalone Cuper 的 Y_out。
-void SpmvService_MultSortTree(tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
-                              tapa::ostream<float_v16> &Vector_Y_Stream_Ans,
-                              tapa::istream<INDEX_TYPE> &Stop_in) {
-    for (;;) {
-#pragma HLS pipeline II=1
-        if (!Stop_in.empty()) {
-            INDEX_TYPE stop;
-            Stop_in.try_read(stop);
-            return;
-        }
-
-        // 非阻塞尝试拼包；输入未齐时本周期不输出，等待下一拍继续轮询。
-        (void)Cuper_TryPackFloatV16(Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans);
     }
 }

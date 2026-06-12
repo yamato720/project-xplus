@@ -3,7 +3,7 @@
 `Cuper-jacobi-iteration` 是从 `DLC/Cuper` 拆出的独立 TAPA/HLS 实验目录。
 
 当前阶段已经做了一版 Jacobi iteration demo：host 侧先把矩阵拆成 `A = D + R`，
-保留 service 化 single SpMV 数据通路。kernel 读 `X0/X1` 时先把 `x_old` 取负，
+保留 service 化 single SpMV 数据通路。kernel 读单个 `X` buffer 时先把 `x_old` 取负，
 让 Cuper service 计算 `-R*x_old`，再由后级 update stage 计算 Jacobi 的新解。
 
 它已经接入 `Project-XPlus` 根 `Makefile` 的 `cuper-jacobi-*` 转发 target；
@@ -43,7 +43,8 @@ $$
 x^{(k+1)} = D^{-1}(b - R x^{(k)})
 $$
 
-4. `X0/X1` 做双缓冲；`Status[1]` 返回最终解所在 buffer。
+4. 写回端完成整轮后才反馈下一轮 token，因此当前实现用单个 `X` buffer 原地更新；
+   `Status[1]` 固定为 `0`。
 5. `Metrics[4..7]` 追加 Jacobi stage cycle，用 host 打印 `[jacobi-stage-cycles]` 和
    `[jacobi-stage-ms]`。
 6. host 支持 Matrix Market `.mtx` 输入，也支持 Project-XPlus CSR 目录
@@ -67,7 +68,7 @@ $$
 
 ## 当前测试状态
 
-当前已经生成第一版 `CuperJacobiIteration.xclbin` 并同步为
+当前已经生成 deadlock-debug ABI `CuperJacobiIteration.xclbin` 并同步为
 `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`。这只是 demo artifact：
 routed timing 未收敛，也还没有上板性能数据。详细测试流程见 `docs/testing.md`。
 
@@ -75,15 +76,15 @@ routed timing 未收敛，也还没有上板性能数据。详细测试流程见
 
 | 数据集 | 迭代 | 状态 |
 | --- | ---: | --- |
-| `data/matrices/cant.mtx` | 2 | 当前 timed 版通过，`Error Num=0` |
-| `../../data/suitesparse/Schmid/csr/thermal2_n65536` | 1 | 当前 timed 版通过，`Error Num=0` |
-| `../../data/suitesparse/Schmid/csr/thermal2_n262144` | 1 | 早期 software run 通过，需用当前 timed/root target 补跑 |
+| `data/matrices/cant.mtx` | 2 | 当前 deadlock-debug 单 `X` ABI 通过，`Error Num=0` |
+| `../../data/suitesparse/Schmid/csr/thermal2_n65536` | 1 | 当前 deadlock-debug 单 `X` ABI 通过，`Error Num=0` |
+| `../../data/suitesparse/Schmid/csr/thermal2_n262144` | 1 | 早期 software run 通过，需用当前 root target 补跑 |
 
 当前 demo bitstream：
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` | `a7c95d3c-ec98-c287-67be-d81f71f7c95e` | `a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172` | 未收敛，WNS `-1.203 ns` |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` | `b4664f5e-8cd6-0f7d-56ae-28384fce6400` | `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5` | 未收敛，WNS `-2.575 ns` |
 
 ## 常用命令
 

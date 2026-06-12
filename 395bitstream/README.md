@@ -39,8 +39,9 @@ DLC/Cuper-jacobi-iteration/
 这条主线的顶层是 `CuperJacobiIteration`，普通 Jacobi 迭代公式为
 `x_next=D^{-1}(b-Rx_old)`，不是 Jacobi 预条件子 PCG。当前代码已经接入根
 `Makefile` 的 `cuper-jacobi-*` 目标，并完成 software/TAPA simulation smoke：
-`cant.mtx` `MAX_ITERS=2`、`thermal2_n65536` `MAX_ITERS=1` 均为当前 timed 版通过，
-`thermal2_n262144` 早期 software run 通过但还需用 timed/root target 补跑。
+`cant.mtx` `MAX_ITERS=2`、`thermal2_n65536` `MAX_ITERS=1` 均为当前
+deadlock-debug 单 `X` ABI 通过，`thermal2_n262144` 早期 software run 通过但还需用
+当前 root target 补跑。
 当前已有一个 demo 候选进入 Jacobi demo 槽，但还没有上板测试数据，也不是标准
 bitstream。版本记录见
 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
@@ -51,19 +52,26 @@ TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
 cuper-tapa-jacobi-u55c-20260611-demo.xclbin
 ```
 
-这版是 `CuperJacobiIteration` 第一版硬件 demo artifact。它不替换任何标准文件；
-当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。demo xclbin UUID 为
-`a7c95d3c-ec98-c287-67be-d81f71f7c95e`，SHA256 为
-`a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172`。
-最终 xclbin info 中 DATA clock 为 220 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 442 MHz。构建目录为 `cuper-jacobi-iteration-build/`。
+这版是 `CuperJacobiIteration` deadlock-debug ABI 硬件 demo artifact。它覆盖了
+同名 Jacobi demo 槽，但不替换任何标准文件；当前 `cuper-tapa-jacobi` 仍然没有标准
+bitstream。demo xclbin UUID 为
+`b4664f5e-8cd6-0f7d-56ae-28384fce6400`，SHA256 为
+`1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5`。
+最终 xclbin info 中 DATA clock 为 169 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz，DATA achieved 为 169.2 MHz。构建目录为
+`cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/`。
 
-注意这版实现阶段完成并已成功封装 `.xclbin`，但 routed timing 未收敛：
-WNS `-1.203 ns`，TNS `-22607.805 ns`，failing endpoints `58206`；
-主要失败在 `clk_kernel_00_unbuffered_net`，`hbm_aclk` 也有 WNS `-0.040 ns`。
-因此它只作为调试/同步 demo artifact，不建议晋级标准。原始 tmux 构建在最后
-`xclbinutil` 包装阶段因本地 XRT 2.18 缺 Boost 1.83 失败；之后使用 Vitis 2022.2
-自带 `xclbinutil` 从包装阶段恢复成功。
+当前 ABI 使用单个原地更新 `X` buffer，不再使用旧 demo 的 `X0/X1` 双缓冲；
+`Status`、`Metrics` 和 deadlock `Debug` buffer 共同映射到 HBM[24]。注意这版
+VPL implementation 和 `.xclbin` 封装都已完成，但 routed timing 仍未收敛：
+WNS `-2.575 ns`，TNS `-56069.028 ns`，failing endpoints `96241`；hold 为
+0 个 failing endpoint，worst hold slack `0.005 ns`。因此它只作为调试/同步
+demo artifact，不建议晋级标准，也还没有上板测试数据。
+
+被覆盖的上一版同名 Jacobi demo UUID 为
+`a7c95d3c-ec98-c287-67be-d81f71f7c95e`，SHA256 为
+`a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172`。上一版
+testing 结论只作为历史记录，不能套用到当前这个 `.xclbin` 文件。
 
 TAPA Cuper / FPGA-PCG 当前归档文件：
 

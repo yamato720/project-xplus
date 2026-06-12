@@ -80,13 +80,15 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
 - `DLC/Cuper-jacobi-iteration` is the fifth Cuper mainline (`cuper-tapa-jacobi`), not
   Jacobi-preconditioned PCG. Its top is `CuperJacobiIteration(...)`: host splits `A=D+R`,
   the vector loader feeds `-x_old`, the Cuper service produces `-R*x_old`, and the update
-  stage writes `x_next=(b+(-R*x_old))*diag_inv` into `X0/X1`. It is wired into the root
-  `Makefile` through `cuper-jacobi-*` targets and currently reports `[jacobi-stage-cycles]`
-  / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current records are software/TAPA
-  simulation plus one debug xclbin artifact only:
-  `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`. That artifact is not
-  timing-clean (routed WNS -1.203 ns) and has not been board-tested, so there is still no
-  Jacobi standard xclbin.
+  stage writes `x_next=(b+(-R*x_old))*diag_inv` back into the single `X` buffer. It is wired
+  into the root `Makefile` through `cuper-jacobi-*` targets and currently reports
+  `[jacobi-stage-cycles]` / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current
+  records are software/TAPA simulation plus one deadlock-debug xclbin artifact only:
+  `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` (UUID
+  `b4664f5e-8cd6-0f7d-56ae-28384fce6400`, SHA256
+  `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5`). That artifact is not
+  timing-clean (routed WNS -2.575 ns, TNS -56069.028 ns) and has not been board-tested, so
+  there is still no Jacobi standard xclbin.
 - The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
   update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,
   `update_p`, `P_spmv` / `AP_spmv` consumption, controller HBM access patterns, stage

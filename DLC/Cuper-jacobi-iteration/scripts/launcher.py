@@ -116,6 +116,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 "set -uo pipefail",
                 f"cd {shell_quote(root)}",
                 f"export BUILD_DIR={shell_quote(build_dir)}",
+                *(["export JACOBI_DEADLOCK_DEBUG=1"] if os.environ.get("JACOBI_DEADLOCK_DEBUG") not in {None, "", "0"} else []),
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",
                 "date",
                 "rc=0",

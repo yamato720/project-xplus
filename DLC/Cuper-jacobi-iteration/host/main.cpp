@@ -42,6 +42,32 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
     return cycles * clock_period_ns * 1.0e-6;
 }
 
+#ifdef JACOBI_DEADLOCK_DEBUG
+void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
+    const INDEX_TYPE packed_event = debug_data[2];
+    const INDEX_TYPE source = (packed_event >> 24) & 0xff;
+    const INDEX_TYPE phase = (packed_event >> 16) & 0xff;
+    const INDEX_TYPE lane = packed_event & 0xffff;
+
+    cout << "[jacobi-deadlock-debug] heartbeat=" << debug_data[0]
+         << " event_count=" << debug_data[1]
+         << " last_source=" << source
+         << " last_phase=" << phase
+         << " last_lane=" << lane
+         << " last_value=" << debug_data[3]
+         << " stop_marker=" << debug_data[15]
+         << endl;
+
+    cout << "[jacobi-deadlock-debug-slots]";
+    for (INDEX_TYPE index = 16; index < 48; ++index) {
+        if (debug_data[index] != 0) {
+            cout << " d" << index << "=" << debug_data[index];
+        }
+    }
+    cout << endl;
+}
+#endif
+
 bool IsCsrDatasetDir(const fs::path& path) {
     // Project-XPlus CSR 数据目录的最小约定：三数组文本文件必须同时存在。
     // b.txt 是可选 RHS，不参与这里的目录判定。
@@ -168,8 +194,7 @@ bool PrepareJacobiVectorsAndR(const INDEX_TYPE n,
                               vector<VALUE_TYPE>& R_Val,
                               vector<VALUE_TYPE>& B,
                               vector<VALUE_TYPE>& Diag_inv,
-                              vector<VALUE_TYPE>& X0,
-                              vector<VALUE_TYPE>& X1) {
+                              vector<VALUE_TYPE>& X) {
     // 如果数据集没有 b.txt，就令真实解 x*=ones，并用 b=A*ones 构造 RHS。
     // 这样 CPU reference 和 FPGA kernel 可以直接比较数值输出。
     if (!has_input_b) {
@@ -189,7 +214,7 @@ bool PrepareJacobiVectorsAndR(const INDEX_TYPE n,
 
     for (INDEX_TYPE row = 0; row < n; ++row) {
         // Jacobi 需要 D^{-1}，所以每行必须能找到非零对角项。
-        // kernel 端只消费 Diag_inv，避免在 update stage 再做除法。
+        // kernel 端只消费 Diag_inv，避免在 Cuper 输出更新侧再做除法。
         bool found_diag = false;
         VALUE_TYPE diag_value = 0.0f;
         R_RowPtr[row] = static_cast<INDEX_TYPE>(R_ColIdx.size());
@@ -207,8 +232,7 @@ bool PrepareJacobiVectorsAndR(const INDEX_TYPE n,
             return false;
         }
         Diag_inv[row] = 1.0f / diag_value;
-        X0[row] = 0.0f;
-        X1[row] = 0.0f;
+        X[row] = 0.0f;
     }
     R_RowPtr[n] = static_cast<INDEX_TYPE>(R_ColIdx.size());
     return true;
@@ -223,33 +247,28 @@ INDEX_TYPE RunJacobiCpu(const INDEX_TYPE n,
                         const vector<VALUE_TYPE>& B,
                         const vector<VALUE_TYPE>& Diag_inv,
                         vector<VALUE_TYPE>& X_ref,
-                        VALUE_TYPE& final_diff,
-                        INDEX_TYPE& final_buffer) {
+                        VALUE_TYPE& final_diff) {
     // Hardware debug runs fixed-count Jacobi iterations. Keep the CPU reference
     // on the same contract so verification does not depend on tau early-exit.
     (void)tau;
-    // CPU reference 使用和 FPGA 相同的双缓冲语义：
-    // read_from_x1=0 表示读 x0 写 x1，下一轮再读 x1 写 x0。
-    vector<VALUE_TYPE> x0(n, 0.0f);
-    vector<VALUE_TYPE> x1(n, 0.0f);
+    // CPU reference 使用和 FPGA 相同的单 buffer 合约：
+    // 每轮先根据完整旧 X 算出 x_next，再整体替换 X，避免变成 Gauss-Seidel。
+    vector<VALUE_TYPE> x(n, 0.0f);
+    vector<VALUE_TYPE> x_next(n, 0.0f);
     vector<VALUE_TYPE> rx(n, 0.0f);
     const vector<VALUE_TYPE> zero(n, 0.0f);
-    INDEX_TYPE read_from_x1 = 0;
-    final_buffer = 0;
     final_diff = 0.0f;
 
     for (INDEX_TYPE iter = 0; iter < max_iters; ++iter) {
-        vector<VALUE_TYPE>& x_old = read_from_x1 ? x1 : x0;
-        vector<VALUE_TYPE>& x_next = read_from_x1 ? x0 : x1;
         // FPGA 侧把对角项从 SpMV 矩阵里移除，并通过输入取负得到 -R*x_old。
         // CPU reference 直接算 R*x_old 再执行 b-rx，数学口径相同，方便逐元素比较。
-        SpMV_CPU_CSR(n, n, static_cast<INDEX_TYPE>(R_Val.size()), R_RowPtr, R_ColIdx, R_Val, x_old, zero, rx);
+        SpMV_CPU_CSR(n, n, static_cast<INDEX_TYPE>(R_Val.size()), R_RowPtr, R_ColIdx, R_Val, x, zero, rx);
 
         VALUE_TYPE diff_max = 0.0f;
         for (INDEX_TYPE row = 0; row < n; ++row) {
             const VALUE_TYPE next =
                 (B[row] - rx[row]) * Diag_inv[row];
-            const VALUE_TYPE diff = std::fabs(next - x_old[row]);
+            const VALUE_TYPE diff = std::fabs(next - x[row]);
             x_next[row] = next;
             if (diff > diff_max) {
                 diff_max = diff;
@@ -257,11 +276,10 @@ INDEX_TYPE RunJacobiCpu(const INDEX_TYPE n,
         }
 
         final_diff = diff_max;
-        final_buffer = read_from_x1 ? 0 : 1;
-        read_from_x1 = read_from_x1 ? 0 : 1;
+        x.swap(x_next);
     }
 
-    X_ref = final_buffer == 1 ? x1 : x0;
+    X_ref = x;
     return max_iters;
 }
 
@@ -297,52 +315,8 @@ int main(int argc, char* argv[]) {
     const bool read_csr_dir = IsCsrDatasetDir(input_path);
     INDEX_TYPE m, n, nnzR, isSymmetric;
 
-#ifdef BINARY_READ
-    // binary 读入路径：一次性读取矩阵尺寸和 CSR 数据。
-    // CSR 三元组含义：
-    //   RowPtr[i]..RowPtr[i + 1] 是第 i 行非零元范围；
-    //   ColIdx[j] 是非零元列号；
-    //   Val[j] 是非零元值。
-    vector<INDEX_TYPE> RowPtr;
-    vector<INDEX_TYPE> ColIdx;
-    vector<VALUE_TYPE> Val;
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read binary: \t\t\t" << "ON" << endl;
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read Matrix Size...";
-
-    // 输入：filename。
-    // 输出：m/n/nnzR/isSymmetric 和 CSR(RowPtr, ColIdx, Val) 都由函数填充。
-    Read_binary_matrix_2_CSR(filename,
-                             m,
-                             n,
-                             nnzR,
-                             isSymmetric,
-                             RowPtr,
-                             ColIdx,
-                             Val
-                            );
-    cout << "  \t\tDone" << endl;
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Matrix Size: \t\t\t" << m << " x " << n << endl;
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "NNZ: \t\t\t\t" << nnzR << endl;
-
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read Matrix Data...";
-    cout << "  \t\tDone" << endl;
-
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Allocate Memory Space...";
-
-    vector<INDEX_TYPE> RowIdx_COO;
-    vector<INDEX_TYPE> ColIdx_COO;
-    vector<VALUE_TYPE> Val_COO;
-    vector<VALUE_TYPE> Col_X_COO;
-
-    vector<VALUE_TYPE> X(n);
-    vector<VALUE_TYPE> Y(m);
-    vector<VALUE_TYPE> Y_CPU(m);
-    vector<VALUE_TYPE> Y_CPU_Slice(m);
-    vector<VALUE_TYPE> Y_Device(m);
-#else
     // Matrix Market 读入路径：先读尺寸，再分配 CSR/COO/向量空间。
     // 这里的 VALUE_TYPE/INDEX_TYPE 来自 Cuper.h，当前分别是 float/int。
-    cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read binary: \t\t\t" << "OFF" << endl;
     cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read CSR dir: \t\t\t" << (read_csr_dir ? "ON" : "OFF") << endl;
     cout << "[" << setw(18) << setfill(' ') << "Read Matrix" << "] " << "Read Matrix Size...";
 
@@ -400,7 +374,6 @@ int main(int argc, char* argv[]) {
                           Val
                          );
     }
-#endif
 
     cout << "  \t\tDone" << endl;
 
@@ -411,16 +384,14 @@ int main(int argc, char* argv[]) {
 
     const INDEX_TYPE max_iters = EnvInt("MAX_ITERS", 1);
     const VALUE_TYPE tau = EnvFloat("TAU", 1.0e-5f);
-    // B/Diag_inv 是只读向量；X0/X1 是 kernel 内外共享的解向量双缓冲。
+    // B/Diag_inv 是只读向量；X 是 kernel 内外共享的解向量原地更新 buffer。
     // Matrix_data 后续只打包 R=A-D 的非对角部分。
     vector<VALUE_TYPE> B(n, 0.0f);
     vector<VALUE_TYPE> Diag_inv(n, 0.0f);
-    vector<VALUE_TYPE> X0(n, 0.0f);
-    vector<VALUE_TYPE> X1(n, 0.0f);
+    vector<VALUE_TYPE> X_vec(n, 0.0f);
     vector<VALUE_TYPE> X_ref(n, 0.0f);
     vector<VALUE_TYPE> X_Device(n, 0.0f);
     VALUE_TYPE cpu_diff = 0.0f;
-    INDEX_TYPE cpu_final_buffer = 0;
     bool has_input_b = false;
 
     if (read_csr_dir) {
@@ -448,8 +419,7 @@ int main(int argc, char* argv[]) {
                                   R_Val,
                                   B,
                                   Diag_inv,
-                                  X0,
-                                  X1)) {
+                                  X_vec)) {
         return 1;
     }
     const INDEX_TYPE r_nnzR = static_cast<INDEX_TYPE>(R_Val.size());
@@ -604,8 +574,7 @@ int main(int argc, char* argv[]) {
                                               B,
                                               Diag_inv,
                                               X_ref,
-                                              cpu_diff,
-                                              cpu_final_buffer);
+                                              cpu_diff);
     auto end_cpu = std::chrono::steady_clock::now();
     double time_cpu = std::chrono::duration_cast<std::chrono::nanoseconds>(end_cpu - start_cpu).count();
     time_cpu *= 1e-9;
@@ -622,18 +591,19 @@ int main(int argc, char* argv[]) {
     INDEX_TYPE vector_channel_size = ((vector_column_size + 1023) / 1024) * 1024;
     aligned_vector<VALUE_TYPE> B_fpga_data(vector_channel_size, 0.0f);
     aligned_vector<VALUE_TYPE> Diag_inv_fpga_data(vector_channel_size, 0.0f);
-    aligned_vector<VALUE_TYPE> X0_fpga_data(vector_channel_size, 0.0f);
-    aligned_vector<VALUE_TYPE> X1_fpga_data(vector_channel_size, 0.0f);
+    aligned_vector<VALUE_TYPE> X_fpga_data(vector_channel_size, 0.0f);
 
     for(INDEX_TYPE i = 0; i < n; ++i) {
         B_fpga_data[i] = B[i];
         Diag_inv_fpga_data[i] = Diag_inv[i];
-        X0_fpga_data[i] = X0[i];
-        X1_fpga_data[i] = X1[i];
+        X_fpga_data[i] = X_vec[i];
     }
 
     aligned_vector<INDEX_TYPE> Status_fpga_data(16, 0);
     aligned_vector<double> Metrics_fpga_data(16, 0.0);
+#ifdef JACOBI_DEADLOCK_DEBUG
+    aligned_vector<INDEX_TYPE> Debug_fpga_data(64, 0);
+#endif
     cout << "  \tDone" << endl;
 
     // FPGA Jacobi
@@ -648,18 +618,24 @@ int main(int argc, char* argv[]) {
     // 参数对应 CuperJacobiIteration(...) ABI：
     //   SpElement_list_ptr_fpga -> batch 边界表
     //   Matrix_fpga_data        -> 16 路 HBM 矩阵数据，reinterpret 为 ap_uint<512>
-    //   B/Diag_inv/X0/X1       -> packed Jacobi 向量
+    //   B/Diag_inv/X           -> packed Jacobi 向量
     //   Status/Metrics         -> kernel 返回状态
+#ifdef JACOBI_DEADLOCK_DEBUG
+    //   Debug                  -> 可选 deadlock debug 槽位，只有宏打开时进入 ABI
+    cout << "\n[jacobi-deadlock-debug] enabled: Debug buffer ABI is active" << endl;
+#endif
     double kernel_time = tapa::invoke(CuperJacobiIteration,
                                       bitstream,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
                                       tapa::read_only_mmap<float>(B_fpga_data).reinterpret<float_v16>(),
                                       tapa::read_only_mmap<float>(Diag_inv_fpga_data).reinterpret<float_v16>(),
-                                      tapa::read_write_mmap<float>(X0_fpga_data).reinterpret<float_v16>(),
-                                      tapa::read_write_mmap<float>(X1_fpga_data).reinterpret<float_v16>(),
+                                      tapa::read_write_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
                                       tapa::write_only_mmap<INDEX_TYPE>(Status_fpga_data),
                                       tapa::write_only_mmap<double>(Metrics_fpga_data),
+#ifdef JACOBI_DEADLOCK_DEBUG
+                                      tapa::write_only_mmap<INDEX_TYPE>(Debug_fpga_data),
+#endif
                                       SpElement_list_ptr_size,
                                       SpElement_list_ptr_max_len,
                                       m,
@@ -692,12 +668,13 @@ int main(int argc, char* argv[]) {
          << " timer_total=" << JacobiCyclesToMs(Metrics_fpga_data[6], jacobi_clock_period_ns)
          << " spmv_update_avg=" << JacobiCyclesToMs(Metrics_fpga_data[7], jacobi_clock_period_ns)
          << " clock_period_ns=" << jacobi_clock_period_ns << endl;
+#ifdef JACOBI_DEADLOCK_DEBUG
+    PrintJacobiDebugBuffer(Debug_fpga_data);
+#endif
 
     cout << "[" << setw(18) << "Verification" << "] Extracting Device Data...";
-    const aligned_vector<VALUE_TYPE>& final_buffer =
-        (Status_fpga_data[1] == 1) ? X1_fpga_data : X0_fpga_data;
     for (INDEX_TYPE i = 0; i < n; i++) {
-        X_Device[i] = final_buffer[i];
+        X_Device[i] = X_fpga_data[i];
     }
     cout << " Done" << endl;
 

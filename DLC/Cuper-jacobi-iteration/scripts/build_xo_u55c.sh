@@ -27,6 +27,10 @@ cmd=(
   -o "$OUTPUT_XO"
 )
 
+if [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_DEADLOCK_DEBUG=1")
+fi
+
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
 printf '\n'

@@ -1,7 +1,7 @@
 #pragma once
 
 // Jacobi 专用输入向量 loader。
-// 它把 Cuper SpMV 的单输入 X 改成 X0/X1 双缓冲选择，并在读入时取负。
+// 它从单个 X buffer 读取当前迭代向量，并在读入时取负。
 // 后级 Core 数据通路仍只看到一条普通的 Vector_X_Stream。
 
 #include <tapa.h>
@@ -39,12 +39,10 @@ jacobi_read_neg_float_v16_packets:
     }
 }
 
-// 双缓冲 vector loader：SpMV service 仍由 command 触发和 stop 退出。
-// command.vector_source 只表示本轮 x_old 来自哪个 buffer，不表示写回位置；
-// 写回位置由 Jacobi_Update_Service 根据 JacobiFrame 决定。
+// 单 buffer vector loader：SpMV service 仍由 command 触发和 stop 退出。
+// 写回在整轮 SpMV/update 完成后才反馈下一轮 token，因此当前实现不需要 X0/X1 双缓冲。
 void Jacobi_Vector_Loader(const INDEX_TYPE Column_num,
-                          tapa::async_mmap<float_v16> &X0,
-                          tapa::async_mmap<float_v16> &X1,
+                          tapa::async_mmap<float_v16> &X,
                           tapa::istream<CuperSpmvServiceCommand> &Command_in,
                           tapa::ostream<float_v16> &Vector_X_Stream) {
     // Cuper Core 链按 float_v16 消费输入向量，每包 16 个连续列元素。
@@ -57,15 +55,9 @@ void Jacobi_Vector_Loader(const INDEX_TYPE Column_num,
             return;
         }
 
-        // 这里只切换 HBM 读源并取负，输出 stream 格式保持 Cuper 原来的 Vector_X_Stream。
-        if (command.vector_source == kJacobiBufferX1) {
-            Jacobi_ReadNegFloatV16Packets(packet_count,
-                                          X1,
-                                          Vector_X_Stream);
-        } else {
-            Jacobi_ReadNegFloatV16Packets(packet_count,
-                                          X0,
-                                          Vector_X_Stream);
-        }
+        // 这里只读单个 X buffer 并取负，输出 stream 格式保持 Cuper 原来的 Vector_X_Stream。
+        Jacobi_ReadNegFloatV16Packets(packet_count,
+                                      X,
+                                      Vector_X_Stream);
     }
 }

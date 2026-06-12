@@ -387,28 +387,28 @@ cuper-run-hw:
 	@$(MAKE) -C "$(CUPER_DIR)" run-hw BUILD_DIR="$(CUPER_TAPA_SPMV_BUILD_DIR)" MATRIX="$(or $(MATRIX),data/matrices/sit100/sit100.mtx)"
 
 cuper-jacobi-launch cuper-jacobi-launcher:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" launch BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" launch BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-build-host:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-run-sw:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-regression-sw:
-	@$(MAKE) --no-print-directory -C "$(CUPER_JACOBI_DIR)" regression-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(MODE),MODE="$(MODE)") $(if $(CASE),CASE="$(CASE)") $(if $(CASES),CASES="$(CASES)") $(if $(NO_BUILD),NO_BUILD="$(NO_BUILD)") $(if $(ALLOW_MISSING),ALLOW_MISSING="$(ALLOW_MISSING)") $(if $(TIMEOUT_SEC),TIMEOUT_SEC="$(TIMEOUT_SEC)") $(if $(TAU),TAU="$(TAU)")
+	@$(MAKE) --no-print-directory -C "$(CUPER_JACOBI_DIR)" regression-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(MODE),MODE="$(MODE)") $(if $(CASE),CASE="$(CASE)") $(if $(CASES),CASES="$(CASES)") $(if $(NO_BUILD),NO_BUILD="$(NO_BUILD)") $(if $(ALLOW_MISSING),ALLOW_MISSING="$(ALLOW_MISSING)") $(if $(TIMEOUT_SEC),TIMEOUT_SEC="$(TIMEOUT_SEC)") $(if $(TAU),TAU="$(TAU)") $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-build-xo:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-xo BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-xo BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-link-xclbin:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-xclbin BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-xclbin BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-hw-tmux:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" hw-tmux BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(FORCE),FORCE=$(FORCE))
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" hw-tmux BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(FORCE),FORCE=$(FORCE)) $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 cuper-jacobi-run-hw:
-	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-hw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))"
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-hw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
 $(LOCAL_HOST): $(ARCHIVED_HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(ARCHIVED_HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(ARCHIVED_INCLUDE_DIR)/cg_kernels.hpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(ARCHIVED_INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/main.cpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)

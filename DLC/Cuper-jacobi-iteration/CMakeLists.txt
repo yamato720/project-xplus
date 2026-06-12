@@ -66,6 +66,13 @@ add_executable(cuper_jacobi_host
     kernels/Cuper.cpp       # 移动到了 kernels/ 目录
 )
 
+if(DEFINED ENV{JACOBI_DEADLOCK_DEBUG} AND NOT "$ENV{JACOBI_DEADLOCK_DEBUG}" STREQUAL "" AND NOT "$ENV{JACOBI_DEADLOCK_DEBUG}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_DEADLOCK_DEBUG=1)
+    message(STATUS "Cuper Jacobi deadlock debug is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi deadlock debug is disabled")
+endif()
+
 # -----------------------------------------------------------------------------
 # 4. 链接库 (保持你的手动链接逻辑，但改为变量管理)
 # -----------------------------------------------------------------------------

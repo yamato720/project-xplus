@@ -7,8 +7,6 @@
 #define VALUE_TYPE float
 #define INDEX_TYPE int
 
-// #define BINARY_READ
-
 #define PINGPONG
 
 #define FLEX_REUSE
@@ -85,18 +83,20 @@ using double_v8 = tapa::vec_t<double, 8>;
 
 // Jacobi iteration 实验顶层。
 //
-// 当前 demo 在 host 侧拆 A = D + R，Jacobi vector loader 读 X0/X1 时取负，
+// 当前 demo 在 host 侧拆 A = D + R，Jacobi vector loader 读 X 时取负，
 // Cuper service 因此计算 -R*x_old：
 //   x_next = (b + (-R*x_old)) * diag_inv
-// X0/X1 是双缓冲；Status[1] 返回最终解所在 buffer。
+// X 是原地更新 buffer；Status[1] 固定为 0。
 void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
                           tapa::mmap<float_v16> B,
                           tapa::mmap<float_v16> Diag_inv,
-                          tapa::mmap<float_v16> X0,
-                          tapa::mmap<float_v16> X1,
+                          tapa::mmap<float_v16> X,
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
+#ifdef JACOBI_DEADLOCK_DEBUG
+                          tapa::mmap<INDEX_TYPE> Debug,
+#endif
                           const INDEX_TYPE Batch_num,
                           const INDEX_TYPE Matrix_len,
                           const INDEX_TYPE Row_num,

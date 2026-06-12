@@ -1,30 +1,21 @@
 #pragma once
 
 // CuperJacobiIteration 的 Jacobi 专用公共定义。
-// 这个头只被 kernels/Cuper.cpp 间接包含，保存迭代状态码、帧元数据和小工具函数。
+// 这个头只被 kernels/Cuper.cpp 间接包含，保存固定轮次迭代状态、帧元数据和小工具函数。
 
 #include <ap_int.h>
 #include <tapa.h>
 
 #include "spmv_service_common.hpp"
 
-// Status[0] 的返回值约定。host 侧用它区分正常收敛、达到最大迭代次数、
-// 以及对角线逆/结果出现 NaN 等 breakdown 情况。
-static constexpr INDEX_TYPE kJacobiStatusConverged = 0;
+// 当前 kernel 固定跑满 Max_iters；Status[0] 保持为 1，兼容已有 host/回归输出。
 static constexpr INDEX_TYPE kJacobiStatusMaxIter = 1;
-static constexpr INDEX_TYPE kJacobiStatusBreakdown = 2;
-
-// X0/X1 双缓冲编号。每轮 Jacobi 读一个旧解 buffer，写另一个新解 buffer。
-static constexpr INDEX_TYPE kJacobiBufferX0 = 0;
-static constexpr INDEX_TYPE kJacobiBufferX1 = 1;
 
 struct JacobiFrame {
-    // stop 非 0 表示 update service 退出；正常迭代帧中为 0。
+    // stop 非 0 表示 Cuper 输出更新 task 退出；正常迭代帧中为 0。
     INDEX_TYPE stop;
-    // 本轮 SpMV 和 update 从哪个旧解 buffer 读取 x_old。
-    INDEX_TYPE read_from_x1;
-    // 本轮 update 把 x_next 写入哪个 buffer。
-    INDEX_TYPE write_to_x1;
+    // 固定轮次上限；输出更新 task 用它判断是否生成下一轮 token。
+    INDEX_TYPE max_iters;
     // 有效行数，用来屏蔽最后一个 float_v16 包里的 padding lane。
     INDEX_TYPE row_num;
     // 一轮 -Rx/x_next 需要处理的 float_v16 包数。
@@ -33,14 +24,17 @@ struct JacobiFrame {
     INDEX_TYPE iter;
 };
 
-struct JacobiUpdateResult {
-    // 本轮 max_i |x_next[i] - x_old[i]|，controller 用它和 Tau 比较。
-    float diff_max;
-    // 非 0 表示 update 发现 NaN/非法数值，controller 会按 breakdown 退出。
-    INDEX_TYPE breakdown;
-    // 本轮实际写入的最终 buffer 编号，host 通过 Status[1] 读取。
-    INDEX_TYPE wrote_x1;
-    // 对应的迭代序号，当前主要用于调试保留。
+struct JacobiRoundToken {
+    // stop 非 0 表示所有正常迭代轮次已经完成，dispatcher 应广播 stop 并写状态。
+    INDEX_TYPE stop;
+    // 已完成轮数；stop token 上用它写 Status[2]。
+    INDEX_TYPE iterations_done;
+    // 固定轮次上限。
+    INDEX_TYPE max_iters;
+    // 有效行数和包数，随 token 走，避免下游重复解释 scalar。
+    INDEX_TYPE row_num;
+    INDEX_TYPE packet_count;
+    // 当前轮次编号。
     INDEX_TYPE iter;
 };
 
@@ -58,47 +52,71 @@ static constexpr INDEX_TYPE kJacobiStageSpmvUpdate = 0;
 static constexpr INDEX_TYPE kJacobiStageControllerTotal = 1;
 static constexpr INDEX_TYPE kJacobiStageCount = 2;
 
-// 构造一轮正常 update 帧。controller 同时把 SpMV command 和这个 frame 发出，
-// 使后级 update service 知道本轮 -Rx 属于哪个旧解 buffer。
-inline JacobiFrame Jacobi_MakeFrame(const INDEX_TYPE read_from_x1,
-                                    const INDEX_TYPE write_to_x1,
+inline JacobiRoundToken Jacobi_MakeRoundToken(const INDEX_TYPE row_num,
+                                              const INDEX_TYPE max_iters,
+                                              const INDEX_TYPE iter) {
+#pragma HLS inline
+    JacobiRoundToken token;
+    token.stop = 0;
+    token.iterations_done = iter;
+    token.max_iters = max_iters;
+    token.row_num = row_num;
+    token.packet_count = spmv_service_num_float_v16_packets(row_num);
+    token.iter = iter;
+    return token;
+}
+
+inline JacobiRoundToken Jacobi_MakeStopToken(const INDEX_TYPE row_num,
+                                             const INDEX_TYPE max_iters,
+                                             const INDEX_TYPE iterations_done) {
+#pragma HLS inline
+    JacobiRoundToken token;
+    token.stop = 1;
+    token.iterations_done = iterations_done;
+    token.max_iters = max_iters;
+    token.row_num = row_num;
+    token.packet_count = spmv_service_num_float_v16_packets(row_num);
+    token.iter = iterations_done;
+    return token;
+}
+
+// 构造一轮正常输出更新帧。dispatcher 按 round token 同步发 SpMV command 和 frame，
+// 输出更新 task 用 frame 判断本轮行数、包数、写回 buffer 和是否生成下一轮 token。
+inline JacobiFrame Jacobi_MakeFrame(const JacobiRoundToken token) {
+#pragma HLS inline
+    JacobiFrame frame;
+    frame.stop = token.stop;
+    frame.max_iters = token.max_iters;
+    frame.row_num = token.row_num;
+    frame.packet_count = token.packet_count;
+    frame.iter = token.iter;
+    return frame;
+}
+
+inline JacobiFrame Jacobi_MakeFrame(const INDEX_TYPE max_iters,
                                     const INDEX_TYPE row_num,
                                     const INDEX_TYPE iter) {
 #pragma HLS inline
     JacobiFrame frame;
     frame.stop = 0;
-    frame.read_from_x1 = read_from_x1;
-    frame.write_to_x1 = write_to_x1;
+    frame.max_iters = max_iters;
     frame.row_num = row_num;
     frame.packet_count = spmv_service_num_float_v16_packets(row_num);
     frame.iter = iter;
     return frame;
 }
 
-// 构造 update service 的退出帧。SpMV service 自己用 command/stop token 退出，
-// update service 则通过这个 frame 退出。
+// 构造输出更新 task 的退出帧。SpMV service 自己用 command/stop token 退出，
+// Cuper 输出更新 task 则通过这个 frame 退出。
 inline JacobiFrame Jacobi_MakeStopFrame() {
 #pragma HLS inline
     JacobiFrame frame;
     frame.stop = 1;
-    frame.read_from_x1 = 0;
-    frame.write_to_x1 = 0;
+    frame.max_iters = 0;
     frame.row_num = 0;
     frame.packet_count = 0;
     frame.iter = 0;
     return frame;
-}
-
-// HLS 内联版绝对值，避免在 kernel 侧引入不必要的库函数路径。
-inline float Jacobi_AbsFloat(const float value) {
-#pragma HLS inline
-    return value < 0.0f ? -value : value;
-}
-
-// float 自身不相等即可判断 NaN；这里用于快速标记 Jacobi 数值 breakdown。
-inline bool Jacobi_InvalidFloat(const float value) {
-#pragma HLS inline
-    return value != value;
 }
 
 inline void Jacobi_StageMark(tapa::ostream<JacobiStageEvent> &Stage_Event_out,

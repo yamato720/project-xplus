@@ -8,13 +8,7 @@
 #include <algorithm>
 
 #include "Cuper.h"
-
-#ifdef BINARY_READ
-#include "biio.h"
-#include "mmio_highlevel_b.h"
-#else
 #include "mmio_highlevel.h"
-#endif
 
 using namespace std;
 
@@ -252,49 +246,6 @@ void Create_SparseSlice(const INDEX_TYPE m,
     sliceMatrix                = sliceMatrix_temp;
 }
 
-#ifdef BINARY_READ
-
-// 输入：
-//   filename : 二进制矩阵文件路径。
-// 输出：
-//   m/n/nnzR/isSymmetric : 矩阵尺寸、非零元数和对称标记。
-//   RowPtr/ColIdx/Val    : CSR 三数组。函数内部会 resize 并填充。
-void Read_binary_matrix_2_CSR(char       *filename,
-                              INDEX_TYPE &m,
-                              INDEX_TYPE &n,
-                              INDEX_TYPE &nnzR,
-                              INDEX_TYPE &isSymmetric,
-
-                              vector<INDEX_TYPE> &RowPtr,
-                              vector<INDEX_TYPE> &ColIdx,
-                              vector<VALUE_TYPE> &Val
-                             ) {
-
-    INDEX_TYPE *RowPtr_tmp;
-    INDEX_TYPE *ColIdx_tmp;
-    double     *Val_fp64;
-
-    read_Dmatrix_32(&m, &n, &nnzR, &RowPtr_tmp, &ColIdx_tmp, &Val_fp64, &isSymmetric, filename);
-
-    RowPtr.resize(m + 1);
-    ColIdx.resize(nnzR);
-    Val.resize(nnzR);
-
-    for(INDEX_TYPE i = 0; i < nnzR; ++i) {
-        Val[i] = Val_fp64[i];
-        ColIdx[i] = ColIdx_tmp[i];
-    }
-
-    for(INDEX_TYPE i = 0; i < m + 1; ++i) {
-        RowPtr[i] = RowPtr_tmp[i];
-    }
-
-    free(Val_fp64);
-    free(ColIdx_tmp);
-    free(RowPtr_tmp);
-}
-#else
-
 // 输入：
 //   filename : Matrix Market 文件路径。
 // 输出：
@@ -343,7 +294,6 @@ void Read_matrix_2_CSR(char       *filename,
     free(ColIdx_d);
     free(RowPtr_d);
 }
-#endif
 
 void SpMV_CPU_CSR(const INDEX_TYPE m,
                   const INDEX_TYPE n,
@@ -645,12 +595,12 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                 for(INDEX_TYPE k = 0; k < slicennzR; ++k) {
                     INDEX_TYPE row = sliceMatrix.sliceVal[j].RowIdx[k];
                     // 每两个 float 组成一个 float_v2 包。这里的分配顺序必须
-                    // 和 SpmvService_VectorChecker / Mult_Sort_Tree 的输出顺序一致，
-                    // 否则会出现行号错位，板上大矩阵时也更容易卡在流控上。
+                    // 和 8 路 Jacobi_UpdatePairCompute 的消费顺序一致，否则会出现
+                    // 行号错位，板上大矩阵时也更容易卡在流控上。
                     INDEX_TYPE packet_id = row / 2;
 
-                    // 关键映射变换：先映射到 8 个 checker，再映射到
-                    // checker 内的 ping/pong 偏移，最后映射到每组 8 个 PE。
+                    // 关键映射变换：先映射到 8 个 update pair，再映射到
+                    // pair 内的 ping/pong 偏移，最后映射到每组 8 个 PE。
                     INDEX_TYPE checker_id = packet_id % 8;
                     INDEX_TYPE acc_offset = (packet_id / 8) % 2;
                     INDEX_TYPE pe_in_acc  = (packet_id / 16) % 8;

@@ -1,8 +1,8 @@
 # Cuper Jacobi 测试流程
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
-software/TAPA simulation 结果，并生成了第一版 demo xclbin；但 routed timing 未收敛，
-也还没有上板性能数据。
+software/TAPA simulation 结果，并生成了 deadlock-debug ABI demo xclbin；但 routed
+timing 未收敛，也还没有上板性能数据。
 
 ## 1. 测试对象
 
@@ -18,8 +18,8 @@ $$
 x^{(k+1)} = D^{-1}(b - R x^{(k)})
 $$
 
-host 侧把矩阵拆成 `A = D + R`，kernel 侧读 `X0/X1` 时先取负，让 Cuper SpMV service
-输出 `-R*x_old`，再由 update stage 计算：
+host 侧把矩阵拆成 `A = D + R`，kernel 侧读单个 `X` buffer 时先取负，让 Cuper SpMV
+service 输出 `-R*x_old`，再由 update stage 计算：
 
 $$
 x_i^{(k+1)} = (b_i + (-R x^{(k)})_i)\mathrm{diag\_inv}_i
@@ -71,7 +71,7 @@ make cuper-jacobi-regression-sw CASES="cant thermal2_n65536" NO_BUILD=1
 ```bash
 make cuper-jacobi-build-xo
 make cuper-jacobi-link-xclbin
-BITFILE=cuper-jacobi-iteration-build/CuperJacobiIteration.xclbin \
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin \
   MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
 ```
 
@@ -79,36 +79,38 @@ BITFILE=cuper-jacobi-iteration-build/CuperJacobiIteration.xclbin \
 
 | 数据集 | 矩阵规模 | 迭代 | 当前记录 | 关键输出 |
 | --- | --- | ---: | --- | --- |
-| `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 timed 版通过 | `Status=1`, `Final buffer=0`, `Iterations=2`, `Final diff=0.73218`, `Error Num=0` |
-| `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 timed 版通过 | `Status=1`, `Final buffer=1`, `Iterations=1`, `Final diff=1.11631`, `Error Num=0` |
-| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 通过 | `Final diff=1.41496`, `Error Num=0`；还需用当前 timed/root target 补跑 |
+| `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 deadlock-debug 单 `X` ABI 通过 | `Status=1`, `Final buffer=0`, `Iterations=2`, `Final diff=0`, `Error Num=0` |
+| `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 deadlock-debug 单 `X` ABI 通过 | `Status=1`, `Final buffer=0`, `Iterations=1`, `Final diff=0`, `Error Num=0` |
+| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 通过 | `Final diff=1.41496`, `Error Num=0`；还需用当前 root target 补跑 |
 
 ## 3.1 当前 demo bitstream
 
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` |
-| 构建目录 | `cuper-jacobi-iteration-build/` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/` |
 | Kernel | `CuperJacobiIteration` |
-| UUID | `a7c95d3c-ec98-c287-67be-d81f71f7c95e` |
-| SHA256 | `a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172` |
-| DATA / KERNEL / HBM clock | `220 MHz` / `500 MHz` / `442 MHz` |
-| 时序状态 | 未收敛：WNS `-1.203 ns`，TNS `-22607.805 ns`，failing endpoints `58206` |
+| ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
+| UUID | `b4664f5e-8cd6-0f7d-56ae-28384fce6400` |
+| SHA256 | `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5` |
+| DATA / KERNEL / HBM clock | `169 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛：WNS `-2.575 ns`，TNS `-56069.028 ns`，failing endpoints `96241`；hold 无 failing endpoints |
 
-原始 tmux 构建完成了 implementation 和 bitstream generation，但最后的
-`xclbinutil` 包装阶段调用了本地 XRT 2.18 工具，因缺少 Boost 1.83 动态库失败。
-随后通过 Vitis 2022.2 自带 `xclbinutil` 从包装阶段恢复，成功生成当前 demo xclbin。
+Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；总耗时
+`4h 46m 28s`，构建日志在
+`cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/logs/build_hw_tmux.log`。
 
 这版还没有做 `hw` 上板运行；同步到 `395bitstream/` 只是为了保留和分发当前调试
-artifact，不能作为 timing-clean 标准 bitstream。
+artifact，不能作为 timing-clean 标准 bitstream。上一版同名 demo UUID
+`a7c95d3c-ec98-c287-67be-d81f71f7c95e` 已被覆盖，旧测试结论只作为历史记录。
 
-当前 timed 版已记录的计数。最新一次 quick regression 日志在
-`cuper-jacobi-iteration-build/regression/20260611_124944_quick/`：
+当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
+`cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：
 
 | 数据集 | `float_v16_packets` | `spmv_update_packets` | `spmv_update` cycles | `controller_total` cycles | `timer_total` cycles | `spmv_update_avg` cycles |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `cant.mtx` / `MAX_ITERS=2` | 3,904 | 7,808 | 157,889 | 157,894 | 158,304 | 78,944 |
-| `thermal2_n65536` / `MAX_ITERS=1` | 4,096 | 4,096 | 84,723 | 84,727 | 84,951 | 84,723 |
+| `cant.mtx` / `MAX_ITERS=2` | 3,904 | 7,808 | 103,856 | 103,863 | 103,918 | 51,928 |
+| `thermal2_n65536` / `MAX_ITERS=1` | 4,096 | 4,096 | 36,081 | 36,088 | 38,155 | 36,081 |
 
 ## 4. 输出字段
 
@@ -130,9 +132,9 @@ host 会打印这些 Jacobi 专用字段：
 | 字段 | 含义 |
 | --- | --- |
 | `Status[0]` | 退出状态：`0` converged，`1` max-iter，`2` breakdown |
-| `Status[1]` | 最终解所在 buffer：`0` 表示 `X0`，`1` 表示 `X1` |
+| `Status[1]` | 最终解所在 buffer：当前单 `X` ABI 固定为 `0` |
 | `Status[2]` | 已完成 Jacobi 迭代轮数 |
-| `Metrics[0]` | 最后一轮 `diff_max` |
+| `Metrics[0]` | 当前固定迭代版本暂为占位 0；数值对齐看 host `Error Num` |
 | `Metrics[1]` | 已完成 Jacobi 迭代轮数 |
 | `Metrics[2]` | 每轮 `float_v16` 包数 |
 | `Metrics[3]` | 已处理的 SpMV/update 包数累计 |

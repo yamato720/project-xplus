@@ -10,19 +10,13 @@
 
 struct CuperSpmvServiceCommand {
     // 传给 Cuper SpMV 服务流水的一次运行命令。
-    // stop 非 0 表示退出常驻服务任务；vector_source 选择本轮输入向量 buffer。
+    // stop 非 0 表示退出常驻服务任务；stop 为 0 表示启动一轮 SpMV。
     INDEX_TYPE stop;
-    INDEX_TYPE vector_source;
 };
 
 // 常驻 SpMV service 的停止令牌。它走 PE_Param/Vector_Y_Param 普通 stream，
 // 避免另开一套复杂控制口。
 static constexpr INDEX_TYPE kSpmvServiceStopToken = -1;
-
-// vector_source 的通用取值。Jacobi 当前把 0/1 映射到 X0/X1；
-// 以后如果换成别的迭代算法，可以继续复用这个 command 壳。
-static constexpr INDEX_TYPE kSpmvServiceVectorSource0 = 0;
-static constexpr INDEX_TYPE kSpmvServiceVectorSource1 = 1;
 
 // 下面几个 helper 包装 Cuper 原有的数量计算，避免 service 层直接散落
 // “16 个 float 一包”“accumulator 输出按 HBM 对齐”这些细节。
@@ -41,11 +35,10 @@ inline INDEX_TYPE spmv_service_num_checker_pe_outputs(const INDEX_TYPE row_num) 
     return Cuper_NumCheckerPeOutputs(row_num);
 }
 
-inline CuperSpmvServiceCommand spmv_service_make_command(const INDEX_TYPE vector_source) {
+inline CuperSpmvServiceCommand spmv_service_make_command() {
 #pragma HLS inline
     CuperSpmvServiceCommand command;
     command.stop = 0;
-    command.vector_source = vector_source;
     return command;
 }
 
@@ -55,7 +48,6 @@ inline CuperSpmvServiceCommand spmv_service_make_stop_command() {
 #pragma HLS inline
     CuperSpmvServiceCommand command;
     command.stop = 1;
-    command.vector_source = kSpmvServiceVectorSource0;
     return command;
 }
 
@@ -80,14 +72,54 @@ send_matrix_command:
     }
 }
 
+inline void spmv_service_send_compute_command(
+    tapa::ostreams<CuperSpmvServiceCommand, 2> &Command_out) {
+#pragma HLS inline
+send_compute_command:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        // Command_out[0] 给 ptr loader，Command_out[1] 给 vector loader。
+        Command_out[index].write(spmv_service_make_command());
+    }
+}
+
+inline void spmv_service_send_matrix_command(
+    tapa::ostreams<CuperSpmvServiceCommand, HBM_CHANNEL_NUM> &Matrix_Command_out) {
+#pragma HLS inline
+send_matrix_command_only:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(spmv_service_make_command());
+    }
+}
+
 inline void spmv_service_send_command(
     tapa::ostreams<CuperSpmvServiceCommand, 2> &Command_out,
-    tapa::ostreams<CuperSpmvServiceCommand, HBM_CHANNEL_NUM> &Matrix_Command_out,
-    const INDEX_TYPE vector_source) {
+    tapa::ostreams<CuperSpmvServiceCommand, HBM_CHANNEL_NUM> &Matrix_Command_out) {
 #pragma HLS inline
     spmv_service_broadcast_command(Command_out,
                                    Matrix_Command_out,
-                                   spmv_service_make_command(vector_source));
+                                   spmv_service_make_command());
+}
+
+inline void spmv_service_send_compute_stop(
+    tapa::ostreams<CuperSpmvServiceCommand, 2> &Command_out) {
+#pragma HLS inline
+send_compute_stop:
+    for (INDEX_TYPE index = 0; index < 2; ++index) {
+#pragma HLS unroll
+        Command_out[index].write(spmv_service_make_stop_command());
+    }
+}
+
+inline void spmv_service_send_matrix_stop(
+    tapa::ostreams<CuperSpmvServiceCommand, HBM_CHANNEL_NUM> &Matrix_Command_out) {
+#pragma HLS inline
+send_matrix_stop:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(spmv_service_make_stop_command());
+    }
 }
 
 inline void spmv_service_send_stop(
