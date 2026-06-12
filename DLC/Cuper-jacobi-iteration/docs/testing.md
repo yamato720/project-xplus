@@ -71,7 +71,7 @@ make cuper-jacobi-regression-sw CASES="cant thermal2_n65536" NO_BUILD=1
 ```bash
 make cuper-jacobi-build-xo
 make cuper-jacobi-link-xclbin
-BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin \
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin \
   MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
 ```
 
@@ -87,22 +87,22 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin \
 
 | 项目 | 内容 |
 | --- | --- |
-| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/` |
+| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/` |
 | Kernel | `CuperJacobiIteration` |
 | ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `b4664f5e-8cd6-0f7d-56ae-28384fce6400` |
-| SHA256 | `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5` |
-| DATA / KERNEL / HBM clock | `169 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 未收敛：WNS `-2.575 ns`，TNS `-56069.028 ns`，failing endpoints `96241`；hold 无 failing endpoints |
+| UUID | `401e53eb-a68f-55fb-78f8-5553f14edcd2` |
+| SHA256 | `46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f` |
+| DATA / KERNEL / HBM clock | `161 MHz` / `500 MHz` / `442 MHz` |
+| 时序状态 | 未收敛：WNS `-2.842 ns`，TNS `-74910.742 ns`，failing endpoints `105708`；hold 无 failing endpoints |
 
 Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；总耗时
-`4h 46m 28s`，构建日志在
-`cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/logs/build_hw_tmux.log`。
+`4h 5m 6s`，构建日志在
+`cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/logs/build_hw_tmux.log`。
 
 这版还没有做 `hw` 上板运行；同步到 `395bitstream/` 只是为了保留和分发当前调试
 artifact，不能作为 timing-clean 标准 bitstream。上一版同名 demo UUID
-`a7c95d3c-ec98-c287-67be-d81f71f7c95e` 已被覆盖，旧测试结论只作为历史记录。
+`b4664f5e-8cd6-0f7d-56ae-28384fce6400` 已被覆盖，旧测试结论只作为历史记录。
 
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
 `cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：
@@ -156,7 +156,7 @@ host 会打印这些 Jacobi 专用字段：
 后续硬件 demo 生成后，按下面顺序补测试记录：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
-2. 对当前 `cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 先做最小上板 smoke；
+2. 对当前 `cuper-tapa-jacobi-u55c-20260612-demo.xclbin` 先做最小上板 smoke；
    若 timing fail 导致不稳定，再先回到降频或优化 update path。
 3. 上板先跑 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
 4. 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、`jacobi-stage-*`

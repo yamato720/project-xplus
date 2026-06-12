@@ -169,9 +169,9 @@ quick regression: pass=2 fail=0
 thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
 ```
 
-注意：这个修复已经在 2026-06-12 重新生成硬件 bitstream，但还没有同步到
-`395bitstream/`。当前 `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`
-仍是修复前 artifact。
+注意：这个修复已经在 2026-06-12 重新生成硬件 bitstream，并同步到
+`395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin`。2026-06-11 demo
+只保留为历史记录，不再是当前 Jacobi demo 槽文件。
 
 ### 2026-06-12 tail-drain debug hardware build
 
@@ -222,15 +222,16 @@ Hold worst slack: 0.004 ns
 ```
 
 结论：这版已经包含 `SpmvService_DestroyFloatV16` 链尾 drain 修复并完成 `.xclbin`
-生成，但仍不是 timing-clean bitstream，且还未同步到 `395bitstream/`、未上板验证。
+生成，且已同步到 `395bitstream/` 的 Jacobi demo 槽。但它仍不是 timing-clean
+bitstream，也还未上板验证。
 
-## 硬件 demo 构建记录
+## 当前硬件 demo 同步记录
 
 同步文件：
 
 ```text
-395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin
-395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin.info
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info
 ```
 
 关键字段：
@@ -238,39 +239,40 @@ Hold worst slack: 0.004 ns
 ```text
 Kernel: CuperJacobiIteration
 ABI: JACOBI_DEADLOCK_DEBUG=1, single X buffer, Debug buffer on HBM[24]
-UUID: b4664f5e-8cd6-0f7d-56ae-28384fce6400
-SHA256: 1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5
-DATA clock: 169 MHz
+UUID: 401e53eb-a68f-55fb-78f8-5553f14edcd2
+SHA256: 46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f
+DATA clock: 161 MHz
 KERNEL clock: 500 MHz
-HBM clock: 450 MHz
-DATA achieved: 169.2 MHz
+HBM clock: 442 MHz
+DATA achieved: 161.9 MHz
 ```
 
 构建情况：
 
 ```text
-build dir: cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/
-build log: cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/logs/build_hw_tmux.log
+build dir: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/
+build log: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/logs/build_hw_tmux.log
 VPL: FINISHED, Run Status: impl Complete
 v++ link: Run completed
-total elapsed: 4h 46m 28s
+total elapsed: 4h 5m 6s
 ```
 
 时序状态：
 
 ```text
 Timing constraints are not met.
-Setup failing endpoints: 96241
-Setup worst slack: -2.575 ns
-Setup total violation: -56069.028 ns
+Setup failing endpoints: 105708
+Setup worst slack: -2.842 ns
+Setup total violation: -74910.742 ns
 Hold failing endpoints: 0
-Hold worst slack: 0.005 ns
+Hold worst slack: 0.004 ns
 ```
 
 因此当前 `.xclbin` 只是调试/同步 demo artifact，不是 timing-clean bitstream；
-还未进行 `hw` 上板验证。上一版同名 Jacobi demo UUID
-`a7c95d3c-ec98-c287-67be-d81f71f7c95e` 已被覆盖，其 SHA256 为
-`a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172`；旧测试结论只能
+还未进行 `hw` 上板验证。上一版同主线 Jacobi demo 是
+`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`，UUID 为
+`b4664f5e-8cd6-0f7d-56ae-28384fce6400`，SHA256 为
+`1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5`；旧测试结论只能
 作为历史记录。
 
 ## 判定标准
@@ -300,15 +302,15 @@ make cuper-jacobi-link-xclbin
 硬件 demo 运行：
 
 ```bash
-BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin \
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin \
   MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
 ```
 
 当前 demo 已放入同步目录：
 
 ```text
-395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin
-395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin.info
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info
 ```
 
 上板后仍必须补：

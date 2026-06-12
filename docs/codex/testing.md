@@ -391,8 +391,9 @@ done
 ### 5.6 TAPA Jacobi iteration software/TAPA simulation
 
 `cuper-tapa-jacobi` 是第五条 Cuper 主线，源码在
-`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有 deadlock-debug ABI
-`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 调试 artifact，但
+`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有 tail-drain 修复版
+deadlock-debug ABI
+`395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin` 调试 artifact，但
 routed timing 未收敛，也还没有上板数据。已记录的是 host + TAPA software run。
 它做普通 Jacobi iteration：
 `x_next=D^{-1}(b-Rx_old)`，不是 Jacobi 预条件子 PCG。
@@ -425,7 +426,7 @@ Jacobi 测试至少记录：
 
 后续硬件 demo 生成后，先作为 `395bitstream/cuper-tapa-jacobi-u55c-YYYYMMDD-demo.xclbin`
 进入 Jacobi demo 槽，只跑 demo-only；标准 Cuper SpMV/PCG bitstream 默认复用既有记录。
-当前 2026-06-11 demo 的最小上板 smoke 仍待补，且需先注意 timing fail 风险。
+当前 2026-06-12 demo 的最小上板 smoke 仍待补，且需先注意 timing fail 风险。
 
 ## 6. 预期结果表
 

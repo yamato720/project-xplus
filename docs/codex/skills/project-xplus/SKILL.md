@@ -83,11 +83,11 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
   stage writes `x_next=(b+(-R*x_old))*diag_inv` back into the single `X` buffer. It is wired
   into the root `Makefile` through `cuper-jacobi-*` targets and currently reports
   `[jacobi-stage-cycles]` / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current
-  records are software/TAPA simulation plus one deadlock-debug xclbin artifact only:
-  `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` (UUID
-  `b4664f5e-8cd6-0f7d-56ae-28384fce6400`, SHA256
-  `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5`). That artifact is not
-  timing-clean (routed WNS -2.575 ns, TNS -56069.028 ns) and has not been board-tested, so
+  records are software/TAPA simulation plus one tail-drain-fix deadlock-debug xclbin artifact:
+  `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin` (UUID
+  `401e53eb-a68f-55fb-78f8-5553f14edcd2`, SHA256
+  `46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f`). That artifact is not
+  timing-clean (routed WNS -2.842 ns, TNS -74910.742 ns) and has not been board-tested, so
   there is still no Jacobi standard xclbin.
 - The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
   update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,

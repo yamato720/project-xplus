@@ -30,11 +30,12 @@
   `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`。
 - 2026-06-12 重新生成包含链尾 drain 修复的 deadlock-debug 硬件 bitstream：
   `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/CuperJacobiIteration.xclbin`。
+- 已把 2026-06-12 tail-drain 修复版同步进 Jacobi demo 槽：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin`。
 
 ## 当前没有做
 
 - 没有上板测试。
-- 新 bitstream 还没有同步到 `395bitstream/`；当前 395 demo 仍是 2026-06-11 artifact。
 - 没有得到 timing-clean bitstream；当前 2026-06-12 routed timing 未收敛，WNS `-2.842 ns`。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。

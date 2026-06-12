@@ -17,9 +17,9 @@ xclbin，但 routed timing 未收敛，还没有上板测试数据。
 | 主线 | `cuper-tapa-jacobi` |
 | 顶层 kernel | `CuperJacobiIteration` |
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
-| 默认构建目录 | `cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/` |
-| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；deadlock-debug 硬件 demo 已封装但 timing fail |
+| 默认构建目录 | `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/` |
+| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin` |
+| 版本状态 | software/TAPA simulation 通过；tail-drain 修复版 deadlock-debug 硬件 demo 已同步但 timing fail |
 | 是否建议晋级标准 | 不建议，需先修 timing 并完成 demo-only 上板测试 |
 
 这条主线做普通 Jacobi iteration：
@@ -64,19 +64,19 @@ $$
 
 | 项目 | 内容 |
 | --- | --- |
-| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` |
-| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin.info` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260611-deadlock-debug-build/` |
+| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin` |
+| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/` |
 | ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `b4664f5e-8cd6-0f7d-56ae-28384fce6400` |
-| SHA256 | `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5` |
-| DATA / KERNEL / HBM clock | `169 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | routed timing 未收敛，WNS `-2.575 ns`，TNS `-56069.028 ns`，failing endpoints `96241` |
+| UUID | `401e53eb-a68f-55fb-78f8-5553f14edcd2` |
+| SHA256 | `46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f` |
+| DATA / KERNEL / HBM clock | `161 MHz` / `500 MHz` / `442 MHz` |
+| 时序状态 | routed timing 未收敛，WNS `-2.842 ns`，TNS `-74910.742 ns`，failing endpoints `105708` |
 
 这个文件只作为当前调试 demo artifact 同步，不是标准 bitstream。Vitis link 已完成
 implementation 和 `.xclbin` 封装；hold 没有 failing endpoint，但 setup 仍明显
-不收敛。上一版同名 demo UUID
-`a7c95d3c-ec98-c287-67be-d81f71f7c95e` 已被覆盖，旧测试结论只作为历史记录。
+不收敛。它覆盖了 2026-06-11 同主线 demo，旧 UUID
+`b4664f5e-8cd6-0f7d-56ae-28384fce6400` 的测试结论只作为历史记录。
 
 ## 当前已记录测试
 

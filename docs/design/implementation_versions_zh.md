@@ -374,10 +374,10 @@ CuperJacobiIteration(
   Matrix_data_0..15,
   B,
   Diag_inv,
-  X0,
-  X1,
+  X,
   Status,
   Metrics,
+  Debug,   // JACOBI_DEADLOCK_DEBUG=1 时启用
   Batch_num,
   Matrix_len,
   Row_num,
@@ -392,16 +392,16 @@ CuperJacobiIteration(
 - 这是第五条 Cuper 主线，主线简称 `cuper-tapa-jacobi`。
 - 它做普通 Jacobi iteration，不是 Jacobi 预条件子 PCG。
 - host 侧拆 `A = D + R`，kernel 内只对 `R` 做 SpMV。
-- `Jacobi_Vector_Loader` 读取 `X0/X1` 时把旧解取负，使 Cuper service 输出
+- `Jacobi_Vector_Loader` 读取单个 `X` buffer 时把旧解取负，使 Cuper service 输出
   `-R*x_old`。
-- `Jacobi_Update_Service` 读取 `B/Diag_inv/x_old`，计算
-  `x_next=(b+(-R*x_old))*diag_inv`，并写入另一个解向量 buffer。
-- `X0/X1` 做双缓冲，`Status[1]` 返回最终结果所在 buffer。
+- `Jacobi_Update_Service` 读取 `B/Diag_inv`，计算
+  `x_next=(b+(-R*x_old))*diag_inv`，并在整轮完成后原地写回 `X`。
+- 当前固定迭代版本取消 `X0/X1` 双缓冲，`Status[1]` 固定为 `0`。
 - 当前 demo 的矩阵 HBM 仍是 `Matrix_data_0..15 -> HBM[0..15]`；向量和状态额外放在
-  `B -> HBM[20]`、`Diag_inv -> HBM[21]`、`X0 -> HBM[22]`、`X1 -> HBM[23]`、
-  `Status/Metrics -> HBM[24]`。
-- 当前还没有压回 16 个 HBM；已有 `cuper-tapa-jacobi-u55c-20260611-demo.xclbin`
-  调试 artifact，但 routed timing 未收敛，还不是标准 bitstream。
+  `B -> HBM[20]`、`Diag_inv -> HBM[21]`、`X -> HBM[22]`、
+  `Status/Metrics/Debug -> HBM[24]`。
+- 当前还没有压回 16 个 HBM；已有 `cuper-tapa-jacobi-u55c-20260612-demo.xclbin`
+  tail-drain 修复版调试 artifact，但 routed timing 未收敛，还不是标准 bitstream。
 
 常用命令：
 
@@ -421,9 +421,9 @@ cant.mtx MAX_ITERS=2: Error Num=0, Final diff=0.73218
 thermal2_n65536 MAX_ITERS=1: Error Num=0, Final diff=1.11631
 thermal2_n262144 MAX_ITERS=1: 早期 software run 通过，Final diff=1.41496
 hardware demo artifact:
-cuper-tapa-jacobi-u55c-20260611-demo.xclbin: UUID a7c95d3c-ec98-c287-67be-d81f71f7c95e,
-SHA256 a622e1600628e9c4ed34fe7dd7d5f2a2afcb374789fddaa4436b1ba9408e8172,
-routed timing fail WNS=-1.203 ns
+cuper-tapa-jacobi-u55c-20260612-demo.xclbin: UUID 401e53eb-a68f-55fb-78f8-5553f14edcd2,
+SHA256 46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f,
+routed timing fail WNS=-2.842 ns
 ```
 
 版本记录：

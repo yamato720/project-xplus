@@ -2,7 +2,8 @@
 
 ## 现状结论
 
-当前 `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 已经是
+本轮 finish hang 上板测试对象是当时的
+`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`，它已经是
 `JACOBI_DEADLOCK_DEBUG=1` 的 debug ABI。这里的 `DEADLOCK` 是当前调试宏和
 artifact 的历史命名，不表示已经证明根因一定是死锁：
 
@@ -336,5 +337,12 @@ SHA256:    46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f
 timing:    not met, WNS -2.842 ns, TNS -74910.742 ns
 ```
 
-这版还没有同步到 `395bitstream/`，也还没有上板验证；当前
-`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 仍是旧逻辑。
+这版已经同步到当前 Jacobi demo 槽：
+
+```text
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin
+395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info
+```
+
+它还没有上板验证；2026-06-11 demo 的 finish hang 日志和结论只作为旧 artifact
+历史记录。
