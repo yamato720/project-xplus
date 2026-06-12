@@ -14,3 +14,4 @@
 - Jacobi kernel 实现方案：`jacobi_implementation_plan.md`
 - 当前测试流程和已记录数据：`testing.md`
 - 上板 `Finish` 挂住的排障和修改建议：`hardware_finish_hang_fix_suggestions.md`
+- `Finish` 不返回且根因待定时的下一版 debug 改进方案：`deadlock_debug_improvement_plan.md`
