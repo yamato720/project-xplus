@@ -36,13 +36,19 @@ inline void Jacobi_SplitCoeffPair(const float_v16 &b,
 void Jacobi_UpdateFrameFork(tapa::istream<JacobiFrame> &Frame_in,
                             tapa::ostream<JacobiFrame> &Coeff_Frame_out,
                             tapa::ostream<JacobiFrame> &Pack_Frame_out,
-                            tapa::ostream<JacobiFrame> &Hbm_Frame_out) {
+                            tapa::ostream<JacobiFrame> &Hbm_Frame_out,
+                            tapa::ostreams<JacobiFrame, 8> &Pair_Frame_out) {
     for (;;) {
 #pragma HLS pipeline II=1
         const JacobiFrame frame = Frame_in.read();
         Coeff_Frame_out.write(frame);
         Pack_Frame_out.write(frame);
         Hbm_Frame_out.write(frame);
+    fork_pair_frames:
+        for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+#pragma HLS unroll
+            Pair_Frame_out[lane_pair].write(frame);
+        }
         if (frame.stop != 0) {
             return;
         }
@@ -100,22 +106,39 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
     }
 }
 
-void Jacobi_UpdatePairCompute(tapa::istream<float_v2> &Neg_Rx_in_0,
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
+                              tapa::istream<float_v2> &Neg_Rx_in_0,
                               tapa::istream<float_v2> &Neg_Rx_in_1,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
-                              tapa::ostream<JacobiUpdatedPair> &Updated_out,
-                              const INDEX_TYPE Row_num
+                              tapa::ostream<JacobiUpdatedPair> &Updated_out
 #ifdef JACOBI_DEADLOCK_DEBUG
                               ,
                               tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
                               const INDEX_TYPE Debug_source
 #endif
                               ) {
-    const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(Row_num);
-    const INDEX_TYPE num_out = spmv_service_num_float_v16_packets(Row_num);
-
     for (;;) {
+#pragma HLS loop_flatten off
+        const JacobiFrame frame = Frame_in.read();
+        if (frame.stop != 0) {
 #ifdef JACOBI_DEADLOCK_DEBUG
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 Debug_source,
+                                 kJacobiDebugPhaseStop,
+                                 0,
+                                 0);
+#endif
+            return;
+        }
+
+        const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(frame.row_num);
+        const INDEX_TYPE num_out = frame.packet_count;
+#ifdef JACOBI_DEADLOCK_DEBUG
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             Debug_source,
+                             kJacobiDebugPhaseEnterRound,
+                             frame.iter,
+                             num_out);
         INDEX_TYPE debug_wait_tick = 0;
 #endif
     filter_update_round:

@@ -327,7 +327,7 @@ JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesp
 结果：quick regression 通过；debug ABI 下 `thermal2_n1024 MAX_ITERS=1` software/TAPA
 simulation 返回，`Error Num=0`。
 
-2026-06-12 已重新生成包含该修复的硬件 bitstream：
+2026-06-12 已重新生成包含该 tail-drain 修复的硬件 bitstream：
 
 ```text
 build dir: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/
@@ -337,12 +337,18 @@ SHA256:    46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f
 timing:    not met, WNS -2.842 ns, TNS -74910.742 ns
 ```
 
-这版已经同步到当前 Jacobi demo 槽：
+这版曾同步到 Jacobi demo 槽：
 
 ```text
 395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin
 395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info
 ```
 
-它还没有上板验证；2026-06-11 demo 的 finish hang 日志和结论只作为旧 artifact
-历史记录。
+它上板后仍出现 Finish 不返回，当前已经被 2026-06-13 finite-pair debug demo 覆盖：
+
+```text
+395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info
+```
+
+2026-06-11 和 2026-06-12 demo 的 finish hang 日志和结论只作为旧 artifact 历史记录。

@@ -2,7 +2,7 @@
 
 ## 当前现象
 
-2026-06-12 复测当前 Jacobi demo：
+2026-06-12 复测当时的 Jacobi demo：
 
 ```text
 bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin
@@ -32,9 +32,13 @@ diagonal-only / `R NNZ=0` 特例。
 当前准确结论应写成：
 
 ```text
-CuperJacobiIteration 在新版 tail-drain debug bitstream 上仍然 Finish 不返回；
+CuperJacobiIteration 在 2026-06-12 tail-drain debug bitstream 上仍然 Finish 不返回；
 根因未定，不能只定性为死锁。
 ```
+
+后续已经生成并同步 `20260613` finite-pair debug demo：
+`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。它包含本文第二步建议的
+`Jacobi_UpdatePairCompute[0..7]` finite frame/stop 修改，但还没有板上复测结果。
 
 ## 还不能直接定性为死锁
 
@@ -49,7 +53,7 @@ CuperJacobiIteration 在新版 tail-drain debug bitstream 上仍然 Finish 不�
    或者缺少 done ack，controller 不知道谁退出了。
 5. debug monitor 自己卡住：当前 debug task 也在 graph 内，依赖 `Debug_Stop_Stream`
    和 Debug mmap 写响应完成收尾。
-6. timing 或板卡/runtime 状态：当前 20260612 demo routed timing 未收敛
+6. timing 或板卡/runtime 状态：当时 20260612 demo routed timing 未收敛
    `WNS=-2.842 ns`、`TNS=-74910.742 ns`，不能排除硬件异常状态。
 
 所以目前建议把问题命名为 `Finish non-return` 或 `runtime finalization hang`，
@@ -485,6 +489,27 @@ debug 版优先处理 `Jacobi_UpdatePairCompute`：
 如果这样后 `thermal2_n1024 MAX_ITERS=1` 能返回，说明之前至少有一部分问题在
 detached 常驻 task 的退出语义上。
 
+2026-06-12 已实施这一项源码改造：
+
+```text
+Jacobi_UpdateFrameFork -> Update_Pair_Frame_Stream[0..7]
+Jacobi_UpdatePairCompute[0..7] 不再使用 tapa::detach
+Jacobi_UpdatePairCompute[0..7] 收到 stop frame 后显式 return
+```
+
+已完成的非上板验证：
+
+```text
+quick regression: pass=2 fail=0 skip=0
+thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+thermal2_n16 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+debug ABI XO generated: cuper-jacobi-iteration-build/CuperJacobiIteration.xo
+```
+
+注意：这个 finite pair compute 改动已经重新生成并同步到
+`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。下一步需要用该新
+debug xclbin 复测，才能判断它是否解决板上的 `Finish` 不返回。
+
 ### 第三步：做 one-round debug top
 
 增加 `CuperJacobiOneRoundDebug`：
@@ -525,12 +550,12 @@ timing 和 runtime。
 建议按这个顺序跑，不要直接上完整 `thermal2`：
 
 ```bash
-timeout 120s env BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin \
+timeout 120s env BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
   MAX_ITERS=1 JACOBI_DEADLOCK_DEBUG=1 \
   make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16 \
   JACOBI_DEADLOCK_DEBUG=1
 
-timeout 120s env BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin \
+timeout 120s env BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
   MAX_ITERS=1 JACOBI_DEADLOCK_DEBUG=1 \
   make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024 \
   JACOBI_DEADLOCK_DEBUG=1

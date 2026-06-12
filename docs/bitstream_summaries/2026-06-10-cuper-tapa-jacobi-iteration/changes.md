@@ -32,11 +32,21 @@
   `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/CuperJacobiIteration.xclbin`。
 - 已把 2026-06-12 tail-drain 修复版同步进 Jacobi demo 槽：
   `395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin`。
+- 2026-06-12 继续排查 tail-drain 修复版上板后 `Finish` 不返回问题，按
+  `finish_nonreturn_monitoring_points.md` 的优先级去掉最可疑的隐式退出点：
+  `Jacobi_UpdatePairCompute[0..7]` 不再使用 `tapa::detach` 无限循环，改为由
+  `JacobiFrame` 显式驱动，收到 stop frame 后 return。源码、debug ABI XO 和完整
+  xclbin 构建均已验证。
+- 2026-06-13 已生成并同步 finite-pair debug 硬件 demo artifact：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版包含 tail-drain
+  修复和 finite pair compute stop-frame 修复，覆盖同主线 2026-06-12 tail-drain-only
+  demo 槽。
 
 ## 当前没有做
 
 - 没有上板测试。
-- 没有得到 timing-clean bitstream；当前 2026-06-12 routed timing 未收敛，WNS `-2.842 ns`。
+- 没有得到 timing-clean bitstream；当前 2026-06-13 routed timing 未收敛，
+  WNS `-2.134 ns`。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -49,4 +59,5 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前 2026-06-12 tail-drain debug bitstream 没有过 timing，不能作为稳定性能结论。
+- 当前 2026-06-13 finite-pair debug bitstream 没有过 timing，也还没有上板验证，
+  不能作为稳定性能结论。

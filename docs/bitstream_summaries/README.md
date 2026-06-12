@@ -23,7 +23,7 @@ YYYY-MM-DD-<主线>-<简短说明>/
   `cuper-tapa-jacobi` 的起始记录。
   目标是用 `DLC/Cuper-jacobi-iteration` 复用 TAPA Cuper SpMV service，在 FPGA kernel
   内执行普通 Jacobi iteration `x_next=D^{-1}(b-Rx_old)`。当前已有
-  `cuper-tapa-jacobi-u55c-20260612-demo.xclbin` tail-drain 修复版调试 artifact，
+  `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` finite-pair 调试 artifact，
   但 routed timing 未收敛；还没有上板数据，也没有标准 bitstream。
 - `2026-05-28-cuper-tapa-spmv-single-optimization/`：当前持续目标目录。
   目标是优化 `Cuper(...)` + `detail/cuper_spmv_tasks.hpp` 这条

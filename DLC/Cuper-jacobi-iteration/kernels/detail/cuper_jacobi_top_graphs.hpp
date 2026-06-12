@@ -69,6 +69,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // Vector_Y_Param[0..15]                     Accumulator 参数流，内嵌 stop token       SpmvService_Core[0..15]                  SpmvService_Accumulator[0..15]
     // Update_Frame_Stream                       update 后端轮次 frame                     Jacobi_RoundDispatcher                   Jacobi_UpdateFrameFork
     // Update_Coeff_Frame_Stream                 B/Diag_inv 读取 frame                     Jacobi_UpdateFrameFork                   Jacobi_UpdateCoeffLoader
+    // Update_Pair_Frame_Stream[0..7]            8 路 pair compute 轮次/停止 frame          Jacobi_UpdateFrameFork                   Jacobi_UpdatePairCompute[0..7]
     // Update_Pack_Frame_Stream                  更新拼包 frame                            Jacobi_UpdateFrameFork                   Jacobi_UpdatePackWriter
     // Update_Hbm_Frame_Stream                   X HBM 写回 frame                          Jacobi_UpdateFrameFork                   Jacobi_XHbmWriter
     // X_Write_Stream                            x_next 写回 FIFO                          Jacobi_UpdatePackWriter                  Jacobi_XHbmWriter
@@ -89,6 +90,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // Vector_Y_Param[0..15]                     Core 已确认本轮参数，或收到 PE stop                       Accumulator 按行数归并本通道乘积；stop 时退出
     // Update_Frame_Stream                       本轮 compute command 已发出                              复制给系数 loader 和 writer；stop frame 让 update 后端退出
     // Update_Coeff_Frame_Stream                 update frame 已被拆分                                    按 packet_count 读取 B 和 Diag_inv，分发到 8 路 pair compute
+    // Update_Pair_Frame_Stream[0..7]            update frame 已被拆分                                    每路 pair compute 按 frame 消费固定数量；stop frame 后显式退出
     // Update_Pack_Frame_Stream                  update frame 已被拆分                                    收齐 8 路更新结果，拼成 float_v16 后写入 X_Write_Stream
     // Update_Hbm_Frame_Stream                   update frame 已被拆分                                    从 X_Write_Stream 连续写 HBM；响应收齐后反馈下一轮或 stop
     // X_Write_Stream                            一个 x_next float_v16 包已经拼好                         按地址顺序写入单 X buffer；FIFO 只解耦反压，不改变轮次边界
@@ -114,6 +116,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 
     tapa::stream<JacobiFrame, 2>                               Update_Frame_Stream("Update_Frame_Stream");
     tapa::stream<JacobiFrame, 2>                               Update_Coeff_Frame_Stream("Update_Coeff_Frame_Stream");
+    tapa::streams<JacobiFrame, 8, 2>                            Update_Pair_Frame_Stream("Update_Pair_Frame_Stream");
     tapa::stream<JacobiFrame, 2>                               Update_Pack_Frame_Stream("Update_Pack_Frame_Stream");
     tapa::stream<JacobiFrame, 2>                               Update_Hbm_Frame_Stream("Update_Hbm_Frame_Stream");
     tapa::stream<JacobiRoundToken, 2>                          Initial_Token_Stream("Initial_Token_Stream");
@@ -243,12 +246,13 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Vector_Y_Param,
                                              Matrix_Mult_Vector_Stream,
                                              Vector_Y_Stream)
-        // dispatcher 的 frame 同时驱动系数 loader 和 writer；计算单元常驻消费数据流。
+        // dispatcher 的 frame 同时驱动系数 loader、8 路 pair compute、pack writer 和 HBM writer。
         .invoke(Jacobi_UpdateFrameFork,
                 Update_Frame_Stream,
                 Update_Coeff_Frame_Stream,
                 Update_Pack_Frame_Stream,
-                Update_Hbm_Frame_Stream)
+                Update_Hbm_Frame_Stream,
+                Update_Pair_Frame_Stream)
         // 按更新 frame 顺序读取 B 和 Diag_inv，为每个 row pair 提供 Jacobi 更新系数。
         .invoke(Jacobi_UpdateCoeffLoader,
                 Update_Coeff_Frame_Stream,
@@ -257,102 +261,103 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Diag_inv)
         // 8 个 pair compute 各自消费两路 accumulator 输出；有效位置做 Jacobi 更新，
         // padding 位置只读掉 -Rx，不再单独经过 checker 对齐。
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[0],
-                              Vector_Y_Stream[1],
-                              Update_Coeff_Stream[0],
-                              Update_Pair_Stream[0],
-                              Row_num
+        // 这里改为 frame/stop 驱动的有限 task，避免 detach 无限循环让 Finish 收尾不可观察。
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[0],
+                Vector_Y_Stream[0],
+                Vector_Y_Stream[1],
+                Update_Coeff_Stream[0],
+                Update_Pair_Stream[0]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 0],
-                              kJacobiDebugSourcePairBase + 0
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 0],
+                kJacobiDebugSourcePairBase + 0
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[2],
-                              Vector_Y_Stream[3],
-                              Update_Coeff_Stream[1],
-                              Update_Pair_Stream[1],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[1],
+                Vector_Y_Stream[2],
+                Vector_Y_Stream[3],
+                Update_Coeff_Stream[1],
+                Update_Pair_Stream[1]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 1],
-                              kJacobiDebugSourcePairBase + 1
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 1],
+                kJacobiDebugSourcePairBase + 1
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[4],
-                              Vector_Y_Stream[5],
-                              Update_Coeff_Stream[2],
-                              Update_Pair_Stream[2],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[2],
+                Vector_Y_Stream[4],
+                Vector_Y_Stream[5],
+                Update_Coeff_Stream[2],
+                Update_Pair_Stream[2]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 2],
-                              kJacobiDebugSourcePairBase + 2
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 2],
+                kJacobiDebugSourcePairBase + 2
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[6],
-                              Vector_Y_Stream[7],
-                              Update_Coeff_Stream[3],
-                              Update_Pair_Stream[3],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[3],
+                Vector_Y_Stream[6],
+                Vector_Y_Stream[7],
+                Update_Coeff_Stream[3],
+                Update_Pair_Stream[3]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 3],
-                              kJacobiDebugSourcePairBase + 3
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 3],
+                kJacobiDebugSourcePairBase + 3
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[8],
-                              Vector_Y_Stream[9],
-                              Update_Coeff_Stream[4],
-                              Update_Pair_Stream[4],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[4],
+                Vector_Y_Stream[8],
+                Vector_Y_Stream[9],
+                Update_Coeff_Stream[4],
+                Update_Pair_Stream[4]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 4],
-                              kJacobiDebugSourcePairBase + 4
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 4],
+                kJacobiDebugSourcePairBase + 4
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[10],
-                              Vector_Y_Stream[11],
-                              Update_Coeff_Stream[5],
-                              Update_Pair_Stream[5],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[5],
+                Vector_Y_Stream[10],
+                Vector_Y_Stream[11],
+                Update_Coeff_Stream[5],
+                Update_Pair_Stream[5]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 5],
-                              kJacobiDebugSourcePairBase + 5
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 5],
+                kJacobiDebugSourcePairBase + 5
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[12],
-                              Vector_Y_Stream[13],
-                              Update_Coeff_Stream[6],
-                              Update_Pair_Stream[6],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[6],
+                Vector_Y_Stream[12],
+                Vector_Y_Stream[13],
+                Update_Coeff_Stream[6],
+                Update_Pair_Stream[6]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 6],
-                              kJacobiDebugSourcePairBase + 6
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 6],
+                kJacobiDebugSourcePairBase + 6
 #endif
-                              )
-        .invoke<tapa::detach>(Jacobi_UpdatePairCompute,
-                              Vector_Y_Stream[14],
-                              Vector_Y_Stream[15],
-                              Update_Coeff_Stream[7],
-                              Update_Pair_Stream[7],
-                              Row_num
+                )
+        .invoke(Jacobi_UpdatePairCompute,
+                Update_Pair_Frame_Stream[7],
+                Vector_Y_Stream[14],
+                Vector_Y_Stream[15],
+                Update_Coeff_Stream[7],
+                Update_Pair_Stream[7]
 #ifdef JACOBI_DEADLOCK_DEBUG
-                              ,
-                              Debug_Event_Stream[kJacobiDebugStreamPairBase + 7],
-                              kJacobiDebugSourcePairBase + 7
+                ,
+                Debug_Event_Stream[kJacobiDebugStreamPairBase + 7],
+                kJacobiDebugSourcePairBase + 7
 #endif
-                              )
+                )
         // pack writer 只收齐 8 路 float_v2 并拼成 float_v16，先写入 X_Write_Stream。
         .invoke(Jacobi_UpdatePackWriter,
                 Update_Pack_Frame_Stream,

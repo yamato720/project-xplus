@@ -400,8 +400,8 @@ CuperJacobiIteration(
 - 当前 demo 的矩阵 HBM 仍是 `Matrix_data_0..15 -> HBM[0..15]`；向量和状态额外放在
   `B -> HBM[20]`、`Diag_inv -> HBM[21]`、`X -> HBM[22]`、
   `Status/Metrics/Debug -> HBM[24]`。
-- 当前还没有压回 16 个 HBM；已有 `cuper-tapa-jacobi-u55c-20260612-demo.xclbin`
-  tail-drain 修复版调试 artifact，但 routed timing 未收敛，还不是标准 bitstream。
+- 当前还没有压回 16 个 HBM；已有 `cuper-tapa-jacobi-u55c-20260613-demo.xclbin`
+  finite-pair 调试 artifact，但 routed timing 未收敛，还不是标准 bitstream。
 
 常用命令：
 
@@ -421,9 +421,9 @@ cant.mtx MAX_ITERS=2: Error Num=0, Final diff=0.73218
 thermal2_n65536 MAX_ITERS=1: Error Num=0, Final diff=1.11631
 thermal2_n262144 MAX_ITERS=1: 早期 software run 通过，Final diff=1.41496
 hardware demo artifact:
-cuper-tapa-jacobi-u55c-20260612-demo.xclbin: UUID 401e53eb-a68f-55fb-78f8-5553f14edcd2,
-SHA256 46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f,
-routed timing fail WNS=-2.842 ns
+cuper-tapa-jacobi-u55c-20260613-demo.xclbin: UUID 6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb,
+SHA256 e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145,
+routed timing fail WNS=-2.134 ns
 ```
 
 版本记录：
