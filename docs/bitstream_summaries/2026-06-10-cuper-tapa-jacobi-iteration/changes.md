@@ -21,15 +21,21 @@
   `[jacobi-stage-cycles]` 和 `[jacobi-stage-ms]`。
 - 新增 deadlock debug ABI：`JACOBI_DEADLOCK_DEBUG=1` 时启用 `Debug` buffer，
   用于记录轮次、pack writer、HBM writer 等阶段的进度/等待位置。
+- 修复 `SpmvService_DestroyFloatV16` 的链尾退出竞态：旧逻辑看到尾端 X stream
+  暂时为空就可能先吃 stop 退出，导致后续 Core15 转发的残余 X 包无人消费。现在按
+  `ceil(Column_num / 16) * Max_iters` 精确 drain 完链尾 X 包后才允许 stop 结束。
 - 根 `Makefile` 接入 `cuper-jacobi-*` 转发 target。
 - 文档口径从四条 Cuper 主线扩展为五条，并给 `cuper-tapa-jacobi` 保留独立 demo 槽。
 - 生成并同步 deadlock-debug 硬件 demo artifact：
   `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`。
+- 2026-06-12 重新生成包含链尾 drain 修复的 deadlock-debug 硬件 bitstream：
+  `cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/CuperJacobiIteration.xclbin`。
 
 ## 当前没有做
 
 - 没有上板测试。
-- 没有得到 timing-clean bitstream；当前 routed timing 未收敛，WNS `-2.575 ns`。
+- 新 bitstream 还没有同步到 `395bitstream/`；当前 395 demo 仍是 2026-06-11 artifact。
+- 没有得到 timing-clean bitstream；当前 2026-06-12 routed timing 未收敛，WNS `-2.842 ns`。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -42,4 +48,4 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前 demo bitstream 没有过 timing，不能作为稳定性能结论。
+- 当前 2026-06-12 tail-drain debug bitstream 没有过 timing，不能作为稳定性能结论。

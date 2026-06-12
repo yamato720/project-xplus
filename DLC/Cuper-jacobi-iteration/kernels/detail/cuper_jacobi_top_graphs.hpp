@@ -92,7 +92,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // Update_Pack_Frame_Stream                  update frame 已被拆分                                    收齐 8 路更新结果，拼成 float_v16 后写入 X_Write_Stream
     // Update_Hbm_Frame_Stream                   update frame 已被拆分                                    从 X_Write_Stream 连续写 HBM；响应收齐后反馈下一轮或 stop
     // X_Write_Stream                            一个 x_next float_v16 包已经拼好                         按地址顺序写入单 X buffer；FIFO 只解耦反压，不改变轮次边界
-    // Vector_Destroy_Stop_Stream                dispatcher 收到最终 stop token，X loader stop 已发出      链尾 drain 消费残余 -X 后退出
+    // Vector_Destroy_Stop_Stream                dispatcher 收到最终 stop token，X loader stop 已发出      链尾 drain 等已知 X 包数 drain 完后退出
     // Stage_Event_Stream                        每轮 dispatch/feedback 或最终 stop                       统计 cycle；stop 后输出计数
     // Stage_Ticks_Stream                        timer 收到 stop 并完成 cycle 汇总                        dispatcher 读取后写 Metrics[4..7]
     // Command_Stream[0] 给 SpElement ptr loader，Command_Stream[1] 给 X vector loader。
@@ -231,8 +231,13 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(SpmvService_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
         // 消费 PE 参数链尾残余，保证上游 Core 的参数转发不会悬空阻塞。
         .invoke(SpmvService_DestroyInt, PE_Param[HBM_CHANNEL_NUM])
-        // 消费 -X 广播链尾残余，并按 stop stream 在所有轮次结束后退出。
-        .invoke(SpmvService_DestroyFloatV16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
+        // 消费 -X 广播链尾残余。这里按 Column_num/Max_iters 算出应到达链尾的总包数，
+        // drain 完后再接受 stop，避免链尾 drain 早退造成 Core15 卡住。
+        .invoke(SpmvService_DestroyFloatV16,
+                Column_num,
+                Max_iters,
+                Vector_X_Stream[HBM_CHANNEL_NUM],
+                Vector_Destroy_Stop_Stream)
         // 每路 accumulator 对 Core 输出的局部乘积按行累加，得到本通道 SpMV 结果。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(SpmvService_Accumulator,
                                              Vector_Y_Param,

@@ -288,3 +288,53 @@ debug ABI 已启用，但仍无法在 Finish 不返回时把 Debug buffer 打印
 thermal2_n16 和 thermal2_n1024 都到达 after ReadFromDevice before Finish。
 当前 debug 只能确认 Finish 不返回仍存在；死锁只是候选原因之一，具体 source 未定位。
 ```
+
+## 2026-06-12 代码排查新增结论
+
+已发现一个明确的退出协议 bug：
+
+```text
+SpmvService_DestroyFloatV16
+```
+
+旧逻辑是“优先读 Vector_X_Stream；如果这一拍 Vector_X_Stream 为空且 stop stream
+有数据，就读 stop 并 return”。这个判断在硬件上有竞态：`Jacobi_RoundDispatcher`
+收到最终 stop token 后会立刻向链尾 drain 发 stop，但 Core15 可能还有本轮残余
+`Vector_X_Stream[16]` 包正在路上。如果 drain 在尾流暂时为空的一拍提前退出，后续
+Core15 再转发 X 包时无人消费，Core 链可能卡住。此时 dispatcher 已经能写
+`Status/Metrics`，host 可能走到 `ReadFromDevice`，但 TAPA `Finish` 仍在等未完成的
+task，于是表现为当前的 finish hang。
+
+已改成按 `Column_num` 和 `Max_iters` 计算链尾应收到的总 X 包数：
+
+```text
+expected_packets = ceil(Column_num / 16) * Max_iters
+```
+
+`SpmvService_DestroyFloatV16` 现在必须 drain 完 `expected_packets` 个尾端 X 包，并且
+看到 stop 后才 return。这样 stop 不能再抢在迟到的尾流前面让 drain 早退。
+
+本地已做验证：
+
+```text
+make cuper-jacobi-build-host
+make cuper-jacobi-regression-sw MODE=quick NO_BUILD=1 ALLOW_MISSING=1
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+结果：quick regression 通过；debug ABI 下 `thermal2_n1024 MAX_ITERS=1` software/TAPA
+simulation 返回，`Error Num=0`。
+
+2026-06-12 已重新生成包含该修复的硬件 bitstream：
+
+```text
+build dir: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/
+xclbin:    CuperJacobiIteration.xclbin
+UUID:      401e53eb-a68f-55fb-78f8-5553f14edcd2
+SHA256:    46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f
+timing:    not met, WNS -2.842 ns, TNS -74910.742 ns
+```
+
+这版还没有同步到 `395bitstream/`，也还没有上板验证；当前
+`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` 仍是旧逻辑。

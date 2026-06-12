@@ -18,18 +18,34 @@ void SpmvService_DestroyInt(tapa::istream<INDEX_TYPE> &PE_Param) {
     }
 }
 
-void SpmvService_DestroyFloatV16(tapa::istream<float_v16> &Vector_X_Stream,
+void SpmvService_DestroyFloatV16(const INDEX_TYPE Column_num,
+                                 const INDEX_TYPE Max_iters,
+                                 tapa::istream<float_v16> &Vector_X_Stream,
                                  tapa::istream<INDEX_TYPE> &Stop_in) {
+    const INDEX_TYPE packet_count = spmv_service_num_float_v16_packets(Column_num);
+    const unsigned long long expected_packets =
+        (Max_iters > 0)
+            ? static_cast<unsigned long long>(packet_count) *
+                  static_cast<unsigned long long>(Max_iters)
+            : 0ULL;
+    unsigned long long drained_packets = 0;
+    bool stop_seen = false;
+
     for (;;) {
 #pragma HLS pipeline II=1
-        // Vector_X_Stream 没有内嵌 stop token，所以单独用 Stop_in 退出。
-        // 优先消费残留 X 包，避免最后一级 Core 因链尾堵塞而卡住。
-        if (!Vector_X_Stream.empty()) {
+        // Vector_X_Stream 没有内嵌 stop token，因此不能在看到 stream 暂时为空时
+        // 直接吃 stop 退出；Core15 可能稍后还会转发本轮残余 X 包。这里按轮次数量
+        // 精确 drain 完所有应到达链尾的 X 包，再允许 stop 结束，避免链尾提前退出后
+        // Core15 写尾流无人消费，导致 host 卡在 Finish。
+        if (drained_packets < expected_packets && !Vector_X_Stream.empty()) {
             float_v16 tmp;
             Vector_X_Stream.try_read(tmp);
-        } else if (!Stop_in.empty()) {
+            ++drained_packets;
+        } else if (!stop_seen && !Stop_in.empty()) {
             INDEX_TYPE stop;
             Stop_in.try_read(stop);
+            stop_seen = true;
+        } else if (stop_seen && drained_packets >= expected_packets) {
             return;
         }
     }

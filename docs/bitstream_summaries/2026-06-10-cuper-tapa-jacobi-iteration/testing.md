@@ -146,6 +146,84 @@ cuper-jacobi-iteration-build/regression/20260612_124905_quick/
 | `cant` | PASS | 1 | 0 | 2 | 0 | 0 | 103856 |
 | `thermal2_n65536` | PASS | 1 | 0 | 1 | 0 | 0 | 36081 |
 
+### 2026-06-12 chain-tail drain fix software check
+
+这轮排查到 `SpmvService_DestroyFloatV16` 存在硬件退出竞态：旧逻辑在尾端
+`Vector_X_Stream` 暂时为空时可以先读 stop 并 return，后续 Core15 若继续转发残余
+X 包，就会因为链尾无人消费而卡住。已改为按 `ceil(Column_num / 16) * Max_iters`
+精确 drain 完所有应到达链尾的 X 包，再允许 stop 退出。
+
+验证命令：
+
+```bash
+make cuper-jacobi-build-host
+make cuper-jacobi-regression-sw MODE=quick NO_BUILD=1 ALLOW_MISSING=1
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+关键结果：
+
+```text
+quick regression: pass=2 fail=0
+thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+```
+
+注意：这个修复已经在 2026-06-12 重新生成硬件 bitstream，但还没有同步到
+`395bitstream/`。当前 `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`
+仍是修复前 artifact。
+
+### 2026-06-12 tail-drain debug hardware build
+
+构建命令：
+
+```bash
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host \
+  CUPER_JACOBI_BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build
+
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw \
+  CUPER_JACOBI_BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build \
+  MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-hw-tmux \
+  CUPER_JACOBI_BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build
+```
+
+构建结果：
+
+```text
+build dir: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/
+build log: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/logs/build_hw_tmux.log
+xclbin: cuper-tapa-jacobi-u55c-20260612-tail-drain-debug-build/CuperJacobiIteration.xclbin
+UUID: 401e53eb-a68f-55fb-78f8-5553f14edcd2
+SHA256: 46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f
+DATA clock: 161 MHz
+KERNEL clock: 500 MHz
+HBM clock: 442 MHz
+v++ link: Run completed
+total elapsed: 4h 5m 6s
+```
+
+前置 software smoke：
+
+```text
+thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+```
+
+时序状态：
+
+```text
+Timing constraints are not met.
+Setup failing endpoints: 105708
+Setup worst slack: -2.842 ns
+Setup total violation: -74910.742 ns
+Hold failing endpoints: 0
+Hold worst slack: 0.004 ns
+```
+
+结论：这版已经包含 `SpmvService_DestroyFloatV16` 链尾 drain 修复并完成 `.xclbin`
+生成，但仍不是 timing-clean bitstream，且还未同步到 `395bitstream/`、未上板验证。
+
 ## 硬件 demo 构建记录
 
 同步文件：
