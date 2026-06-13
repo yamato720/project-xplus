@@ -105,4 +105,13 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           const float Tau
                          );
 
+// Debug-only mmap micro top。它不执行 Jacobi 数学，只写 Status/Metrics/Debug 的
+// 固定 probe 槽位后返回，用来确认 mmap 写回、HBM bank 和 runtime wait/sync 边界。
+void CuperJacobiMmapProbeOnly(tapa::mmap<INDEX_TYPE> Status,
+                              tapa::mmap<double> Metrics,
+                              tapa::mmap<INDEX_TYPE> Debug,
+                              const INDEX_TYPE Row_num,
+                              const INDEX_TYPE Max_iters,
+                              const INDEX_TYPE Column_num);
+
 #endif

@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | entry mmap probe debug demo 候选，routed timing 未收敛，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration debug demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiMmapProbeOnly` | mmap-only split-bank probe，timing-clean，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -51,33 +51,34 @@ TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
 cuper-tapa-jacobi-u55c-20260613-demo.xclbin
 ```
 
-这版是 `CuperJacobiIteration` entry mmap probe / deadlock-debug ABI 硬件 demo
-artifact，包含
-`SpmvService_DestroyFloatV16` 链尾 X stream 精确 drain 修复、
-`Jacobi_UpdatePairCompute[0..7]` 的 finite frame/stop 退出改造，以及
-`Batch_num==0` 空 R 路径下的 X loader/drain 修复。当前版本额外在
-`Jacobi_DebugMonitor` 和 `Jacobi_RoundDispatcher` 入口写入 Debug/Status/Metrics
-mmap probe，用于确认 kernel 入口任务和 HBM[24] 写回是否可见。配套 host 也拆开
-`WriteToDevice/Exec/ReadFromDevice/Finish`，可在 `Finish()` 前打印
-Status/Metrics/Debug 快照。它覆盖同主线 Jacobi demo 槽，但不替换任何标准文件；
-当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。
+这版是 `CuperJacobiMmapProbeOnly` split-bank mmap-only 硬件 probe。它只写
+`Status`、`Metrics`、`Debug` 的固定槽位并等待 m_axi write response 后返回，不接入
+完整 `CuperJacobiIteration` dataflow、Cuper SpMV service 或 Jacobi update。它用于先
+验证 kernel 启动、mmap 写回、HBM bank 分配、native XRT BO sync 和 runtime wait
+边界。它覆盖同主线 Jacobi demo 槽，但不替换任何标准文件；当前 `cuper-tapa-jacobi`
+仍然没有标准 bitstream。
 demo xclbin UUID 为
+`380f9de1-e5c1-66ab-b888-db99d2ef3523`，SHA256 为
+`7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1`。
+最终 xclbin info 中 DATA clock 为 300 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz。构建目录为
+`cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/`。
+
+当前 probe ABI 把 `Status`、`Metrics`、`Debug` 分别映射到
+HBM[24]、HBM[25]、HBM[26]。VPL implementation 和 `.xclbin` 封装都已完成，routed
+timing 收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；
+hold worst slack `0.009 ns`。这版仅用于调试 runtime/mmap 边界，不代表完整
+Jacobi graph 已跑通。
+
+它覆盖的上一版同名 `20260613` entry mmap probe debug demo UUID 为
 `7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为
-`775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`。
-最终 xclbin info 中 DATA clock 为 175 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 450 MHz，DATA achieved 为 175.9 MHz。构建目录为
-`cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/`。
-
-当前 ABI 使用单个原地更新 `X` buffer，不再使用旧 demo 的 `X0/X1` 双缓冲；
-`Status`、`Metrics` 和 deadlock `Debug` buffer 共同映射到 HBM[24]。注意这版
-VPL implementation 和 `.xclbin` 封装都已完成，但 routed timing 仍未收敛：
-WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235`；hold 为
-0 个 failing endpoint，worst hold slack `0.009 ns`。因此它只作为调试/同步
-demo artifact，不建议晋级标准。
-
-2026-06-13 已完成这版的 software/TAPA simulation、debug XO 前置验证和完整
-`.xclbin` 构建；当前 entry mmap probe demo 还没有做新版上板 smoke。它覆盖的上一版
-同名 `20260613` pre-Finish/empty-R demo UUID 为
+`775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`。上一版是完整
+`CuperJacobiIteration` graph 上的入口阻塞 mmap probe，routed timing 未收敛：
+WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235`。服务器侧上板
+`thermal2_n16` 与 `thermal2_n1024` 的 `MAX_ITERS=1` 均为 120s timeout，host 停在
+`[tapa-invoke] after ReadFromDevice before Finish`，且 Status[8..11]、
+Metrics[8..11]、Debug[48..51] 入口 probe 全 0。该失败结论只对应旧 UUID，不能
+套用到当前 mmap-only `.xclbin` 文件。再上一版同名 pre-Finish/empty-R demo UUID 为
 `5c9f0e72-5ea9-7142-1e90-690b72d30557`，SHA256 为
 `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26`。上一版上板最小
 smoke 显示 `thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 均停在

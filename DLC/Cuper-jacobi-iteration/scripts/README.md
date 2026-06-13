@@ -7,9 +7,12 @@
 - `launcher.py`：交互式/命令行构建与运行入口
 - `env_u55c.sh`：加载 TAPA、Vitis 2022.2、XRT、U55C platform 路径
 - `build_host.sh`：用 CMake 编译 `cuper_jacobi_host`
-- `build_xo_u55c.sh`：用 `tapa compile` 生成 `CuperJacobiIteration.xo`
-- `link_xclbin_u55c.sh`：用 `v++ --link` 生成 `CuperJacobiIteration.xclbin`
+- `build_xo_u55c.sh`：用 `tapa compile` 生成 `CuperJacobiIteration.xo`；可用
+  `JACOBI_TOP=CuperJacobiMmapProbeOnly` 切到 mmap-only micro top
+- `link_xclbin_u55c.sh`：用 `v++ --link` 生成 xclbin；micro top 支持 same-bank 与
+  split-bank connectivity
 - `run_hw.sh`：设置 `BITFILE` 后运行 host
+- `run_mmap_probe_xrt.sh`：用 native XRT runner 运行 `CuperJacobiMmapProbeOnly`
 - `regression_sw.py`：一键 software/TAPA simulation 回归，终端只输出摘要，详细输出写日志
 
 推荐顺序：
@@ -61,4 +64,31 @@ scripts/launcher.py hw-tmux --force
 
 ```bash
 BITFILE=/path/to/CuperJacobiIteration.xclbin scripts/run_hw.sh data/matrices/cant.mtx
+```
+
+## mmap-only micro probe
+
+`CuperJacobiMmapProbeOnly` 只写 Status/Metrics/Debug 固定槽位并返回，不接入完整
+Jacobi dataflow。它用于排查 mmap 写回、HBM bank、native XRT sync 和 TAPA/FRT
+`Finish()` 边界。
+
+从根目录运行：
+
+```bash
+make cuper-jacobi-build-mmap-probe-xrt-host
+make cuper-jacobi-build-mmap-probe-xo
+make cuper-jacobi-link-mmap-probe-xclbin
+make cuper-jacobi-link-mmap-probe-xclbin-split
+```
+
+`link-mmap-probe-xclbin` 把 Status/Metrics/Debug 都放在 HBM[24]；
+`link-mmap-probe-xclbin-split` 使用 HBM[24]/HBM[25]/HBM[26]。
+
+上板运行：
+
+```bash
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=1024 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
 ```

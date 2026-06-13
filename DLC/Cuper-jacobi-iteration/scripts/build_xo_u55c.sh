@@ -9,15 +9,16 @@ source "$ROOT_DIR/scripts/env_u55c.sh"
 
 mkdir -p "$BUILD_DIR"
 
-OUTPUT_XO="${1:-$BUILD_DIR/CuperJacobiIteration.xo}"
-WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_CuperJacobiIteration}"
+TOP="${JACOBI_TOP:-CuperJacobiIteration}"
+OUTPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
+WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_$TOP}"
 CLOCK_PERIOD="${CLOCK_PERIOD:-2.0}"
 JOBS="${JOBS:-$(nproc)}"
 
 cmd=(
   tapa -w "$WORK_DIR" compile
   -f "$ROOT_DIR/kernels/Cuper.cpp"
-  -t CuperJacobiIteration
+  -t "$TOP"
   -p "$DEVICE"
   --clock-period "$CLOCK_PERIOD"
   -j "$JOBS"

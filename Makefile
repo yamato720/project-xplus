@@ -232,7 +232,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-build-mmap-probe-xrt-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-build-mmap-probe-xo cuper-jacobi-link-mmap-probe-xclbin cuper-jacobi-link-mmap-probe-xclbin-split cuper-jacobi-run-mmap-probe-xrt cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
 
 all: run-local
 
@@ -392,6 +392,9 @@ cuper-jacobi-launch cuper-jacobi-launcher:
 cuper-jacobi-build-host:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
+cuper-jacobi-build-mmap-probe-xrt-host:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-mmap-probe-xrt-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
 cuper-jacobi-run-sw:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
 
@@ -403,6 +406,18 @@ cuper-jacobi-build-xo:
 
 cuper-jacobi-link-xclbin:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-xclbin BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")
+
+cuper-jacobi-build-mmap-probe-xo:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-mmap-probe-xo BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-link-mmap-probe-xclbin:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-mmap-probe-xclbin BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-link-mmap-probe-xclbin-split:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" link-mmap-probe-xclbin-split BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-run-mmap-probe-xrt:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-mmap-probe-xrt BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(BITFILE),BITFILE="$(BITFILE)") $(if $(ROW_NUM),ROW_NUM="$(ROW_NUM)") $(if $(MAX_ITERS),MAX_ITERS="$(MAX_ITERS)") $(if $(COLUMN_NUM),COLUMN_NUM="$(COLUMN_NUM)") $(if $(WAIT_TIMEOUT_MS),WAIT_TIMEOUT_MS="$(WAIT_TIMEOUT_MS)") $(if $(SAMPLE_DELAY_MS),SAMPLE_DELAY_MS="$(SAMPLE_DELAY_MS)")
 
 cuper-jacobi-hw-tmux:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" hw-tmux BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" $(if $(FORCE),FORCE=$(FORCE)) $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)")

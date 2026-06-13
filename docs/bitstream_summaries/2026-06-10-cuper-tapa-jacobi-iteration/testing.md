@@ -512,8 +512,72 @@ Hold worst slack: 0.009 ns
 ```
 
 结论：这版已经包含入口 mmap probe，并已同步到 `395bitstream/` 的 Jacobi demo 槽。
-它仍不是 timing-clean bitstream，当前还没有新版上板 smoke；上一版
+它仍不是 timing-clean bitstream。后续最小上板 smoke 显示当前 UUID 在
+`thermal2_n16` 与 `thermal2_n1024` 上仍卡 `Finish()`，见下一节；上一版
 pre-Finish/empty-R demo 的 `Finish()` 不返回结论只对应旧 UUID。
+
+### 2026-06-13 entry mmap probe demo 上板失败
+
+测试对象：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 7bf54cce-83a3-b7e7-97a9-719446658c03
+SHA256: 775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24
+logs: logs/jacobi_entry_mmap_probe_hw_20260613_171648/
+```
+
+关键结果：
+
+```text
+thermal2_n16 MAX_ITERS=1: rc=124, 120s timeout
+thermal2_n1024 MAX_ITERS=1: rc=124, 120s timeout
+host stop point: [tapa-invoke] after ReadFromDevice before Finish
+Status[8..11]: 0,0,0,0
+Metrics[8..11]: 0,0,0,0
+Debug[48..51]: 0,0,0,0
+CU status after timeout: usually IDLE
+firewall: GOOD
+```
+
+判定：`thermal2_n1024` 是非空 R 路径，因此不能继续只按 empty-R 特例解释。当前
+probe 全 0 也不能直接证明 PL 内部 dataflow 死锁；优先拆 host/runtime/m_axi 写回边界。
+
+### 2026-06-13 mmap-only micro top 准备
+
+已实现下一版 debug-only micro top 和 native runner：
+
+```text
+CuperJacobiMmapProbeOnly
+cuper_jacobi_mmap_probe_xrt
+```
+
+已跑：
+
+```text
+make cuper-jacobi-build-mmap-probe-xrt-host: passed
+make cuper-jacobi-build-mmap-probe-xo: generated cuper-jacobi-iteration-build/CuperJacobiMmapProbeOnly.xo
+```
+
+已在 tmux 下生成两个 micro probe xclbin：
+
+```text
+same-bank: cuper-tapa-jacobi-u55c-20260613-mmap-probe-same-bank-build/CuperJacobiMmapProbeOnly.xclbin
+split-bank: cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/CuperJacobiMmapProbeOnly.xclbin
+build log: logs/cuper_jacobi_mmap_probe_hw_20260613.log
+```
+
+两版 routed timing 均收敛，WNS `0.003 ns`，TNS `0.000 ns`。当前同步到
+`395bitstream/` 的是 split-bank 版本。
+
+上板时用 native runner 直接采样 BO：
+
+```bash
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=1024 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+```
 
 ## 当前硬件 demo 同步记录
 
@@ -527,42 +591,40 @@ pre-Finish/empty-R demo 的 `Finish()` 不返回结论只对应旧 UUID。
 关键字段：
 
 ```text
-Kernel: CuperJacobiIteration
-ABI: JACOBI_DEADLOCK_DEBUG=1, single X buffer, Debug buffer on HBM[24]
-UUID: 7bf54cce-83a3-b7e7-97a9-719446658c03
-SHA256: 775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24
-DATA clock: 175 MHz
+Kernel: CuperJacobiMmapProbeOnly
+ABI: mmap-only split-bank probe, Status/Metrics/Debug on HBM[24]/HBM[25]/HBM[26]
+UUID: 380f9de1-e5c1-66ab-b888-db99d2ef3523
+SHA256: 7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1
+DATA clock: 300 MHz
 KERNEL clock: 500 MHz
 HBM clock: 450 MHz
-DATA achieved: 175.9 MHz
 ```
 
 构建情况：
 
 ```text
-build dir: cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/
-build log: cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/logs/build_hw_tmux.log
+build dir: cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/
+build log: logs/cuper_jacobi_mmap_probe_hw_20260613.log
 VPL: FINISHED, Run Status: impl Complete
 v++ link: Run completed
-total elapsed: 4h 2m 20s
+total elapsed: 1h 12m 15s
 ```
 
 时序状态：
 
 ```text
-Timing constraints are not met.
-Setup failing endpoints: 101235
-Setup worst slack: -2.350 ns
-Setup total violation: -60974.352 ns
-Hold failing endpoints: 0
+Timing constraints are met.
+Setup failing endpoints: 0
+Setup worst slack: 0.003 ns
+Setup total violation: 0.000 ns
 Hold worst slack: 0.009 ns
 ```
 
-因此当前 `.xclbin` 只是调试/同步 demo artifact，不是 timing-clean bitstream；
-当前 entry mmap probe demo 还没有做新版上板 smoke。上一版同名 pre-Finish/empty-R
-Jacobi demo UUID 为 `5c9f0e72-5ea9-7142-1e90-690b72d30557`，SHA256 为
-`0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26`；旧测试结论只能
-作为历史记录，不能套用到当前 `.xclbin` 文件。
+因此当前 `.xclbin` 是 timing-clean 的调试/同步 demo artifact，但它不是完整
+Jacobi graph。上一版同名 entry mmap probe Jacobi demo UUID 为
+`7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为
+`775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`；该旧版最小上板仍卡
+`Finish()`，旧测试结论只能作为历史记录，不能套用到当前 mmap-only `.xclbin` 文件。
 
 ## 判定标准
 
@@ -592,7 +654,7 @@ JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-link-xclbin
 
 ```bash
 BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
-  MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
 ```
 
 当前 demo 已放入同步目录：
@@ -602,8 +664,9 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info
 ```
 
-当前 entry mmap probe demo 上板后仍必须补：
+当前 mmap-only split-bank demo 上板后仍必须补：
 
-- `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2` 结果。
-- `Status`、`Final buffer`、`Iterations`、`Final diff`、`jacobi-stage-*`、`Error Num`。
+- native XRT runner 的 wait 前/后 Status、Metrics、Debug 快照。
+- `ROW_NUM=16` 和 `ROW_NUM=1024` 的返回状态、timeout 边界和 BO 内容。
+- 若 micro probe 通过，再回到完整 `CuperJacobiIteration` graph 重新生成 xclbin。
 - `395bitstream/README.md` 和 HTML 报告。

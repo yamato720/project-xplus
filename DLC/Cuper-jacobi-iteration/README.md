@@ -30,7 +30,7 @@ Cuper-jacobi-iteration/
 
 1. 保留 Cuper 的 16 HBM SpMV loader/core/accumulator/checker 数据通路。
 2. 保留 PCG 路线里 command/stop 驱动的 SpMV service 边界。
-3. 只提供一个 `CuperJacobiIteration(...)` 顶层，当前行为是：
+3. 主要算法顶层是 `CuperJacobiIteration(...)`，当前行为是：
 
 $$
 x_i^{(k+1)}
@@ -49,6 +49,8 @@ $$
    `[jacobi-stage-ms]`。
 6. host 支持 Matrix Market `.mtx` 输入，也支持 Project-XPlus CSR 目录
    `row_ptr.txt/col_idx.txt/values.txt/b.txt`。
+7. 当前另有 debug-only `CuperJacobiMmapProbeOnly(...)` micro top，只写
+   Status/Metrics/Debug mmap 后返回，用于排查 `Finish()`、BO sync 和 HBM 写回边界。
 
 ## 与上层工程的关系
 
@@ -68,9 +70,12 @@ $$
 
 ## 当前测试状态
 
-当前已经生成 deadlock-debug ABI `CuperJacobiIteration.xclbin` 并同步为
-`395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin`。这只是 demo artifact：
-routed timing 未收敛，也还没有上板性能数据。详细测试流程见 `docs/testing.md`。
+当前已经把 timing-clean 的 `CuperJacobiMmapProbeOnly` split-bank mmap-only probe 同步为
+`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这只是 debug artifact，
+用于验证 kernel 启动、mmap 写回和 native XRT BO sync；它不是完整
+`CuperJacobiIteration` graph。上一版完整 graph 的 entry mmap probe 在
+`thermal2_n16` 与 `thermal2_n1024` 的 `MAX_ITERS=1` 上板 smoke 中 timeout 在
+`Finish()`，入口 probe 全 0。详细测试流程见 `docs/testing.md`。
 
 已记录数据：
 
@@ -84,7 +89,7 @@ routed timing 未收敛，也还没有上板性能数据。详细测试流程见
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260611-demo.xclbin` | `b4664f5e-8cd6-0f7d-56ae-28384fce6400` | `1113701276f09545b2407d16823e5649d6e017a9fcef63a014838106612e8eb5` | 未收敛，WNS `-2.575 ns` |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | `380f9de1-e5c1-66ab-b888-db99d2ef3523` | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` | `CuperJacobiMmapProbeOnly` split-bank probe，WNS `0.003 ns`，待上板 |
 
 ## 常用命令
 
@@ -107,5 +112,16 @@ MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2
 
 `build-xo` 的 TAPA top 是 `CuperJacobiIteration`，输出默认是
 `cuper-jacobi-iteration-build/CuperJacobiIteration.xo`。
+
+mmap-only micro probe：
+
+```bash
+make cuper-jacobi-build-mmap-probe-xrt-host
+make cuper-jacobi-build-mmap-probe-xo
+make cuper-jacobi-link-mmap-probe-xclbin
+make cuper-jacobi-link-mmap-probe-xclbin-split
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+```
 
 默认软件仿真不需要 `BITFILE`。上板或 emulation 时通过 `BITFILE` 指定 xclbin。

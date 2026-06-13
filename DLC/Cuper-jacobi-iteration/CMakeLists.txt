@@ -44,6 +44,24 @@ set(TAPA_LIB_DIR "${TAPA_ROOT}/lib")
 message(STATUS "Using TAPA_ROOT=${TAPA_ROOT}")
 message(STATUS "Using XILINX_HLS_PATH=${XILINX_HLS_PATH}")
 
+set(XRT_ROOT_CANDIDATES
+    "$ENV{XILINX_XRT}"
+    "${CMAKE_SOURCE_DIR}/../../../xilinx-local/opt/xilinx/xrt"
+    "/opt/xilinx/xrt"
+)
+
+foreach(candidate IN LISTS XRT_ROOT_CANDIDATES)
+    if(candidate AND EXISTS "${candidate}/include/experimental/xrt_bo.h")
+        set(XILINX_XRT_PATH "${candidate}")
+        break()
+    endif()
+endforeach()
+
+if(NOT XILINX_XRT_PATH)
+    message(FATAL_ERROR "XRT not found. Set XILINX_XRT to the XRT prefix.")
+endif()
+message(STATUS "Using XILINX_XRT_PATH=${XILINX_XRT_PATH}")
+
 # -----------------------------------------------------------------------------
 # 2. 头文件包含 (对齐新目录结构)
 # -----------------------------------------------------------------------------
@@ -53,6 +71,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/src                    # 适配层源码
     ${XILINX_HLS_PATH}/include
     ${XILINX_HLS_PATH}/common/technology/autopilot
+    ${XILINX_XRT_PATH}/include
 )
 
 # -----------------------------------------------------------------------------
@@ -96,5 +115,21 @@ target_link_libraries(cuper_jacobi_host
 )
 
 set_target_properties(cuper_jacobi_host PROPERTIES
-    BUILD_RPATH "${TAPA_LIB_DIR};/opt/xilinx/xrt/lib"
+    BUILD_RPATH "${TAPA_LIB_DIR};${XILINX_XRT_PATH}/lib"
+)
+
+add_executable(cuper_jacobi_mmap_probe_xrt
+    host/mmap_probe_xrt.cpp
+)
+
+target_link_libraries(cuper_jacobi_mmap_probe_xrt
+    PUBLIC
+    ${XILINX_XRT_PATH}/lib/libxrt_coreutil.so
+    uuid
+    pthread
+    rt
+)
+
+set_target_properties(cuper_jacobi_mmap_probe_xrt PROPERTIES
+    BUILD_RPATH "${XILINX_XRT_PATH}/lib"
 )

@@ -7,22 +7,22 @@ DLC/Cuper-jacobi-iteration/
 ```
 
 当前状态：已完成 software/TAPA simulation demo，并接入 Project-XPlus 根
-`Makefile` 的 `cuper-jacobi-*` 目标；已生成并同步 entry mmap probe /
-deadlock-debug ABI 硬件 demo xclbin，但 routed timing 未收敛，且当前新 demo 还没有
-上板 smoke。上一版 pre-Finish/empty-R demo 的最小上板 smoke 仍卡在 `Finish()`
-收尾，该结论仅作为历史记录。
+`Makefile` 的 `cuper-jacobi-*` 目标；完整 `CuperJacobiIteration` 的 entry mmap probe
+demo 上板仍卡在 `Finish()` 收尾。当前已新增并同步 timing-clean 的
+`CuperJacobiMmapProbeOnly` split-bank mmap-only debug xclbin，用于先排查
+host/runtime/m_axi 写回边界。
 
 ## 版本定位
 
 | 项目 | 内容 |
 | --- | --- |
 | 主线 | `cuper-tapa-jacobi` |
-| 顶层 kernel | `CuperJacobiIteration` |
+| 顶层 kernel | `CuperJacobiIteration`；当前同步 debug bitstream 为 `CuperJacobiMmapProbeOnly` |
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
-| 默认构建目录 | `cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/` |
+| 当前 debug 构建目录 | `cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；entry mmap probe debug 硬件 demo 已同步但 timing fail，尚未上板 smoke |
-| 是否建议晋级标准 | 不建议，需先修 timing 并完成 demo-only 上板测试 |
+| 版本状态 | software/TAPA simulation 通过；当前同步的是 mmap-only split-bank probe，timing clean，待上板验证 |
+| 是否建议晋级标准 | 不建议，当前不是完整 Jacobi graph |
 
 这条主线做普通 Jacobi iteration：
 
@@ -68,17 +68,18 @@ $$
 | --- | --- |
 | 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
 | `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/` |
-| ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `7bf54cce-83a3-b7e7-97a9-719446658c03` |
-| SHA256 | `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24` |
-| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | routed timing 未收敛，WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/` |
+| Kernel | `CuperJacobiMmapProbeOnly` |
+| ABI | mmap-only split-bank probe；`Status/Metrics/Debug` 分别接 HBM[24]/HBM[25]/HBM[26] |
+| UUID | `380f9de1-e5c1-66ab-b888-db99d2ef3523` |
+| SHA256 | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` |
+| DATA / KERNEL / HBM clock | `300 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 收敛，WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
 
-这个文件只作为当前调试 demo artifact 同步，不是标准 bitstream。Vitis link 已完成
-implementation 和 `.xclbin` 封装；hold 没有 failing endpoint，但 setup 仍明显
-不收敛。它覆盖了上一版同名 `20260613` pre-Finish/empty-R demo，旧 UUID
-`5c9f0e72-5ea9-7142-1e90-690b72d30557` 的测试结论只作为历史记录。
+这个文件只作为当前调试 demo artifact 同步，不是标准 bitstream，也不代表完整
+Jacobi graph 已跑通。Vitis link 已完成 implementation 和 `.xclbin` 封装；split-bank
+版本总耗时 `1h 12m 15s`。它覆盖了上一版同名 `20260613` entry mmap probe demo，旧
+UUID `7bf54cce-83a3-b7e7-97a9-719446658c03` 的测试结论只作为历史记录。
 
 更早 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
 `[tapa-invoke] after ReadFromDevice before Finish`。probe 期间 CU 已显示
@@ -102,7 +103,21 @@ Status/Metrics/Debug 全 0；probe 期间 CU 为 `IDLE`，firewall `GOOD`。因�
 
 这版 probe 源码已经通过 `thermal2_n16` / `thermal2_n1024` 的 debug ABI
 software/TAPA simulation，并重新生成完整硬件 demo xclbin，同步到当前 Jacobi demo
-槽。当前 entry mmap probe demo 还没有做新版上板 smoke。
+槽。服务器侧复测当前 UUID 后，`thermal2_n16` 与 `thermal2_n1024` 的
+`MAX_ITERS=1` 均为 120s timeout，Status[8..11]、Metrics[8..11]、Debug[48..51]
+入口 probe 全 0。下一步不再继续往完整 graph 里堆事件，而是先用
+`CuperJacobiMmapProbeOnly` 和 native XRT runner 验证 mmap 写回边界。
+
+## 当前 micro probe 工具
+
+| 项目 | 内容 |
+| --- | --- |
+| Debug top | `CuperJacobiMmapProbeOnly` |
+| Native runner | `cuper_jacobi_mmap_probe_xrt` |
+| Same-bank link | `make cuper-jacobi-link-mmap-probe-xclbin` |
+| Split-bank link | `make cuper-jacobi-link-mmap-probe-xclbin-split` |
+| 当前同步版本 | split-bank xclbin 已同步到 Jacobi demo 槽 |
+| XO 验证 | 已生成 `cuper-jacobi-iteration-build/CuperJacobiMmapProbeOnly.xo` |
 
 ## 当前已记录测试
 
@@ -128,8 +143,9 @@ docs/codex/testing.md
 ## 待补
 
 - 当前 root target 下补跑 `thermal2_n262144`。
-- 若要继续硬件路线，先处理 timing fail；主要看 update path 和
-  300 MHz DATA clock 下的 update/writeback 路径。
-- 对当前 entry mmap probe debug xclbin 复测 `thermal2_n16` 和 `thermal2_n1024`。
+- 对当前 mmap-only split-bank demo 跑 native XRT 上板 smoke，确认
+  Status/Metrics/Debug mmap 写回是否能可靠穿透 native XRT sync。
+- full Jacobi graph 暂停继续堆 event debug；等 micro probe 证明 mmap 写回边界后再回到
+  one-round/no-feedback 或 no-Debug full graph。
 - 完成 demo-only 上板测试后，再更新 HTML 报告和本目录测试表。
 - `source.diff` 暂不生成；当前还没有硬件 demo-only 性能确认。

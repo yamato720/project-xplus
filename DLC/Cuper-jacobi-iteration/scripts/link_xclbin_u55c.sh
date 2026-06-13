@@ -7,8 +7,9 @@ BUILD_DIR="${BUILD_DIR:-$(cd "$ROOT_DIR/../.." && pwd)/cuper-jacobi-iteration-bu
 # shellcheck source=env_u55c.sh
 source "$ROOT_DIR/scripts/env_u55c.sh"
 
-INPUT_XO="${1:-$BUILD_DIR/CuperJacobiIteration.xo}"
-OUTPUT_XCLBIN="${2:-$BUILD_DIR/CuperJacobiIteration.xclbin}"
+TOP="${JACOBI_TOP:-CuperJacobiIteration}"
+INPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
+OUTPUT_XCLBIN="${2:-$BUILD_DIR/$TOP.xclbin}"
 CONNECTIVITY_CFG="$ROOT_DIR/cfg/connectivity.cfg"
 
 if [[ ! -f "$INPUT_XO" ]]; then
@@ -19,7 +20,22 @@ fi
 
 mkdir -p "$BUILD_DIR/logs" "$BUILD_DIR/reports" "$BUILD_DIR/vpp_tmp"
 
-if [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
+if [[ "$TOP" == "CuperJacobiMmapProbeOnly" ]]; then
+  CONNECTIVITY_CFG="$BUILD_DIR/connectivity_mmap_probe.cfg"
+  {
+    echo "[connectivity]"
+    echo "nk=CuperJacobiMmapProbeOnly:1"
+    echo
+    echo "sp=CuperJacobiMmapProbeOnly_1.Status:HBM[24]"
+    if [[ "${JACOBI_MMAP_PROBE_SPLIT:-0}" != "0" && "${JACOBI_MMAP_PROBE_SPLIT:-}" != "" ]]; then
+      echo "sp=CuperJacobiMmapProbeOnly_1.Metrics:HBM[25]"
+      echo "sp=CuperJacobiMmapProbeOnly_1.Debug:HBM[26]"
+    else
+      echo "sp=CuperJacobiMmapProbeOnly_1.Metrics:HBM[24]"
+      echo "sp=CuperJacobiMmapProbeOnly_1.Debug:HBM[24]"
+    fi
+  } > "$CONNECTIVITY_CFG"
+elif [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
   CONNECTIVITY_CFG="$BUILD_DIR/connectivity_deadlock_debug.cfg"
   cp "$ROOT_DIR/cfg/connectivity.cfg" "$CONNECTIVITY_CFG"
   {

@@ -19,6 +19,7 @@ data/suitesparse/*/csr/
 DLC/Cuper-jacobi-iteration/data/matrices/*.mtx
 DLC/Cuper-jacobi-iteration/.ipcache/
 DLC/Cuper/.ipcache/
+.ipcache/
 DLC/Cuper/run/
 DLC/Cuper/work.out/
 work.out/

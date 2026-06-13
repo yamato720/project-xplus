@@ -83,15 +83,16 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
   stage writes `x_next=(b+(-R*x_old))*diag_inv` back into the single `X` buffer. It is wired
   into the root `Makefile` through `cuper-jacobi-*` targets and currently reports
   `[jacobi-stage-cycles]` / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current
-  records are software/TAPA simulation plus one entry mmap probe deadlock-debug xclbin artifact:
+  records are software/TAPA simulation plus one mmap-only micro-probe xclbin artifact:
   `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` (UUID
-  `7bf54cce-83a3-b7e7-97a9-719446658c03`, SHA256
-  `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`). That artifact is not
-  timing-clean (routed WNS -2.350 ns, TNS -60974.352 ns) and has not been board-tested, so
-  there is still no Jacobi standard xclbin. The previous pre-Finish/empty-R demo UUID
-  `5c9f0e72-5ea9-7142-1e90-690b72d30557` timed out at `Finish()` on
-  `thermal2_n16` / `thermal2_n1024`; that conclusion is historical and does not apply to
-  the current synced file.
+  `380f9de1-e5c1-66ab-b888-db99d2ef3523`, SHA256
+  `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1`). That artifact is
+  `CuperJacobiMmapProbeOnly(...)`, not the full Jacobi graph. It is timing-clean (routed WNS
+  0.003 ns, TNS 0) and maps Status/Metrics/Debug to HBM[24]/HBM[25]/HBM[26]. The previous
+  full-graph entry mmap probe xclbin timed out at `Finish()` on `thermal2_n16` /
+  `thermal2_n1024`, with Status[8..11], Metrics[8..11], and Debug[48..51] all zero. There is
+  still no Jacobi standard xclbin. The next debug boundary is board testing the current
+  mmap-only demo with the native XRT runner `cuper_jacobi_mmap_probe_xrt`.
 - The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
   update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,
   `update_p`, `P_spmv` / `AP_spmv` consumption, controller HBM access patterns, stage

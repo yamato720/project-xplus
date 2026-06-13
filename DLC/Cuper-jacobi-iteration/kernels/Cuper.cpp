@@ -11,4 +11,6 @@
 //   - spmv_service_tasks.hpp        ：中性命名的常驻 SpMV service task。
 //   - jacobi_cuper_output_update.hpp：Cuper 输出拼包、Jacobi 更新和写回。
 //   - cuper_jacobi_top_graphs.hpp ：当前实验顶层 task graph。
+//   - jacobi_mmap_probe_only.hpp  ：debug-only mmap micro top。
 #include "detail/cuper_jacobi_top_graphs.hpp"
+#include "detail/jacobi_mmap_probe_only.hpp"

@@ -66,12 +66,30 @@
 - 2026-06-13 已生成并同步 entry mmap probe debug 硬件 demo artifact：
   `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版覆盖上一版同名
   pre-Finish/empty-R demo 槽，但仍未晋级标准。
+- 2026-06-13 服务器侧复测当前 entry mmap probe demo 后，`thermal2_n16` 与
+  `thermal2_n1024` 的 `MAX_ITERS=1` 均为 120s timeout，host 仍停在
+  `[tapa-invoke] after ReadFromDevice before Finish`，Status[8..11]、
+  Metrics[8..11]、Debug[48..51] 入口 probe 全 0。当前证据不能直接定性为 PL
+  dataflow 死锁，下一步先拆 host/runtime/m_axi 写回边界。
+- 新增 debug-only `CuperJacobiMmapProbeOnly` micro top：只写 Status/Metrics/Debug
+  固定槽位并等待 write response 后返回，不接入完整 Jacobi dataflow。
+- 新增 native XRT debug runner `cuper_jacobi_mmap_probe_xrt`，使用 sentinel 初始化
+  Status/Metrics/Debug，并在 wait 前后主动 sync BO 打印快照。
+- 新增 same-bank 与 split-bank micro probe 构建入口：
+  `cuper-jacobi-link-mmap-probe-xclbin` 和
+  `cuper-jacobi-link-mmap-probe-xclbin-split`。
+- 2026-06-13 已在 tmux 中生成 mmap-only micro probe same-bank 与 split-bank 两版
+  xclbin。两版 routed timing 均收敛，WNS `0.003 ns`，TNS `0.000 ns`。
+- 已把 split-bank 版本同步到 Jacobi demo 槽：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。当前同步文件的 kernel
+  是 `CuperJacobiMmapProbeOnly`，不是完整 `CuperJacobiIteration` graph；它用于验证
+  mmap/ABI/runtime 边界。
 
 ## 当前没有做
 
-- entry mmap probe 版本还没有做新版上板 smoke。
-- 没有得到 timing-clean bitstream；当前 2026-06-13 entry mmap probe demo routed
-  timing 未收敛，WNS `-2.350 ns`。
+- mmap-only micro top 已生成 timing-clean `.xclbin`，但还没有上板测试。
+- 完整 `CuperJacobiIteration` 仍没有 timing-clean、可正常返回的硬件 bitstream；上一版
+  entry mmap probe demo routed timing 未收敛，WNS `-2.350 ns`。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -84,6 +102,6 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前 2026-06-13 entry mmap probe debug bitstream 没有过 timing，且还没有做新版
-  上板 smoke，不能作为稳定性能结论。上一版 pre-Finish/empty-R demo 的
-  `Finish()` 不返回结论只对应旧 UUID。
+- 当前同步的 2026-06-13 demo 是 mmap-only micro probe，不是完整 Jacobi graph，不能
+  作为 Jacobi 算法功能或性能结论。下一步优先用 native XRT runner 上板验证
+  Status/Metrics/Debug BO sync。

@@ -156,6 +156,13 @@ timing violation
 如果 A 失败、B 通过，优先怀疑同 bank 三个 m_axi master 的竞争或 routing/timing。
 如果 A/B 都失败，优先看 ABI/runtime/timing。
 
+当前实现状态：
+
+```text
+CuperJacobiMmapProbeOnly 已加入 kernels/detail/jacobi_mmap_probe_only.hpp
+make cuper-jacobi-build-mmap-probe-xo 已生成 CuperJacobiMmapProbeOnly.xo
+```
+
 ### P1. 写一个 native XRT debug runner
 
 当前 `tapa::invoke` 把 start/wait/sync 边界藏在 FRT 里，不利于观察失败瞬间。建议新增一个
@@ -182,6 +189,13 @@ kernel 未完成或 Finish 未返回时，Status/Metrics/Debug BO 里到底有�
 如果 native XRT 能采样到 magic，而 TAPA/FRT pre-Finish 仍全 0，问题就在 FRT
 调用顺序或 BO 迁移语义附近。如果 native XRT 也采不到 magic，再回到 kernel
 entry/m_axi/timing。
+
+当前实现状态：
+
+```text
+host/mmap_probe_xrt.cpp 已加入 native XRT runner
+make cuper-jacobi-build-mmap-probe-xrt-host 已通过
+```
 
 ### P2. 去掉 full graph 里的入口阻塞 mmap probe
 

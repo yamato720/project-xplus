@@ -68,13 +68,12 @@ make cuper-jacobi-regression-sw CASE=thermal2_n65536 NO_BUILD=1
 make cuper-jacobi-regression-sw CASES="cant thermal2_n65536" NO_BUILD=1
 ```
 
-`run-sw` 不需要 `BITFILE`。后续硬件候选生成后，再用：
+`run-sw` 不需要 `BITFILE`。当前同步 demo 是 `CuperJacobiMmapProbeOnly`，用 native
+XRT runner 验证 mmap 写回边界：
 
 ```bash
-make cuper-jacobi-build-xo
-make cuper-jacobi-link-xclbin
 BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
-  MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
 ```
 
 ## 3. 当前记录数据
@@ -90,23 +89,22 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/` |
-| Kernel | `CuperJacobiIteration` |
-| ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `7bf54cce-83a3-b7e7-97a9-719446658c03` |
-| SHA256 | `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24` |
-| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 未收敛：WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235`；hold 无 failing endpoints |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/` |
+| Kernel | `CuperJacobiMmapProbeOnly` |
+| ABI | mmap-only split-bank probe，`Status/Metrics/Debug` 分别在 HBM[24]/HBM[25]/HBM[26] |
+| UUID | `380f9de1-e5c1-66ab-b888-db99d2ef3523` |
+| SHA256 | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` |
+| DATA / KERNEL / HBM clock | `300 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；hold worst slack `0.009 ns` |
 
-Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；总耗时
-`4h 2m 20s`，构建日志在
-`cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/logs/build_hw_tmux.log`。
-
-这版已同步到 `395bitstream/`，但还没有做新版 `hw` 上板运行。同步只是为了保留和
-分发当前调试 artifact，不能作为 timing-clean 标准 bitstream。上一版同名
-pre-Finish/empty-R demo UUID 为 `5c9f0e72-5ea9-7142-1e90-690b72d30557`，上板
-`thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 均卡在
-`after ReadFromDevice before Finish`；旧测试结论只作为历史记录。
+Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；split-bank
+构建总耗时 `1h 12m 15s`，汇总日志在
+`logs/cuper_jacobi_mmap_probe_hw_20260613.log`。这版已同步到 `395bitstream/`，只用于
+验证 kernel 启动、mmap 写回、HBM bank 分配和 native XRT BO sync 边界，不代表完整
+Jacobi graph 已跑通。上一版同名 entry mmap probe demo UUID 为
+`7bf54cce-83a3-b7e7-97a9-719446658c03`，上板 `thermal2_n16` 和 `thermal2_n1024`
+的 `MAX_ITERS=1` 均卡在 `after ReadFromDevice before Finish`，入口 probe 全 0；
+旧测试结论只作为历史记录。
 
 ## 3.2 finite pair compute 源码验证
 
@@ -372,6 +370,43 @@ prefinish Debug[48..51]: 0,0,0,0
 DLC/Cuper-jacobi-iteration/docs/entry_mmap_probe_failure_analysis.md
 ```
 
+## 3.8 mmap-only micro top 与 native XRT runner
+
+已按 `entry_mmap_probe_failure_analysis.md` 的 P0/P1 建议新增独立 debug top 和
+native XRT runner：
+
+```text
+CuperJacobiMmapProbeOnly
+host/mmap_probe_xrt.cpp
+scripts/run_mmap_probe_xrt.sh
+```
+
+`CuperJacobiMmapProbeOnly` 只写 Status/Metrics/Debug 的固定槽位并等待 write response
+后返回，不接入 Cuper SpMV service、Jacobi update、stage timer、debug event stream
+或 feedback token。它用于先验证 mmap 写回、HBM bank 分配和 runtime wait/sync 边界。
+
+新增 root target：
+
+```bash
+make cuper-jacobi-build-mmap-probe-xrt-host
+make cuper-jacobi-build-mmap-probe-xo
+make cuper-jacobi-link-mmap-probe-xclbin
+make cuper-jacobi-link-mmap-probe-xclbin-split
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
+  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+```
+
+其中 `link-mmap-probe-xclbin` 把 Status/Metrics/Debug 都接到 HBM[24]；
+`link-mmap-probe-xclbin-split` 使用 HBM[24]/HBM[25]/HBM[26]，用于区分同 bank 三个
+m_axi master 的问题。
+
+已完成本地验证：
+
+```text
+make cuper-jacobi-build-mmap-probe-xrt-host: passed
+make cuper-jacobi-build-mmap-probe-xo: generated cuper-jacobi-iteration-build/CuperJacobiMmapProbeOnly.xo
+```
+
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
 `cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：
 
@@ -421,13 +456,14 @@ host 会打印这些 Jacobi 专用字段：
 
 ## 5. 后续补测
 
-后续硬件 demo 生成后，按下面顺序补测试记录：
+后续硬件测试按下面顺序补记录：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
-2. 对当前 `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` 先做最小上板 smoke；
-   若仍卡在 Finish，先看 pre-Finish 的 Status/Metrics/Debug 快照。
-3. 上板先跑 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
-4. 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、`jacobi-stage-*`
-   和 `Error Num`。
+2. 对当前同步的 `CuperJacobiMmapProbeOnly` split-bank xclbin，用 native XRT runner
+   记录 wait 前后的 Status/Metrics/Debug 快照。
+3. 等完整 `CuperJacobiIteration` graph 重新生成 xclbin 后，再上板跑 `cant.mtx`、
+   `thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
+4. 对完整 graph 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
+   `jacobi-stage-*` 和 `Error Num`。
 5. 同步更新 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`
    和 `395bitstream/README.md`。
