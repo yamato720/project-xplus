@@ -41,7 +41,8 @@ jacobi_read_neg_float_v16_packets:
 
 // 单 buffer vector loader：SpMV service 仍由 command 触发和 stop 退出。
 // 写回在整轮 SpMV/update 完成后才反馈下一轮 token，因此当前实现不需要 X0/X1 双缓冲。
-void Jacobi_Vector_Loader(const INDEX_TYPE Column_num,
+void Jacobi_Vector_Loader(const INDEX_TYPE Batch_num,
+                          const INDEX_TYPE Column_num,
                           tapa::async_mmap<float_v16> &X,
                           tapa::istream<CuperSpmvServiceCommand> &Command_in,
                           tapa::ostream<float_v16> &Vector_X_Stream) {
@@ -53,6 +54,13 @@ void Jacobi_Vector_Loader(const INDEX_TYPE Column_num,
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
             return;
+        }
+
+        // 空 R 矩阵时 Batch_num=0，Core 只转发参数并让 Accumulator 输出 0。
+        // 此时没有任何 Core 会消费 Vector_X_Stream；如果仍读 X，会在 core0 前留下
+        // 未消费包，并让链尾 drain 等不到包。直接跳过 X 读取即可得到 -R*x=0。
+        if (Batch_num == 0) {
+            continue;
         }
 
         // 这里只读单个 X buffer 并取负，输出 stream 格式保持 Cuper 原来的 Vector_X_Stream。

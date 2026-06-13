@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | finite-pair debug demo 候选，routed timing 未收敛，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | pre-Finish/empty-R debug demo 候选，routed timing 未收敛，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -42,8 +42,7 @@ DLC/Cuper-jacobi-iteration/
 `cant.mtx` `MAX_ITERS=2`、`thermal2_n65536` `MAX_ITERS=1` 均为当前
 deadlock-debug 单 `X` ABI 通过，`thermal2_n262144` 早期 software run 通过但还需用
 当前 root target 补跑。
-当前已有一个 demo 候选进入 Jacobi demo 槽，但还没有上板测试数据，也不是标准
-bitstream。版本记录见
+当前已有一个 demo 候选进入 Jacobi demo 槽，但还不是标准 bitstream。版本记录见
 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
 
 TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
@@ -53,23 +52,34 @@ cuper-tapa-jacobi-u55c-20260613-demo.xclbin
 ```
 
 这版是 `CuperJacobiIteration` deadlock-debug ABI 硬件 demo artifact，包含
-`SpmvService_DestroyFloatV16` 链尾 X stream 精确 drain 修复，以及
-`Jacobi_UpdatePairCompute[0..7]` 的 finite frame/stop 退出改造。它覆盖同主线
-Jacobi demo 槽，但不替换任何标准文件；当前 `cuper-tapa-jacobi` 仍然没有标准
-bitstream。
+`SpmvService_DestroyFloatV16` 链尾 X stream 精确 drain 修复、
+`Jacobi_UpdatePairCompute[0..7]` 的 finite frame/stop 退出改造，以及
+`Batch_num==0` 空 R 路径下的 X loader/drain 修复。配套 host 也拆开
+`WriteToDevice/Exec/ReadFromDevice/Finish`，可在 `Finish()` 前打印
+Status/Metrics/Debug 快照。它覆盖同主线 Jacobi demo 槽，但不替换任何标准文件；
+当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。
 demo xclbin UUID 为
-`6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb`，SHA256 为
-`e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145`。
-最终 xclbin info 中 DATA clock 为 182 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 450 MHz，DATA achieved 为 182.9 MHz。构建目录为
-`cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/`。
+`5c9f0e72-5ea9-7142-1e90-690b72d30557`，SHA256 为
+`0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26`。
+最终 xclbin info 中 DATA clock 为 175 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 427 MHz，DATA achieved 为 175.2 MHz。构建目录为
+`cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/`。
 
 当前 ABI 使用单个原地更新 `X` buffer，不再使用旧 demo 的 `X0/X1` 双缓冲；
 `Status`、`Metrics` 和 deadlock `Debug` buffer 共同映射到 HBM[24]。注意这版
 VPL implementation 和 `.xclbin` 封装都已完成，但 routed timing 仍未收敛：
-WNS `-2.134 ns`，TNS `-46314.336 ns`，failing endpoints `86957`；hold 为
-0 个 failing endpoint，worst hold slack `0.005 ns`。因此它只作为调试/同步
-demo artifact，不建议晋级标准，也还没有上板测试数据。
+WNS `-2.373 ns`，TNS `-51779.359 ns`，failing endpoints `91026`；hold 为
+0 个 failing endpoint，worst hold slack `0.009 ns`。因此它只作为调试/同步
+demo artifact，不建议晋级标准。
+
+2026-06-13 已完成这版的 software/TAPA simulation 和 debug XO 前置验证，并生成
+完整 `.xclbin`；还没有做新版上板 smoke。它覆盖的上一版同名 `20260613` demo
+UUID 为 `6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb`，SHA256 为
+`e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145`。上一版上板最小
+smoke 显示 `thermal2_n16 MAX_ITERS=1` 复位板卡后仍停在
+`[tapa-invoke] after ReadFromDevice before Finish`，rc=124；probe 期间 CU
+`Status (IDLE)`、firewall GOOD，同时存在 `[CuperJacobiIter]` D 状态线程。该失败
+结论只对应上一版 UUID，不能套用到当前这个 `.xclbin` 文件。
 
 被覆盖的上一版同主线 Jacobi demo 是
 `cuper-tapa-jacobi-u55c-20260612-demo.xclbin`，UUID 为

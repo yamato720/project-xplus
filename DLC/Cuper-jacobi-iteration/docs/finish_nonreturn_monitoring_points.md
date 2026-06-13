@@ -36,9 +36,10 @@ CuperJacobiIteration 在 2026-06-12 tail-drain debug bitstream 上仍然 Finish 
 根因未定，不能只定性为死锁。
 ```
 
-后续已经生成并同步 `20260613` finite-pair debug demo：
+后续已经生成并同步 `20260613` pre-Finish/empty-R debug demo：
 `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。它包含本文第二步建议的
-`Jacobi_UpdatePairCompute[0..7]` finite frame/stop 修改，但还没有板上复测结果。
+`Jacobi_UpdatePairCompute[0..7]` finite frame/stop 修改，并追加 host pre-Finish
+debug dump 与 `Batch_num==0` 空 R no-X-read/drain 修复，但还没有新版板上复测结果。
 
 ## 还不能直接定性为死锁
 
@@ -506,9 +507,10 @@ thermal2_n16 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
 debug ABI XO generated: cuper-jacobi-iteration-build/CuperJacobiIteration.xo
 ```
 
-注意：这个 finite pair compute 改动已经重新生成并同步到
+注意：finite pair compute、pre-Finish dump 和 empty-R 修复都已经重新生成并同步到
 `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。下一步需要用该新
-debug xclbin 复测，才能判断它是否解决板上的 `Finish` 不返回。
+debug xclbin 复测，才能判断它是否解决板上的 `Finish` 不返回；若仍不返回，先看
+host 在 `Finish()` 前打印的 Status/Metrics/Debug 快照。
 
 ### 第三步：做 one-round debug top
 

@@ -1,8 +1,8 @@
 # Cuper Jacobi 测试流程
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
-software/TAPA simulation 结果，并生成了 finite-pair deadlock-debug ABI demo
-xclbin；但 routed timing 未收敛，也还没有上板性能数据。
+software/TAPA simulation 结果，并生成了 pre-Finish/empty-R deadlock-debug ABI demo
+xclbin；但 routed timing 未收敛，也还没有新版上板性能数据。
 
 ## 1. 测试对象
 
@@ -88,22 +88,22 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/` |
 | Kernel | `CuperJacobiIteration` |
 | ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb` |
-| SHA256 | `e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145` |
-| DATA / KERNEL / HBM clock | `182 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 未收敛：WNS `-2.134 ns`，TNS `-46314.336 ns`，failing endpoints `86957`；hold 无 failing endpoints |
+| UUID | `5c9f0e72-5ea9-7142-1e90-690b72d30557` |
+| SHA256 | `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26` |
+| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `427 MHz` |
+| 时序状态 | 未收敛：WNS `-2.373 ns`，TNS `-51779.359 ns`，failing endpoints `91026`；hold 无 failing endpoints |
 
 Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；总耗时
-`4h 19m 47s`，构建日志在
-`cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/logs/build_hw_tmux.log`。
+`3h 47m 24s`，构建日志在
+`cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/logs/build_hw_tmux.log`。
 
-这版还没有做 `hw` 上板运行；同步到 `395bitstream/` 只是为了保留和分发当前调试
-artifact，不能作为 timing-clean 标准 bitstream。上一版同主线 demo 是
-`20260612` tail-drain-only artifact，UUID
-`401e53eb-a68f-55fb-78f8-5553f14edcd2`，旧测试结论只作为历史记录。
+这版还没有做新版 `hw` 上板运行；同步到 `395bitstream/` 只是为了保留和分发当前调试
+artifact，不能作为 timing-clean 标准 bitstream。上一版同名 demo UUID 为
+`6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb`，上板 `thermal2_n16 MAX_ITERS=1` 仍卡在
+`after ReadFromDevice before Finish`；旧测试结论只作为历史记录。
 
 ## 3.2 finite pair compute 源码验证
 
@@ -178,6 +178,45 @@ Hold worst slack: 0.005 ns
 这版已搬到 Jacobi demo 槽，但仍不是 timing-clean bitstream；还没有完成板上
 `hw` 验证。
 
+## 3.4 pre-Finish/empty-R 源码验证和硬件构建
+
+上一版 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
+`after ReadFromDevice before Finish`；probe 显示 CU 已 `IDLE`，firewall GOOD，
+但存在 `[CuperJacobiIter]` D 状态线程。本轮改动：
+
+```text
+host/main.cpp: Finish() 前打印 Status/Metrics/Debug BO 快照。
+jacobi_vector_loader.hpp: Batch_num==0 时不读 X、不写 Vector_X_Stream。
+spmv_service_drains.hpp: Batch_num==0 时链尾 X drain expected_packets=0。
+```
+
+已跑验证：
+
+```text
+make cuper-jacobi-build-host: passed
+thermal2_n16 MAX_ITERS=1 software/TAPA simulation: Error Num=0
+quick regression: pass=2 fail=0 skip=0
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host: passed
+thermal2_n16 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-xo: generated CuperJacobiIteration.xo
+```
+
+硬件构建：
+
+```text
+build dir: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/
+sync: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 5c9f0e72-5ea9-7142-1e90-690b72d30557
+SHA256: 0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26
+DATA/KERNEL/HBM: 175/500/427 MHz
+DATA achieved: 175.2 MHz
+timing: not met, WNS -2.373 ns, TNS -51779.359 ns, failing endpoints 91026
+elapsed: 3h 47m 24s
+```
+
+这版已经覆盖 Jacobi demo 槽，但还没有新版上板验证。
+
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
 `cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：
 
@@ -231,7 +270,7 @@ host 会打印这些 Jacobi 专用字段：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
 2. 对当前 `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` 先做最小上板 smoke；
-   若仍卡在 Finish 或 timing fail 导致不稳定，再先回到降频或优化 update path。
+   若仍卡在 Finish，先看 pre-Finish 的 Status/Metrics/Debug 快照。
 3. 上板先跑 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
 4. 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、`jacobi-stage-*`
    和 `Error Num`。

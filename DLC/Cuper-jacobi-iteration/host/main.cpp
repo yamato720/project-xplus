@@ -1,6 +1,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <csignal>
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
@@ -11,6 +12,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <ap_int.h>
 #include <tapa.h>
 
@@ -42,6 +44,22 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
     return cycles * clock_period_ns * 1.0e-6;
 }
 
+void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
+                                  const aligned_vector<double>& metrics_data) {
+    cout << "[jacobi-prefinish] Status[0..2]="
+         << status_data[0] << ","
+         << status_data[1] << ","
+         << status_data[2]
+         << " Metrics[0..7]=";
+    for (INDEX_TYPE index = 0; index < 8; ++index) {
+        if (index != 0) {
+            cout << ",";
+        }
+        cout << metrics_data[index];
+    }
+    cout << endl;
+}
+
 #ifdef JACOBI_DEADLOCK_DEBUG
 void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
     const INDEX_TYPE packed_event = debug_data[2];
@@ -67,6 +85,55 @@ void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
     cout << endl;
 }
 #endif
+
+template <typename... Args>
+int64_t InvokeCuperJacobiIterationWithPrefinishDump(
+    const std::string& bitstream,
+    const aligned_vector<INDEX_TYPE>& status_data,
+    const aligned_vector<double>& metrics_data,
+#ifdef JACOBI_DEADLOCK_DEBUG
+    const aligned_vector<INDEX_TYPE>& debug_data,
+#endif
+    Args&&... args) {
+    if (bitstream.empty()) {
+        return tapa::invoke(CuperJacobiIteration,
+                            bitstream,
+                            std::forward<Args>(args)...);
+    }
+
+    fpga::Instance instance(bitstream);
+
+    tapa::internal::frt_sync_kernel_instance = &instance;
+    std::signal(SIGINT, &tapa::internal::kill_frt_sync_kernel);
+
+    using JacobiInvoker = tapa::internal::invoker<decltype((CuperJacobiIteration))>;
+    JacobiInvoker::set_fpga_args(instance,
+                                 CuperJacobiIteration,
+                                 std::index_sequence_for<Args...>{},
+                                 std::forward<Args>(args)...);
+
+    cout << "[tapa-invoke] before WriteToDevice" << endl;
+    instance.WriteToDevice();
+    cout << "[tapa-invoke] after WriteToDevice before Exec" << endl;
+    instance.Exec();
+    cout << "[tapa-invoke] after Exec before ReadFromDevice" << endl;
+    instance.ReadFromDevice();
+    cout << "[tapa-invoke] after ReadFromDevice before Finish" << endl;
+
+    // Finish() 当前可能不返回；ReadFromDevice 后先打印已同步回 host 的 BO 快照。
+    PrintJacobiPrefinishSnapshot(status_data, metrics_data);
+#ifdef JACOBI_DEADLOCK_DEBUG
+    PrintJacobiDebugBuffer(debug_data);
+#endif
+
+    instance.Finish();
+    cout << "[tapa-invoke] after Finish" << endl;
+
+    std::signal(SIGINT, SIG_DFL);
+    tapa::internal::frt_sync_kernel_instance = nullptr;
+
+    return instance.ComputeTimeNanoSeconds();
+}
 
 bool IsCsrDatasetDir(const fs::path& path) {
     // Project-XPlus CSR 数据目录的最小约定：三数组文本文件必须同时存在。
@@ -624,8 +691,13 @@ int main(int argc, char* argv[]) {
     //   Debug                  -> 可选 deadlock debug 槽位，只有宏打开时进入 ABI
     cout << "\n[jacobi-deadlock-debug] enabled: Debug buffer ABI is active" << endl;
 #endif
-    double kernel_time = tapa::invoke(CuperJacobiIteration,
+    double kernel_time = InvokeCuperJacobiIterationWithPrefinishDump(
                                       bitstream,
+                                      Status_fpga_data,
+                                      Metrics_fpga_data,
+#ifdef JACOBI_DEADLOCK_DEBUG
+                                      Debug_fpga_data,
+#endif
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
                                       tapa::read_only_mmap<float>(B_fpga_data).reinterpret<float_v16>(),

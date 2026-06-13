@@ -84,7 +84,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // Feedback_Token_Stream                     当前轮 X 写回响应已收齐，SpMV+update 计时已结束           作为下一轮 token 继续 dispatch，或转发 stop
     // Round_Token_Stream                        初始 token 或上一轮反馈 token 已就绪                     扇出 SpMV command、矩阵预取 command 和 update frame；stop 时收尾
     // Command_Stream[0]                         本轮 token 已被 dispatch；stop 时所有正常轮次已完成       读取边界表并写 PE_Param[0]，或向 PE_Param 写 stop token
-    // Command_Stream[1]                         本轮 token 已被 dispatch；单 X 已由上一轮 writer 写完     从 HBM 读 X、取负并写 Vector_X_Stream[0]，或退出
+    // Command_Stream[1]                         本轮 token 已被 dispatch；单 X 已由上一轮 writer 写完     非空 R 时读 X 并取负；空 R 时不读 X；stop 时退出
     // Matrix_Prefetch_Command_Stream[0..15]     第 0 轮 dispatch 前，或当前轮 compute command 发出后       从 Matrix_data 读 A/R 到 Matrix_A_Stream FIFO，或退出
     // PE_Param[0..16]                           边界表参数已读出，或收到 compute stop                    配置本级 Core 的行块范围并继续转发；stop 时逐级退出
     // Vector_Y_Param[0..15]                     Core 已确认本轮参数，或收到 PE stop                       Accumulator 按行数归并本通道乘积；stop 时退出
@@ -188,7 +188,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Command_Stream[0],
                 PE_Param[0])
         // 从 HBM 读取当前 X，取负后写入向量广播链首端，使 Core 输出 -R*x_old。
+        // Batch_num=0 时 Core 不会消费 X，loader 会跳过读取，让 update 看到 -R*x=0。
         .invoke(Jacobi_Vector_Loader,
+                Batch_num,
                 Column_num,
                 X,
                 Command_Stream[1],
@@ -237,6 +239,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         // 消费 -X 广播链尾残余。这里按 Column_num/Max_iters 算出应到达链尾的总包数，
         // drain 完后再接受 stop，避免链尾 drain 早退造成 Core15 卡住。
         .invoke(SpmvService_DestroyFloatV16,
+                Batch_num,
                 Column_num,
                 Max_iters,
                 Vector_X_Stream[HBM_CHANNEL_NUM],

@@ -311,6 +311,109 @@ Hold worst slack: 0.005 ns
 `395bitstream/` 的 Jacobi demo 槽。但它仍不是 timing-clean bitstream，也还未完成
 板上验证。
 
+### 2026-06-13 finite pair demo board smoke
+
+服务器侧复测上一版同名 finite-pair demo：
+
+```text
+bitfile: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb
+case: thermal2_n16, MAX_ITERS=1, JACOBI_DEADLOCK_DEBUG=1
+result: timeout, rc=124
+host stop point: [tapa-invoke] after ReadFromDevice before Finish
+```
+
+probe 结果：
+
+```text
+xbutil dynamic-regions: CuperJacobiIteration_1 Usage 1 Status (IDLE)
+firewall: GOOD
+kernel thread: [CuperJacobiIter] D state
+```
+
+判断：这不像 CU 仍处于 RUN 的纯 PL 业务数据流死锁，更像 TAPA/FRT `Finish()` 或
+XRT exec 清理路径未返回。由于 `thermal2_n16` 的 `R NNZ=0`、`Slice Num=0`，空 R
+路径的 X loader/drain 协议仍被列为高优先级怀疑点。
+
+### 2026-06-13 pre-Finish/empty-R source and XO check
+
+本轮源码改动：
+
+```text
+host/main.cpp:
+  拆开 WriteToDevice -> Exec -> ReadFromDevice -> pre-Finish dump -> Finish。
+  如果 Finish() 不返回，host 也能先打印 Status/Metrics/Debug BO 快照。
+
+jacobi_vector_loader.hpp:
+  Batch_num==0 时不读 X、不写 Vector_X_Stream；空 R 数学上直接使用 -R*x=0。
+
+spmv_service_drains.hpp:
+  Batch_num==0 时链尾 X drain expected_packets=0，不再等待不会被 Core 转发的 X 包。
+```
+
+已跑验证：
+
+```bash
+make cuper-jacobi-build-host
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+make cuper-jacobi-regression-sw MODE=quick NO_BUILD=1 ALLOW_MISSING=1
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-xo
+```
+
+关键结果：
+
+```text
+thermal2_n16 MAX_ITERS=1 software/TAPA simulation: Error Num=0
+quick regression: pass=2 fail=0 skip=0
+thermal2_n16 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+thermal2_n1024 MAX_ITERS=1 debug ABI software/TAPA simulation: Error Num=0
+debug ABI XO generated: cuper-jacobi-iteration-build/CuperJacobiIteration.xo
+```
+
+quick regression 日志：
+
+```text
+cuper-jacobi-iteration-build/regression/20260613_014101_quick/
+```
+
+### 2026-06-13 pre-Finish/empty-R debug hardware build
+
+构建结果：
+
+```text
+build dir: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/
+build log: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/logs/build_hw_tmux.log
+xclbin: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/CuperJacobiIteration.xclbin
+sync: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 5c9f0e72-5ea9-7142-1e90-690b72d30557
+SHA256: 0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26
+DATA clock: 175 MHz
+KERNEL clock: 500 MHz
+HBM clock: 427 MHz
+DATA achieved: 175.2 MHz
+VPL: FINISHED, Run Status: impl Complete
+v++ link: Run completed
+total elapsed: 3h 47m 24s
+```
+
+时序状态：
+
+```text
+Timing constraints are not met.
+Setup failing endpoints: 91026
+Setup worst slack: -2.373 ns
+Setup total violation: -51779.359 ns
+Hold failing endpoints: 0
+Hold worst slack: 0.009 ns
+```
+
+结论：这版已经包含 pre-Finish debug dump 和 `Batch_num==0` 空 R no-X-read/drain
+修复，并已同步到 `395bitstream/` 的 Jacobi demo 槽。但它仍不是 timing-clean
+bitstream，也还未完成新版上板验证。
+
 ## 当前硬件 demo 同步记录
 
 同步文件：
@@ -325,41 +428,40 @@ Hold worst slack: 0.005 ns
 ```text
 Kernel: CuperJacobiIteration
 ABI: JACOBI_DEADLOCK_DEBUG=1, single X buffer, Debug buffer on HBM[24]
-UUID: 6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb
-SHA256: e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145
-DATA clock: 182 MHz
+UUID: 5c9f0e72-5ea9-7142-1e90-690b72d30557
+SHA256: 0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26
+DATA clock: 175 MHz
 KERNEL clock: 500 MHz
-HBM clock: 450 MHz
-DATA achieved: 182.9 MHz
+HBM clock: 427 MHz
+DATA achieved: 175.2 MHz
 ```
 
 构建情况：
 
 ```text
-build dir: cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/
-build log: cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/logs/build_hw_tmux.log
+build dir: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/
+build log: cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/logs/build_hw_tmux.log
 VPL: FINISHED, Run Status: impl Complete
 v++ link: Run completed
-total elapsed: 4h 19m 47s
+total elapsed: 3h 47m 24s
 ```
 
 时序状态：
 
 ```text
 Timing constraints are not met.
-Setup failing endpoints: 86957
-Setup worst slack: -2.134 ns
-Setup total violation: -46314.336 ns
+Setup failing endpoints: 91026
+Setup worst slack: -2.373 ns
+Setup total violation: -51779.359 ns
 Hold failing endpoints: 0
-Hold worst slack: 0.005 ns
+Hold worst slack: 0.009 ns
 ```
 
 因此当前 `.xclbin` 只是调试/同步 demo artifact，不是 timing-clean bitstream；
-还未进行 `hw` 上板验证。上一版同主线 Jacobi demo 是
-`395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin`，UUID 为
-`401e53eb-a68f-55fb-78f8-5553f14edcd2`，SHA256 为
-`46272395b4f4cef1a977767225080dfe2194fed3cf55baccbb5e4eec68e82e2f`；旧测试结论只能
-作为历史记录。
+还未进行新版 `hw` 上板验证。上一版同名 Jacobi demo UUID 为
+`6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb`，SHA256 为
+`e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145`；旧测试结论只能
+作为历史记录，不能套用到当前 `.xclbin` 文件。
 
 ## 判定标准
 

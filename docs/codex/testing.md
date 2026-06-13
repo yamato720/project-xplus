@@ -391,7 +391,7 @@ done
 ### 5.6 TAPA Jacobi iteration software/TAPA simulation
 
 `cuper-tapa-jacobi` 是第五条 Cuper 主线，源码在
-`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有 finite-pair
+`DLC/Cuper-jacobi-iteration/`。当前还没有标准 bitstream；已有 pre-Finish/empty-R
 deadlock-debug ABI
 `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` 调试 artifact，但
 routed timing 未收敛，也还没有上板数据。已记录的是 host + TAPA software run。

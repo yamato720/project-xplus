@@ -7,8 +7,9 @@ DLC/Cuper-jacobi-iteration/
 ```
 
 当前状态：已完成 software/TAPA simulation demo，并接入 Project-XPlus 根
-`Makefile` 的 `cuper-jacobi-*` 目标；已生成并同步 finite-pair deadlock-debug ABI
-硬件 demo xclbin，但 routed timing 未收敛，还没有上板测试数据。
+`Makefile` 的 `cuper-jacobi-*` 目标；已生成并同步 pre-Finish/empty-R
+deadlock-debug ABI 硬件 demo xclbin，但 routed timing 未收敛，当前新版还没有上板
+smoke。
 
 ## 版本定位
 
@@ -17,9 +18,9 @@ DLC/Cuper-jacobi-iteration/
 | 主线 | `cuper-tapa-jacobi` |
 | 顶层 kernel | `CuperJacobiIteration` |
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
-| 默认构建目录 | `cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/` |
+| 默认构建目录 | `cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；finite-pair deadlock-debug 硬件 demo 已同步但 timing fail |
+| 版本状态 | software/TAPA simulation 通过；pre-Finish/empty-R deadlock-debug 硬件 demo 已同步但 timing fail |
 | 是否建议晋级标准 | 不建议，需先修 timing 并完成 demo-only 上板测试 |
 
 这条主线做普通 Jacobi iteration：
@@ -66,17 +67,24 @@ $$
 | --- | --- |
 | 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
 | `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260612-finite-pair-debug-build/` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/` |
 | ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb` |
-| SHA256 | `e981baf0f809065674f9bc696095bfa0d2e816ffb281c3dfe6dfeb8e8990a145` |
-| DATA / KERNEL / HBM clock | `182 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | routed timing 未收敛，WNS `-2.134 ns`，TNS `-46314.336 ns`，failing endpoints `86957` |
+| UUID | `5c9f0e72-5ea9-7142-1e90-690b72d30557` |
+| SHA256 | `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26` |
+| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `427 MHz` |
+| 时序状态 | routed timing 未收敛，WNS `-2.373 ns`，TNS `-51779.359 ns`，failing endpoints `91026` |
 
 这个文件只作为当前调试 demo artifact 同步，不是标准 bitstream。Vitis link 已完成
 implementation 和 `.xclbin` 封装；hold 没有 failing endpoint，但 setup 仍明显
-不收敛。它覆盖了 2026-06-12 tail-drain-only 同主线 demo，旧 UUID
-`401e53eb-a68f-55fb-78f8-5553f14edcd2` 的测试结论只作为历史记录。
+不收敛。它覆盖了上一版同名 `20260613` finite-pair demo，旧 UUID
+`6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb` 的测试结论只作为历史记录。
+
+上一版 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
+`[tapa-invoke] after ReadFromDevice before Finish`。probe 期间 CU 已显示
+`Status (IDLE)` 且 firewall GOOD，同时存在 `[CuperJacobiIter]` D 状态线程。
+这说明当时优先怀疑 TAPA/FRT `Finish()` 或 XRT exec 清理路径，以及空 R 的
+Vector_X drain 协议。当前新版已把 host pre-Finish dump 和 `Batch_num==0`
+空 R no-X-read/drain 修复打入源码和 `.xclbin`，但还没有上板复测。
 
 ## 当前已记录测试
 
@@ -104,6 +112,6 @@ docs/codex/testing.md
 - 当前 root target 下补跑 `thermal2_n262144`。
 - 若要继续硬件路线，先处理 timing fail；主要看 update path 和
   300 MHz DATA clock 下的 update/writeback 路径。
-- 对当前 `20260613` finite-pair demo 做最小上板 smoke，确认是否仍会 Finish 不返回。
+- 对当前 pre-Finish/empty-R debug xclbin 复测 `thermal2_n16` 和 `thermal2_n1024`。
 - 完成 demo-only 上板测试后，再更新 HTML 报告和本目录测试表。
 - `source.diff` 暂不生成；当前还没有硬件 demo-only 性能确认。

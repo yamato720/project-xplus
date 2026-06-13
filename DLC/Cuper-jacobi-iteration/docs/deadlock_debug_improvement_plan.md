@@ -344,7 +344,7 @@ timing:    not met, WNS -2.842 ns, TNS -74910.742 ns
 395bitstream/cuper-tapa-jacobi-u55c-20260612-demo.xclbin.info
 ```
 
-它上板后仍出现 Finish 不返回，当前已经被 2026-06-13 finite-pair debug demo 覆盖：
+它上板后仍出现 Finish 不返回，当前已经被 2026-06-13 pre-Finish/empty-R debug demo 覆盖：
 
 ```text
 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
