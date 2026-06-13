@@ -71,8 +71,10 @@ $$
 ## 当前测试状态
 
 当前已经把 timing-clean 的 `CuperJacobiMmapProbeOnly` split-bank mmap-only probe 同步为
-`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这只是 debug artifact，
-用于验证 kernel 启动、mmap 写回和 native XRT BO sync；它不是完整
+`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`，并完成 native XRT
+上板 smoke。`ROW_NUM=16` 和 `ROW_NUM=1024` 都能在 wait 前采样到 magic，最终
+`wait_state=COMPLETED`、`rc=0`。这证明 kernel 启动、m_axi 写回、split-bank HBM
+分配和 native XRT BO sync 是通的；但它只是 debug artifact，不是完整
 `CuperJacobiIteration` graph。上一版完整 graph 的 entry mmap probe 在
 `thermal2_n16` 与 `thermal2_n1024` 的 `MAX_ITERS=1` 上板 smoke 中 timeout 在
 `Finish()`，入口 probe 全 0。详细测试流程见 `docs/testing.md`。
@@ -89,7 +91,7 @@ $$
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | `380f9de1-e5c1-66ab-b888-db99d2ef3523` | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` | `CuperJacobiMmapProbeOnly` split-bank probe，WNS `0.003 ns`，待上板 |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | `380f9de1-e5c1-66ab-b888-db99d2ef3523` | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` | `CuperJacobiMmapProbeOnly` split-bank probe，WNS `0.003 ns`，native XRT smoke 通过 |
 
 ## 常用命令
 

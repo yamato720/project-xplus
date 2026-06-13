@@ -664,9 +664,40 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info
 ```
 
-当前 mmap-only split-bank demo 上板后仍必须补：
+### 2026-06-13 mmap-only split-bank demo native XRT 上板
 
-- native XRT runner 的 wait 前/后 Status、Metrics、Debug 快照。
-- `ROW_NUM=16` 和 `ROW_NUM=1024` 的返回状态、timeout 边界和 BO 内容。
-- 若 micro probe 通过，再回到完整 `CuperJacobiIteration` graph 重新生成 xclbin。
-- `395bitstream/README.md` 和 HTML 报告。
+测试对象：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+Kernel: CuperJacobiMmapProbeOnly
+UUID: 380f9de1-e5c1-66ab-b888-db99d2ef3523
+SHA256: 7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1
+logs: logs/jacobi_mmap_probe_hw_20260613_214342/
+```
+
+命令：
+
+```bash
+make cuper-jacobi-build-mmap-probe-xrt-host
+
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
+  ROW_NUM=16 COLUMN_NUM=16 MAX_ITERS=1 WAIT_TIMEOUT_MS=5000 SAMPLE_DELAY_MS=100 \
+  make cuper-jacobi-run-mmap-probe-xrt
+
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
+  ROW_NUM=1024 COLUMN_NUM=1024 MAX_ITERS=1 WAIT_TIMEOUT_MS=5000 SAMPLE_DELAY_MS=100 \
+  make cuper-jacobi-run-mmap-probe-xrt
+```
+
+结果：
+
+| 参数 | rc | wait_state | 关键写回 |
+| --- | ---: | --- | --- |
+| `ROW_NUM=16` | 0 | `COMPLETED(4)` | `Status[8..11]=1245921841,16,1,1`, `Metrics[8..11]=1245921841,16,1,1`, `Debug[48..51]=1245921841,11,1,8192` |
+| `ROW_NUM=1024` | 0 | `COMPLETED(4)` | `Status[8..11]=1245921841,1024,1,64`, `Metrics[8..11]=1245921841,1024,1,64`, `Debug[48..51]=1245921841,11,1,8192` |
+
+wait 前的 sample sync 已能读到同样的 magic，说明 kernel 启动、split-bank m_axi 写回、
+write response、native XRT BO sync 和 `run.wait()` 都正常。下一步应回到完整
+`CuperJacobiIteration` graph，优先做 no-Debug full graph 或 one-round/no-feedback
+边界，不再把“数据完全没进去 / kernel 根本没启动”作为首要假设。

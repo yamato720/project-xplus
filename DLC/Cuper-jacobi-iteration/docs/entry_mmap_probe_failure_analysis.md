@@ -161,6 +161,7 @@ timing violation
 ```text
 CuperJacobiMmapProbeOnly 已加入 kernels/detail/jacobi_mmap_probe_only.hpp
 make cuper-jacobi-build-mmap-probe-xo 已生成 CuperJacobiMmapProbeOnly.xo
+split-bank xclbin 已同步到 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
 ```
 
 ### P1. 写一个 native XRT debug runner
@@ -195,7 +196,35 @@ entry/m_axi/timing。
 ```text
 host/mmap_probe_xrt.cpp 已加入 native XRT runner
 make cuper-jacobi-build-mmap-probe-xrt-host 已通过
+2026-06-13 上板 ROW_NUM=16/1024 均 wait_state=COMPLETED
 ```
+
+P0/P1 的当前验证结果：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID:      380f9de1-e5c1-66ab-b888-db99d2ef3523
+logs:      logs/jacobi_mmap_probe_hw_20260613_214342/
+
+ROW_NUM=16:
+  rc=0
+  wait_state=COMPLETED
+  Status[8..11]=1245921841,16,1,1
+  Metrics[8..11]=1245921841,16,1,1
+  Debug[48..51]=1245921841,11,1,8192
+
+ROW_NUM=1024:
+  rc=0
+  wait_state=COMPLETED
+  Status[8..11]=1245921841,1024,1,64
+  Metrics[8..11]=1245921841,1024,1,64
+  Debug[48..51]=1245921841,11,1,8192
+```
+
+因此，当前不应再优先假设“板卡数据完全没进去”或“kernel 根本不能启动”。更合理的
+下一步是回到完整 `CuperJacobiIteration` graph：先移除 full graph 里的入口阻塞 mmap
+probe，或做 one-round/no-feedback 与 no-Debug full graph，继续定位 `Finish()` 收尾、
+stop/drain 和 full graph timing 问题。
 
 ### P2. 去掉 full graph 里的入口阻塞 mmap probe
 

@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration debug demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiMmapProbeOnly` | mmap-only split-bank probe，timing-clean，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration debug demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiMmapProbeOnly` | mmap-only split-bank probe，timing-clean，native XRT smoke 通过，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -69,6 +69,13 @@ HBM[24]、HBM[25]、HBM[26]。VPL implementation 和 `.xclbin` 封装都已完�
 timing 收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；
 hold worst slack `0.009 ns`。这版仅用于调试 runtime/mmap 边界，不代表完整
 Jacobi graph 已跑通。
+
+2026-06-13 已完成该 split-bank mmap-only demo 的 native XRT 上板 smoke，日志在
+`logs/jacobi_mmap_probe_hw_20260613_214342/`。`ROW_NUM=16` 和 `ROW_NUM=1024`
+均为 `rc=0`、`wait_state=COMPLETED`；wait 前 sample sync 已能读到
+`Status[8]`、`Metrics[8]`、`Debug[48]` 的 probe magic `1245921841`
+(`0x4a434231`)。这说明当前板卡、kernel launch、split-bank m_axi 写回和 native XRT
+BO sync 边界是可用的；完整 Jacobi graph 的 `Finish()` timeout 仍需另行修。
 
 它覆盖的上一版同名 `20260613` entry mmap probe debug demo UUID 为
 `7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为

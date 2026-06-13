@@ -9,8 +9,8 @@ DLC/Cuper-jacobi-iteration/
 当前状态：已完成 software/TAPA simulation demo，并接入 Project-XPlus 根
 `Makefile` 的 `cuper-jacobi-*` 目标；完整 `CuperJacobiIteration` 的 entry mmap probe
 demo 上板仍卡在 `Finish()` 收尾。当前已新增并同步 timing-clean 的
-`CuperJacobiMmapProbeOnly` split-bank mmap-only debug xclbin，用于先排查
-host/runtime/m_axi 写回边界。
+`CuperJacobiMmapProbeOnly` split-bank mmap-only debug xclbin，并已通过 native XRT
+上板 smoke，用于排除基本 kernel launch、split-bank m_axi 写回和 BO sync 边界。
 
 ## 版本定位
 
@@ -21,7 +21,7 @@ host/runtime/m_axi 写回边界。
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前 debug 构建目录 | `cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；当前同步的是 mmap-only split-bank probe，timing clean，待上板验证 |
+| 版本状态 | software/TAPA simulation 通过；当前同步的是 mmap-only split-bank probe，timing clean，native XRT smoke 通过 |
 | 是否建议晋级标准 | 不建议，当前不是完整 Jacobi graph |
 
 这条主线做普通 Jacobi iteration：
@@ -81,6 +81,18 @@ Jacobi graph 已跑通。Vitis link 已完成 implementation 和 `.xclbin` 封�
 版本总耗时 `1h 12m 15s`。它覆盖了上一版同名 `20260613` entry mmap probe demo，旧
 UUID `7bf54cce-83a3-b7e7-97a9-719446658c03` 的测试结论只作为历史记录。
 
+2026-06-13 native XRT 上板 smoke 已通过：
+
+```text
+logs: logs/jacobi_mmap_probe_hw_20260613_214342/
+ROW_NUM=16:   rc=0, wait_state=COMPLETED, Status[8..11]=1245921841,16,1,1
+ROW_NUM=1024: rc=0, wait_state=COMPLETED, Status[8..11]=1245921841,1024,1,64
+Debug[48..51]=1245921841,11,1,8192
+```
+
+这说明基本 launch、split-bank mmap 写回和 native XRT BO sync 是通的。完整 graph 的
+失败边界仍然是 `Finish()` 收尾和 graph 内 stop/drain/timing 问题。
+
 更早 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
 `[tapa-invoke] after ReadFromDevice before Finish`。probe 期间 CU 已显示
 `Status (IDLE)` 且 firewall GOOD，同时存在 `[CuperJacobiIter]` D 状态线程。
@@ -116,7 +128,7 @@ software/TAPA simulation，并重新生成完整硬件 demo xclbin，同步到�
 | Native runner | `cuper_jacobi_mmap_probe_xrt` |
 | Same-bank link | `make cuper-jacobi-link-mmap-probe-xclbin` |
 | Split-bank link | `make cuper-jacobi-link-mmap-probe-xclbin-split` |
-| 当前同步版本 | split-bank xclbin 已同步到 Jacobi demo 槽 |
+| 当前同步版本 | split-bank xclbin 已同步到 Jacobi demo 槽并通过 native XRT smoke |
 | XO 验证 | 已生成 `cuper-jacobi-iteration-build/CuperJacobiMmapProbeOnly.xo` |
 
 ## 当前已记录测试
@@ -143,8 +155,6 @@ docs/codex/testing.md
 ## 待补
 
 - 当前 root target 下补跑 `thermal2_n262144`。
-- 对当前 mmap-only split-bank demo 跑 native XRT 上板 smoke，确认
-  Status/Metrics/Debug mmap 写回是否能可靠穿透 native XRT sync。
 - full Jacobi graph 暂停继续堆 event debug；等 micro probe 证明 mmap 写回边界后再回到
   one-round/no-feedback 或 no-Debug full graph。
 - 完成 demo-only 上板测试后，再更新 HTML 报告和本目录测试表。

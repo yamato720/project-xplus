@@ -87,7 +87,10 @@
 
 ## 当前没有做
 
-- mmap-only micro top 已生成 timing-clean `.xclbin`，但还没有上板测试。
+- mmap-only micro top 已生成 timing-clean `.xclbin`，且 split-bank 同步 demo 已完成
+  native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
+  `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
+  probe magic。
 - 完整 `CuperJacobiIteration` 仍没有 timing-clean、可正常返回的硬件 bitstream；上一版
   entry mmap probe demo routed timing 未收敛，WNS `-2.350 ns`。
 - 没有把 HBM 使用压回 16 个通道。
@@ -103,5 +106,5 @@
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
 - 当前同步的 2026-06-13 demo 是 mmap-only micro probe，不是完整 Jacobi graph，不能
-  作为 Jacobi 算法功能或性能结论。下一步优先用 native XRT runner 上板验证
-  Status/Metrics/Debug BO sync。
+  作为 Jacobi 算法功能或性能结论。native XRT runner 已证明 Status/Metrics/Debug BO
+  sync 和 kernel launch 边界可用；下一步回到完整 graph 的 `Finish()` 收尾问题。

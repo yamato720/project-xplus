@@ -1,9 +1,11 @@
 # Cuper Jacobi 测试流程
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
-software/TAPA simulation 结果，并生成了 entry mmap probe / deadlock-debug ABI demo
-xclbin；但 routed timing 未收敛，且 entry mmap probe demo 的最小上板 smoke 仍在
-`Finish()` 阶段 timeout。上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文
+software/TAPA simulation 结果；完整 `CuperJacobiIteration` graph 的 entry mmap probe
+demo 仍会在 `Finish()` 阶段 timeout。当前同步 demo 已切换为 timing-clean 的
+`CuperJacobiMmapProbeOnly` split-bank mmap-only probe，并已通过 native XRT 上板
+smoke。该结果只证明 kernel 启动、m_axi 写回、HBM bank 分配和 BO sync 边界，不代表
+完整 Jacobi graph 已跑通。上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文
 历史小节中。
 
 ## 1. 测试对象
@@ -105,6 +107,36 @@ Jacobi graph 已跑通。上一版同名 entry mmap probe demo UUID 为
 `7bf54cce-83a3-b7e7-97a9-719446658c03`，上板 `thermal2_n16` 和 `thermal2_n1024`
 的 `MAX_ITERS=1` 均卡在 `after ReadFromDevice before Finish`，入口 probe 全 0；
 旧测试结论只作为历史记录。
+
+2026-06-13 已完成当前 split-bank mmap-only demo 的 native XRT 上板 smoke：
+
+```text
+logs: logs/jacobi_mmap_probe_hw_20260613_214342/
+ROW_NUM=16 MAX_ITERS=1: rc=0, wait_state=COMPLETED
+ROW_NUM=1024 MAX_ITERS=1: rc=0, wait_state=COMPLETED
+```
+
+关键写回：
+
+```text
+ROW_NUM=16:
+  Status[0..3]=1245921841,16,1,16
+  Status[8..11]=1245921841,16,1,1
+  Metrics[8..11]=1245921841,16,1,1
+  Debug[48..51]=1245921841,11,1,8192
+
+ROW_NUM=1024:
+  Status[0..3]=1245921841,1024,1,1024
+  Status[8..11]=1245921841,1024,1,64
+  Metrics[8..11]=1245921841,1024,1,64
+  Debug[48..51]=1245921841,11,1,8192
+```
+
+`1245921841` 是 probe magic `0x4a434231`。wait 前的 sample sync 已能读到这些值，
+最终 `run.wait()` 也返回 `COMPLETED`。因此“kernel 没启动 / output mmap 完全写不回 /
+native XRT BO sync 不通”不再是当前最优先嫌疑；完整 graph 的问题应继续看
+TAPA/FRT `Finish()`、完整 graph stop/drain、debug 阻塞写对 graph 的影响，以及旧
+full graph artifact 的 timing violation。
 
 ## 3.2 finite pair compute 源码验证
 
@@ -405,6 +437,7 @@ m_axi master 的问题。
 ```text
 make cuper-jacobi-build-mmap-probe-xrt-host: passed
 make cuper-jacobi-build-mmap-probe-xo: generated cuper-jacobi-iteration-build/CuperJacobiMmapProbeOnly.xo
+split-bank xclbin native XRT hw smoke: ROW_NUM=16/1024 both rc=0, wait_state=COMPLETED
 ```
 
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
@@ -459,8 +492,8 @@ host 会打印这些 Jacobi 专用字段：
 后续硬件测试按下面顺序补记录：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
-2. 对当前同步的 `CuperJacobiMmapProbeOnly` split-bank xclbin，用 native XRT runner
-   记录 wait 前后的 Status/Metrics/Debug 快照。
+2. 当前同步的 `CuperJacobiMmapProbeOnly` split-bank xclbin 已用 native XRT runner
+   通过 `ROW_NUM=16/1024` smoke；后续如改 runner 或 bank 分配再复测该边界。
 3. 等完整 `CuperJacobiIteration` graph 重新生成 xclbin 后，再上板跑 `cant.mtx`、
    `thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
 4. 对完整 graph 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
