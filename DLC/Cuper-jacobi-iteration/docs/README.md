@@ -18,3 +18,5 @@
 - 2026-06-12 tail-drain demo 仍 `Finish` 不返回后的候选原因、细粒度监测点，以及
   2026-06-13 pre-Finish/empty-R demo 的后续验证入口：
   `finish_nonreturn_monitoring_points.md`
+- 2026-06-13 entry mmap probe 上板仍失败后的 debug 结论和下一版修改建议：
+  `entry_mmap_probe_failure_analysis.md`

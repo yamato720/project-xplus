@@ -2,8 +2,9 @@
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
 software/TAPA simulation 结果，并生成了 entry mmap probe / deadlock-debug ABI demo
-xclbin；但 routed timing 未收敛，当前 entry mmap probe demo 还没有上板 smoke。
-上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文历史小节中。
+xclbin；但 routed timing 未收敛，且 entry mmap probe demo 的最小上板 smoke 仍在
+`Finish()` 阶段 timeout。上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文
+历史小节中。
 
 ## 1. 测试对象
 
@@ -333,8 +334,43 @@ Hold worst slack: 0.009 ns
 ```
 
 结论：这版已经包含入口 mmap probe，并已同步到 `395bitstream/` 的 Jacobi demo 槽。
-它仍不是 timing-clean bitstream，当前还没有新版上板 smoke；上一版
+它仍不是 timing-clean bitstream。新版上板 smoke 结果见下一节；上一版
 pre-Finish/empty-R demo 的 `Finish()` 不返回结论只对应旧 UUID。
+
+## 3.7 entry mmap probe 上板失败记录
+
+服务器侧复测当前 entry mmap probe 395 demo：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 7bf54cce-83a3-b7e7-97a9-719446658c03
+SHA256: 775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24
+logs: logs/jacobi_entry_mmap_probe_hw_20260613_171648/
+```
+
+结果：
+
+```text
+thermal2_n16 MAX_ITERS=1: rc=124, 120s timeout
+thermal2_n1024 MAX_ITERS=1: rc=124, 120s timeout
+host stop point: [tapa-invoke] after ReadFromDevice before Finish
+prefinish Status[0..2]: 0,0,0
+prefinish Metrics[0..7]: 0,0,0,0,0,0,0,0
+prefinish Status[8..11]: 0,0,0,0
+prefinish Metrics[8..11]: 0,0,0,0
+prefinish Debug[48..51]: 0,0,0,0
+```
+
+`thermal2_n16` 是 `R NNZ=0` 的 empty-R case；`thermal2_n1024` 是
+`R NNZ=5338` 的非空 R case。两个 case 均看不到入口 mmap probe 写回，因此当前失败
+不能继续只按 empty-R 特例解释。timeout 后 CU 通常显示 `IDLE`，firewall `GOOD`，
+所以也不能直接定性为 PL 内部 dataflow 死锁。
+
+本轮详细分析和下一版修改建议见：
+
+```text
+DLC/Cuper-jacobi-iteration/docs/entry_mmap_probe_failure_analysis.md
+```
 
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
 `cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：
