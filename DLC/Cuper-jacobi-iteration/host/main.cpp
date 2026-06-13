@@ -44,6 +44,35 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
     return cycles * clock_period_ns * 1.0e-6;
 }
 
+#ifdef JACOBI_DEADLOCK_DEBUG
+void PrintJacobiProbeSnapshot(const char* label,
+                              const aligned_vector<INDEX_TYPE>& status_data,
+                              const aligned_vector<double>& metrics_data) {
+    const std::streamsize old_precision = cout.precision();
+    const std::ios_base::fmtflags old_flags = cout.flags();
+    cout << std::defaultfloat << std::setprecision(10);
+
+    cout << "[" << label << "] Status[8..11]=";
+    for (INDEX_TYPE index = 8; index < 12; ++index) {
+        if (index != 8) {
+            cout << ",";
+        }
+        cout << status_data[index];
+    }
+    cout << " Metrics[8..11]=";
+    for (INDEX_TYPE index = 8; index < 12; ++index) {
+        if (index != 8) {
+            cout << ",";
+        }
+        cout << metrics_data[index];
+    }
+    cout << endl;
+
+    cout.flags(old_flags);
+    cout.precision(old_precision);
+}
+#endif
+
 void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
                                   const aligned_vector<double>& metrics_data) {
     cout << "[jacobi-prefinish] Status[0..2]="
@@ -58,6 +87,10 @@ void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
         cout << metrics_data[index];
     }
     cout << endl;
+
+#ifdef JACOBI_DEADLOCK_DEBUG
+    PrintJacobiProbeSnapshot("jacobi-prefinish-probe", status_data, metrics_data);
+#endif
 }
 
 #ifdef JACOBI_DEADLOCK_DEBUG
@@ -76,8 +109,15 @@ void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
          << " stop_marker=" << debug_data[15]
          << endl;
 
+    cout << "[jacobi-deadlock-probe] Debug[48..51]="
+         << debug_data[48] << ","
+         << debug_data[49] << ","
+         << debug_data[50] << ","
+         << debug_data[51]
+         << endl;
+
     cout << "[jacobi-deadlock-debug-slots]";
-    for (INDEX_TYPE index = 16; index < 48; ++index) {
+    for (INDEX_TYPE index = 16; index < 64; ++index) {
         if (debug_data[index] != 0) {
             cout << " d" << index << "=" << debug_data[index];
         }
@@ -741,6 +781,7 @@ int main(int argc, char* argv[]) {
          << " spmv_update_avg=" << JacobiCyclesToMs(Metrics_fpga_data[7], jacobi_clock_period_ns)
          << " clock_period_ns=" << jacobi_clock_period_ns << endl;
 #ifdef JACOBI_DEADLOCK_DEBUG
+    PrintJacobiProbeSnapshot("jacobi-final-probe", Status_fpga_data, Metrics_fpga_data);
     PrintJacobiDebugBuffer(Debug_fpga_data);
 #endif
 

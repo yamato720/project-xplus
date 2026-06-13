@@ -167,6 +167,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Status,
                 Metrics,
                 Row_num,
+                Max_iters,
                 Tau)
         // 根据 dispatcher 发出的事件统计分段 cycle，并把结果回传给 dispatcher 写 Metrics。
         .invoke(Jacobi_Stage_Timer,

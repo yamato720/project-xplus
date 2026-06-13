@@ -91,6 +91,55 @@ write_metrics_resp:
     }
 }
 
+#ifdef JACOBI_DEADLOCK_DEBUG
+inline void Jacobi_WriteStatusProbe(tapa::async_mmap<INDEX_TYPE> &Status,
+                                    const INDEX_TYPE Row_num,
+                                    const INDEX_TYPE Max_iters) {
+#pragma HLS inline
+    // Status[8..11] 是 debug-only 入口探针，避开 Status[0..2] 的正式结果。
+    Status.write_addr.write(8);
+    Status.write_data.write(kJacobiDebugProbeMagic);
+    Status.write_addr.write(9);
+    Status.write_data.write(Row_num);
+    Status.write_addr.write(10);
+    Status.write_data.write(Max_iters);
+    Status.write_addr.write(11);
+    Status.write_data.write(spmv_service_num_float_v16_packets(Row_num));
+write_status_probe_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 4;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Status.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+
+inline void Jacobi_WriteMetricsProbe(tapa::async_mmap<double> &Metrics,
+                                     const INDEX_TYPE Row_num,
+                                     const INDEX_TYPE Max_iters) {
+#pragma HLS inline
+    // Metrics[8..11] 镜像 Status probe。若 Status 可见但 Metrics 不可见，优先看
+    // double mmap ABI 或 HBM[24] 上多个 BO 的连接。
+    Metrics.write_addr.write(8);
+    Metrics.write_data.write(static_cast<double>(kJacobiDebugProbeMagic));
+    Metrics.write_addr.write(9);
+    Metrics.write_data.write(static_cast<double>(Row_num));
+    Metrics.write_addr.write(10);
+    Metrics.write_data.write(static_cast<double>(Max_iters));
+    Metrics.write_addr.write(11);
+    Metrics.write_data.write(static_cast<double>(spmv_service_num_float_v16_packets(Row_num)));
+write_metrics_probe_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 4;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Metrics.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+#endif
+
 void Jacobi_RoundDispatcher(
     tapa::istream<JacobiRoundToken> &Round_Token_in,
     tapa::ostreams<CuperSpmvServiceCommand, 2> &Command_out,
@@ -106,10 +155,18 @@ void Jacobi_RoundDispatcher(
     tapa::async_mmap<INDEX_TYPE> &Status,
     tapa::async_mmap<double> &Metrics,
     const INDEX_TYPE Row_num,
+    const INDEX_TYPE Max_iters,
     const float Tau) {
     // 当前 fixed-count Jacobi 不使用 Tau，保留 ABI。
     (void)Tau;
     unsigned long long spmv_update_work_packets = 0;
+
+#ifdef JACOBI_DEADLOCK_DEBUG
+    // Dispatcher 是 Status/Metrics 的唯一 writer。入口阻塞写可以确认该 task 已启动、
+    // HBM[24] 上 Status/Metrics BO 可写，且写响应能回到 kernel。
+    Jacobi_WriteStatusProbe(Status, Row_num, Max_iters);
+    Jacobi_WriteMetricsProbe(Metrics, Row_num, Max_iters);
+#endif
 
     Jacobi_StageMark(Stage_Event_out, kJacobiStageControllerTotal, kJacobiStageBegin);
 

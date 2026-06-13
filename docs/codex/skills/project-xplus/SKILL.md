@@ -83,12 +83,15 @@ If a hardware build is already in `vpl`, `impl`, or routing, say that source edi
   stage writes `x_next=(b+(-R*x_old))*diag_inv` back into the single `X` buffer. It is wired
   into the root `Makefile` through `cuper-jacobi-*` targets and currently reports
   `[jacobi-stage-cycles]` / `[jacobi-stage-ms]` timing debug from `Metrics[4..7]`. Current
-  records are software/TAPA simulation plus one pre-Finish/empty-R deadlock-debug xclbin artifact:
+  records are software/TAPA simulation plus one entry mmap probe deadlock-debug xclbin artifact:
   `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` (UUID
-  `5c9f0e72-5ea9-7142-1e90-690b72d30557`, SHA256
-  `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26`). That artifact is not
-  timing-clean (routed WNS -2.373 ns, TNS -51779.359 ns) and has not been board-tested, so
-  there is still no Jacobi standard xclbin.
+  `7bf54cce-83a3-b7e7-97a9-719446658c03`, SHA256
+  `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`). That artifact is not
+  timing-clean (routed WNS -2.350 ns, TNS -60974.352 ns) and has not been board-tested, so
+  there is still no Jacobi standard xclbin. The previous pre-Finish/empty-R demo UUID
+  `5c9f0e72-5ea9-7142-1e90-690b72d30557` timed out at `Finish()` on
+  `thermal2_n16` / `thermal2_n1024`; that conclusion is historical and does not apply to
+  the current synced file.
 - The active optimization target has moved to full `CuperPcg(...)` PCG control and vector
   update paths. Prioritize `detail/pcg_controller.hpp`, `dot_p_ap`, `update_xr`,
   `update_p`, `P_spmv` / `AP_spmv` consumption, controller HBM access patterns, stage

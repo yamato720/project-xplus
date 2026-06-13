@@ -1,8 +1,9 @@
 # Cuper Jacobi 测试流程
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
-software/TAPA simulation 结果，并生成了 pre-Finish/empty-R deadlock-debug ABI demo
-xclbin；但 routed timing 未收敛，也还没有新版上板性能数据。
+software/TAPA simulation 结果，并生成了 entry mmap probe / deadlock-debug ABI demo
+xclbin；但 routed timing 未收敛，当前 entry mmap probe demo 还没有上板 smoke。
+上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文历史小节中。
 
 ## 1. 测试对象
 
@@ -88,26 +89,27 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/` |
+| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/` |
 | Kernel | `CuperJacobiIteration` |
 | ABI | `JACOBI_DEADLOCK_DEBUG=1`，单 `X` buffer，`Debug` HBM[24] |
-| UUID | `5c9f0e72-5ea9-7142-1e90-690b72d30557` |
-| SHA256 | `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26` |
-| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `427 MHz` |
-| 时序状态 | 未收敛：WNS `-2.373 ns`，TNS `-51779.359 ns`，failing endpoints `91026`；hold 无 failing endpoints |
+| UUID | `7bf54cce-83a3-b7e7-97a9-719446658c03` |
+| SHA256 | `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24` |
+| DATA / KERNEL / HBM clock | `175 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛：WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235`；hold 无 failing endpoints |
 
 Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；总耗时
-`3h 47m 24s`，构建日志在
-`cuper-tapa-jacobi-u55c-20260613-prefinish-empty-r-debug-build/logs/build_hw_tmux.log`。
+`4h 2m 20s`，构建日志在
+`cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/logs/build_hw_tmux.log`。
 
-这版还没有做新版 `hw` 上板运行；同步到 `395bitstream/` 只是为了保留和分发当前调试
-artifact，不能作为 timing-clean 标准 bitstream。上一版同名 demo UUID 为
-`6ad9f2dd-d23f-6ab2-c8bb-1129f00d27bb`，上板 `thermal2_n16 MAX_ITERS=1` 仍卡在
+这版已同步到 `395bitstream/`，但还没有做新版 `hw` 上板运行。同步只是为了保留和
+分发当前调试 artifact，不能作为 timing-clean 标准 bitstream。上一版同名
+pre-Finish/empty-R demo UUID 为 `5c9f0e72-5ea9-7142-1e90-690b72d30557`，上板
+`thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 均卡在
 `after ReadFromDevice before Finish`；旧测试结论只作为历史记录。
 
 ## 3.2 finite pair compute 源码验证
 
-2026-06-12 复测当前 395 demo 后，`thermal2_n1024 MAX_ITERS=1` 仍然卡在
+2026-06-12 复测当时的 395 Jacobi demo 后，`thermal2_n1024 MAX_ITERS=1` 仍然卡在
 `after ReadFromDevice before Finish`。当前源码已按
 `finish_nonreturn_monitoring_points.md` 的建议，把 8 个 `Jacobi_UpdatePairCompute`
 从 `tapa::detach` 无限循环改成 frame/stop 驱动的有限 task：
@@ -180,7 +182,7 @@ Hold worst slack: 0.005 ns
 
 ## 3.4 pre-Finish/empty-R 源码验证和硬件构建
 
-上一版 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
+当时上一版 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
 `after ReadFromDevice before Finish`；probe 显示 CU 已 `IDLE`，firewall GOOD，
 但存在 `[CuperJacobiIter]` D 状态线程。本轮改动：
 
@@ -215,7 +217,124 @@ timing: not met, WNS -2.373 ns, TNS -51779.359 ns, failing endpoints 91026
 elapsed: 3h 47m 24s
 ```
 
-这版已经覆盖 Jacobi demo 槽，但还没有新版上板验证。
+这版已经覆盖 Jacobi demo 槽。后续上板验证显示它仍然不能正常返回，见下一节。
+
+## 3.5 pre-Finish/empty-R 上板失败与入口 mmap probe
+
+服务器侧复测上一版 pre-Finish/empty-R 395 demo：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 5c9f0e72-5ea9-7142-1e90-690b72d30557
+SHA256: 0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26
+logs: logs/jacobi_prefinish_empty_r_hw_20260613_112806/
+```
+
+结果：
+
+```text
+thermal2_n16 MAX_ITERS=1: rc=124, 120s timeout
+thermal2_n1024 MAX_ITERS=1: rc=124, 120s timeout
+host stop point: [tapa-invoke] after ReadFromDevice before Finish
+prefinish Status[0..2]: 0,0,0
+prefinish Metrics[0..7]: 0,0,0,0,0,0,0,0
+prefinish Debug: heartbeat=0, event_count=0, stop_marker=0
+xbutil CU status: IDLE
+firewall: GOOD
+```
+
+这个结果说明当前失败不再像单纯 PL 业务数据流还在 RUN。`ReadFromDevice()` 已经执行，
+但 Status/Metrics/Debug 没有任何 kernel 写回痕迹；下一步要先区分 kernel 入口 task
+是否启动、HBM[24] 上 mmap 写回是否可见，以及 `ReadFromDevice`/`Finish` 迁移顺序
+是否掩盖了已写数据。
+
+当前源码已加入 debug-only 入口 mmap probe，仍由 `JACOBI_DEADLOCK_DEBUG=1` 控制：
+
+```text
+Jacobi_DebugMonitor:
+  Debug[0]       = 0x4a434231，阻塞写并等待 write response
+  Debug[48..51]  = magic, debug stream count, entry phase, stop drain cycles
+
+Jacobi_RoundDispatcher:
+  Status[8..11]  = magic, Row_num, Max_iters, float_v16 packet count
+  Metrics[8..11] = magic, Row_num, Max_iters, float_v16 packet count
+```
+
+host 现在会在 `Finish()` 前打印：
+
+```text
+[jacobi-prefinish-probe] Status[8..11]=...
+[jacobi-deadlock-probe] Debug[48..51]=...
+```
+
+并在正常返回后额外打印：
+
+```text
+[jacobi-final-probe] Status[8..11]=...
+```
+
+这版源码验证：
+
+```bash
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-xo
+```
+
+关键结果：
+
+```text
+thermal2_n16 software/TAPA simulation: Error Num=0
+  [jacobi-final-probe] Status[8..11]=1245921841,16,1,1
+  [jacobi-final-probe] Metrics[8..11]=1245921841,16,1,1
+  [jacobi-deadlock-probe] Debug[48..51]=1245921841,11,1,8192
+
+thermal2_n1024 software/TAPA simulation: Error Num=0
+  [jacobi-final-probe] Status[8..11]=1245921841,1024,1,64
+  [jacobi-final-probe] Metrics[8..11]=1245921841,1024,1,64
+  [jacobi-deadlock-probe] Debug[48..51]=1245921841,11,1,8192
+
+XO: cuper-jacobi-iteration-build/CuperJacobiIteration.xo generated
+```
+
+这一步先证明源码和 XO 能通过。随后已用 entry mmap probe 源码重新生成完整
+`.xclbin` 并同步到 Jacobi demo 槽，见下一节。
+
+## 3.6 entry mmap probe 硬件构建
+
+构建结果：
+
+```text
+build dir: cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/
+build log: cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/logs/build_hw_tmux.log
+xclbin: cuper-tapa-jacobi-u55c-20260613-entry-mmap-probe-debug-build/CuperJacobiIteration.xclbin
+sync: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+UUID: 7bf54cce-83a3-b7e7-97a9-719446658c03
+SHA256: 775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24
+DATA clock: 175 MHz
+KERNEL clock: 500 MHz
+HBM clock: 450 MHz
+DATA achieved: 175.9 MHz
+VPL: FINISHED, Run Status: impl Complete
+v++ link: Run completed
+total elapsed: 4h 2m 20s
+```
+
+时序状态：
+
+```text
+Timing constraints are not met.
+Setup failing endpoints: 101235
+Setup worst slack: -2.350 ns
+Setup total violation: -60974.352 ns
+Hold failing endpoints: 0
+Hold worst slack: 0.009 ns
+```
+
+结论：这版已经包含入口 mmap probe，并已同步到 `395bitstream/` 的 Jacobi demo 槽。
+它仍不是 timing-clean bitstream，当前还没有新版上板 smoke；上一版
+pre-Finish/empty-R demo 的 `Finish()` 不返回结论只对应旧 UUID。
 
 当前 deadlock-debug 单 `X` ABI 已记录的计数。最新一次 quick regression 日志在
 `cuper-jacobi-iteration-build/regression/20260612_124905_quick/`：

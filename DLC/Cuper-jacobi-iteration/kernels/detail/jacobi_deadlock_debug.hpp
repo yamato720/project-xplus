@@ -28,6 +28,14 @@ static constexpr INDEX_TYPE kJacobiDebugStreamHbmWriter = 2;
 static constexpr INDEX_TYPE kJacobiDebugStreamPairBase = 3;
 static constexpr INDEX_TYPE kJacobiDebugStopDrainCycles = 8192;
 
+// 入口级 mmap 探针。下一版上板若 pre-Finish dump 仍读不到这些槽位，优先怀疑
+// kernel task 未启动、Debug BO ABI/mmap 写回路径，或 XRT/FRT 的迁移顺序。
+static constexpr INDEX_TYPE kJacobiDebugProbeMagic = 0x4a434231;
+static constexpr INDEX_TYPE kJacobiDebugProbeSlotMagic = 48;
+static constexpr INDEX_TYPE kJacobiDebugProbeSlotStreamCount = 49;
+static constexpr INDEX_TYPE kJacobiDebugProbeSlotPhase = 50;
+static constexpr INDEX_TYPE kJacobiDebugProbeSlotStopDrain = 51;
+
 struct JacobiDebugEvent {
     INDEX_TYPE source;
     INDEX_TYPE phase;
@@ -73,6 +81,22 @@ void Jacobi_DebugMonitor(
     tapa::istreams<JacobiDebugEvent, kJacobiDebugStreamCount> &Debug_Event_in,
     tapa::istream<INDEX_TYPE> &Debug_Stop_in,
     tapa::async_mmap<INDEX_TYPE> &Debug) {
+    // 先做阻塞写并等待 AXI write response。它只阻塞 debug task，不会反压业务流；
+    // 但可以证明 Debug mmap 端口是否在 kernel 入口阶段已经可写。
+    Jacobi_DebugWriteBlocking(Debug, 0, kJacobiDebugProbeMagic);
+    Jacobi_DebugWriteBlocking(Debug,
+                              kJacobiDebugProbeSlotMagic,
+                              kJacobiDebugProbeMagic);
+    Jacobi_DebugWriteBlocking(Debug,
+                              kJacobiDebugProbeSlotStreamCount,
+                              kJacobiDebugStreamCount);
+    Jacobi_DebugWriteBlocking(Debug,
+                              kJacobiDebugProbeSlotPhase,
+                              kJacobiDebugPhaseEnterRound);
+    Jacobi_DebugWriteBlocking(Debug,
+                              kJacobiDebugProbeSlotStopDrain,
+                              kJacobiDebugStopDrainCycles);
+
     INDEX_TYPE heartbeat = 0;
     INDEX_TYPE event_count = 0;
     INDEX_TYPE poll_index = 0;

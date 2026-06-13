@@ -52,12 +52,26 @@
 - 2026-06-13 已生成并同步 pre-Finish/empty-R debug 硬件 demo artifact：
   `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版覆盖上一版同名
   finite-pair demo 槽。
+- 2026-06-13 服务器侧复测当前 pre-Finish/empty-R demo 后，`thermal2_n16` 和
+  `thermal2_n1024` 的 `MAX_ITERS=1` 均在 120s timeout，host 仍停在
+  `[tapa-invoke] after ReadFromDevice before Finish`。这次 `ReadFromDevice()` 前置
+  dump 生效，但 Status/Metrics/Debug 全 0；probe 期间 CU 为 `IDLE`，firewall
+  `GOOD`。这说明问题比后端 update/drain 更靠前，优先看 kernel 入口 task、HBM[24]
+  mmap 写回路径和 TAPA/FRT `Finish()` 清理。
+- 当前源码已加入 debug-only 入口 mmap probe：`Jacobi_DebugMonitor` 在入口阻塞写
+  `Debug[0]` 和 `Debug[48..51]` 并等待 write response；`Jacobi_RoundDispatcher`
+  在入口写 `Status[8..11]`、`Metrics[8..11]`。host 会在 pre-Finish 和正常返回后
+  打印这些槽位。`thermal2_n16` / `thermal2_n1024` 的 debug ABI software/TAPA
+  simulation 均已通过，并重新生成 `cuper-jacobi-iteration-build/CuperJacobiIteration.xo`。
+- 2026-06-13 已生成并同步 entry mmap probe debug 硬件 demo artifact：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版覆盖上一版同名
+  pre-Finish/empty-R demo 槽，但仍未晋级标准。
 
 ## 当前没有做
 
-- 当前 pre-Finish/empty-R debug xclbin 还没有上板测试。
-- 没有得到 timing-clean bitstream；当前 2026-06-13 pre-Finish/empty-R demo routed
-  timing 未收敛，WNS `-2.373 ns`。
+- entry mmap probe 版本还没有做新版上板 smoke。
+- 没有得到 timing-clean bitstream；当前 2026-06-13 entry mmap probe demo routed
+  timing 未收敛，WNS `-2.350 ns`。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -70,5 +84,6 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前 2026-06-13 pre-Finish/empty-R debug bitstream 没有过 timing，也还没有上板
-  验证，不能作为稳定性能结论。
+- 当前 2026-06-13 entry mmap probe debug bitstream 没有过 timing，且还没有做新版
+  上板 smoke，不能作为稳定性能结论。上一版 pre-Finish/empty-R demo 的
+  `Finish()` 不返回结论只对应旧 UUID。
