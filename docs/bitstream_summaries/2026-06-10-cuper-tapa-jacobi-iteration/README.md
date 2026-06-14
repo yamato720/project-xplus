@@ -9,8 +9,9 @@ DLC/Cuper-jacobi-iteration/
 当前状态：已完成 software/TAPA simulation demo，并接入 Project-XPlus 根
 `Makefile` 的 `cuper-jacobi-*` 目标。`CuperJacobiMmapProbeOnly` split-bank
 mmap-only debug xclbin 已通过 native XRT 上板 smoke，用于排除基本 kernel launch、
-split-bank m_axi 写回和 BO sync 边界；当前同步 demo 已切回 no-debug 的完整
-`CuperJacobiIteration` full graph，但 routed timing 仍未收敛，尚未完成上板 smoke。
+split-bank m_axi 写回和 BO sync 边界；当前同步 demo 是 `JACOBI_TRACE_LIGHT=1`
+的完整 `CuperJacobiIteration` full graph debug 版，但 routed timing 仍未收敛，
+尚未完成上板 smoke。
 
 ## 版本定位
 
@@ -20,8 +21,8 @@ split-bank m_axi 写回和 BO sync 边界；当前同步 demo 已切回 no-debug
 | 顶层 kernel | `CuperJacobiIteration` |
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
-| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；当前同步的是 no-debug full graph，timing 未收敛，待上板 smoke |
+| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` |
+| 版本状态 | software/TAPA simulation 通过；当前同步的是 light-trace full graph，timing 未收敛，待上板 smoke |
 | 是否建议晋级标准 | 不建议，当前还未完成 timing closure 和硬件 smoke |
 
 这条主线做普通 Jacobi iteration：
@@ -56,7 +57,9 @@ $$
 | `B` | HBM[20] |
 | `Diag_inv` | HBM[21] |
 | `X` | HBM[22] |
-| `Status` / `Metrics` / `Debug` | HBM[24] |
+| `Status` | HBM[24] |
+| `Metrics` | HBM[25] |
+| `Debug` | HBM[26] |
 
 当前设计仍显式使用矩阵 16 个 HBM 通道之外的向量/状态/debug 通道。后续如果目标是
 压回 16 个 HBM，需要重新设计 X 转发、B/Diag_inv 供给和结果写回策略；这还没有进入
@@ -66,20 +69,31 @@ $$
 
 | 项目 | 内容 |
 | --- | --- |
-| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin.info` |
+| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` |
+| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin.info` |
 | 构建目录 | `cuper-jacobi-iteration-build/` |
 | Kernel | `CuperJacobiIteration` |
-| ABI | no-debug full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics` HBM[24] |
-| UUID | `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7` |
-| SHA256 | `1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a` |
-| DATA / KERNEL / HBM clock | `207 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 未收敛，WNS `-1.480 ns`，TNS `-26306.850 ns`，setup failing endpoints `68234` |
+| ABI | light-trace full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics/Debug` HBM[24]/HBM[25]/HBM[26] |
+| UUID | `6dfaf1e3-9707-7f46-b914-1f59ca240993` |
+| SHA256 | `4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5` |
+| DATA / KERNEL / HBM clock | `195 MHz` / `500 MHz` / `439 MHz` |
+| 时序状态 | 未收敛，WNS `-1.789 ns`，TNS `-29517.641 ns`，setup failing endpoints `72617` |
 
-这个文件是当前 full graph demo artifact，不是标准 bitstream。Vitis link 已完成
-implementation 和 `.xclbin` 封装；构建总耗时 `5h 25m 17s`。它覆盖了上一版同名
-`20260613` mmap-only split-bank probe demo，旧 UUID
-`380f9de1-e5c1-66ab-b888-db99d2ef3523` 的测试结论只作为历史记录。
+这个文件是当前 full graph debug demo artifact，不是标准 bitstream。Vitis link 已完成
+implementation 和 `.xclbin` 封装；v++ link 总耗时 `4h 10m 40s`。它覆盖了上一版
+`20260613` no-debug full graph demo，旧 UUID
+`b233c1af-6ba7-ebc5-8a5b-c56d348c53c7` 的构建结论只作为历史记录。
+
+当前 light trace 只接入 7 路 source，降低 DebugMonitor 对 HLS/RTL 的压力：
+
+```text
+dispatcher, ptr_loader, vector_loader, frame_fork,
+coeff_loader, pack_writer, x_hbm_writer
+```
+
+full isotope 47 路 trace 仍可通过 `JACOBI_TRACE_ISOTOPE=1` 打开，但它的
+`Jacobi_DebugMonitor` 曾在 HLS 阶段消耗约 70GB 内存并长时间停留，不适合作为默认硬件
+debug 构建。
 
 上一版 mmap-only split-bank probe 的 2026-06-13 native XRT 上板 smoke 已通过：
 
@@ -126,6 +140,15 @@ software/TAPA simulation，并重新生成完整硬件 demo xclbin，同步到 J
 Status/Metrics/Debug 改为 sentinel 初始化和 `read_write_mmap`，用于下一版 full graph
 上板时判断 pre-Finish BO 是否被 kernel 覆盖。
 
+2026-06-14 追加 `JACOBI_TRACE_ISOTOPE=1` 调试边界。trace 版会给完整 graph 的关键
+task 分配 source 编号，并把每个 source 的最后 phase/lane/value/event 写到
+`Debug[64 + source*4 ...]`。覆盖的 source 包括 dispatcher、ptr/vector loader、
+16 路 matrix loader、16 路 accumulator、frame/coeff loader、8 路 pair compute、
+pack writer 和 X HBM writer。业务 task 只非阻塞发事件，Debug BO 由单独 monitor
+写回，host 在 `Finish()` 前先打印快照，因此下一轮上板即使继续卡在 `Finish()`，
+也应能看到最后到达的数据流位置。trace connectivity 把 `Status/Metrics/Debug`
+分到 `HBM[24]/HBM[25]/HBM[26]`。
+
 ## 当前 micro probe 工具
 
 | 项目 | 内容 |
@@ -144,6 +167,10 @@ Status/Metrics/Debug 改为 sentinel 初始化和 `read_write_mmap`，用于下�
 | `cant.mtx` | 2 | 当前 deadlock-debug 单 `X` ABI 通过 | `Final buffer=0`, `Final diff=0`, `Error Num=0`, `spmv_update=103856 cycles` |
 | `thermal2_n65536` | 1 | 当前 deadlock-debug 单 `X` ABI 通过 | `Final buffer=0`, `Final diff=0`, `Error Num=0`, `spmv_update=36081 cycles` |
 | `thermal2_n262144` | 1 | 早期 software run 通过 | `Final diff=1.41496`, `Error Num=0`；需用当前 root target 补跑 |
+| `thermal2_n16` | 1 | `JACOBI_TRACE_ISOTOPE=1` trace ABI software 通过 | `Error Num=0`, Debug[48..51]=`1245921841,47,1,8192` |
+| `thermal2_n1024` | 1 | `JACOBI_TRACE_ISOTOPE=1` trace ABI software 通过 | `Error Num=0`, 47 个 source 槽位均可见 |
+| `thermal2_n16` | 1 | `JACOBI_TRACE_LIGHT=1` trace ABI software 通过 | `Error Num=0`, Debug[48..51]=`1245921841,7,1,8192` |
+| `thermal2_n1024` | 1 | `JACOBI_TRACE_LIGHT=1` trace ABI software 通过 | `Error Num=0`, 7 个关键 source 槽位均可见 |
 
 详细命令和字段见 `testing.md`。
 
@@ -161,7 +188,7 @@ docs/codex/testing.md
 ## 待补
 
 - 当前 root target 下补跑 `thermal2_n262144`。
-- 当前 full Jacobi graph demo 已同步，下一步先做最小上板 smoke，并根据结果决定继续
+- 当前 light-trace full Jacobi graph demo 已同步，下一步先做最小上板 smoke，并根据结果决定继续
   查 `Finish()`/stop-drain 还是先做 timing closure。
 - 完成 demo-only 上板测试后，再更新 HTML 报告和本目录测试表。
 - `source.diff` 暂不生成；当前还没有硬件 demo-only 性能确认。

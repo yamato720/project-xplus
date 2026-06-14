@@ -9,7 +9,7 @@
 #include <tapa.h>
 
 #include "jacobi_common.hpp"
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
 #include "jacobi_deadlock_debug.hpp"
 #endif
 
@@ -37,10 +37,22 @@ void Jacobi_UpdateFrameFork(tapa::istream<JacobiFrame> &Frame_in,
                             tapa::ostream<JacobiFrame> &Coeff_Frame_out,
                             tapa::ostream<JacobiFrame> &Pack_Frame_out,
                             tapa::ostream<JacobiFrame> &Hbm_Frame_out,
-                            tapa::ostreams<JacobiFrame, 8> &Pair_Frame_out) {
+                            tapa::ostreams<JacobiFrame, 8> &Pair_Frame_out
+#ifdef JACOBI_TRACE_ENABLED
+                            ,
+                            tapa::ostream<JacobiDebugEvent> &Debug_Event_out
+#endif
+                            ) {
     for (;;) {
 #pragma HLS pipeline II=1
         const JacobiFrame frame = Frame_in.read();
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourceFrameFork,
+                             frame.stop != 0 ? kJacobiDebugPhaseStop : kJacobiDebugPhaseFrame,
+                             frame.iter,
+                             frame.packet_count);
+#endif
         Coeff_Frame_out.write(frame);
         Pack_Frame_out.write(frame);
         Hbm_Frame_out.write(frame);
@@ -58,13 +70,33 @@ void Jacobi_UpdateFrameFork(tapa::istream<JacobiFrame> &Frame_in,
 void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                               tapa::ostreams<JacobiCoeffPair, 8> &Coeff_out,
                               tapa::async_mmap<float_v16> &B,
-                              tapa::async_mmap<float_v16> &Diag_inv) {
+                              tapa::async_mmap<float_v16> &Diag_inv
+#ifdef JACOBI_TRACE_ENABLED
+                              ,
+                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out
+#endif
+                              ) {
     for (;;) {
 #pragma HLS loop_flatten off
         const JacobiFrame frame = Frame_in.read();
         if (frame.stop != 0) {
+#ifdef JACOBI_TRACE_ENABLED
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 kJacobiDebugSourceCoeffLoader,
+                                 kJacobiDebugPhaseStop,
+                                 frame.iter,
+                                 0);
+#endif
             return;
         }
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourceCoeffLoader,
+                             kJacobiDebugPhaseRecv,
+                             frame.iter,
+                             frame.packet_count);
+        INDEX_TYPE debug_wait_tick = 0;
+#endif
 
     load_coeff_packets:
         for (INDEX_TYPE request = 0, response = 0; response < frame.packet_count;) {
@@ -76,6 +108,15 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                 B.read_addr.try_write(request);
                 Diag_inv.read_addr.try_write(request);
                 ++request;
+#ifdef JACOBI_TRACE_ENABLED
+                if ((request & 0x3ff) == 0 || request == frame.packet_count) {
+                    Jacobi_DebugTryWrite(Debug_Event_out,
+                                         kJacobiDebugSourceCoeffLoader,
+                                         kJacobiDebugPhaseReadIssue,
+                                         frame.iter,
+                                         request);
+                }
+#endif
             }
 
             bool coeff_output_ready = true;
@@ -92,6 +133,9 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                 float_v16 diag_inv;
                 B.read_data.try_read(b);
                 Diag_inv.read_data.try_read(diag_inv);
+#ifdef JACOBI_TRACE_ENABLED
+                debug_wait_tick = 0;
+#endif
 
             split_coeff_lanes:
                 for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
@@ -101,8 +145,47 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                     Coeff_out[lane_pair].try_write(pair);
                 }
                 ++response;
+#ifdef JACOBI_TRACE_ENABLED
+                if ((response & 0x3ff) == 0 || response == frame.packet_count) {
+                    Jacobi_DebugTryWrite(Debug_Event_out,
+                                         kJacobiDebugSourceCoeffLoader,
+                                         kJacobiDebugPhaseReadResp,
+                                         frame.iter,
+                                         response);
+                }
+#endif
+#ifdef JACOBI_TRACE_ENABLED
+            } else {
+                INDEX_TYPE wait_code = 0;
+                if (B.read_addr.full()) {
+                    wait_code = 1;
+                } else if (Diag_inv.read_addr.full()) {
+                    wait_code = 2;
+                } else if (B.read_data.empty()) {
+                    wait_code = 3;
+                } else if (Diag_inv.read_data.empty()) {
+                    wait_code = 4;
+                } else if (!coeff_output_ready) {
+                    wait_code = 5;
+                }
+                ++debug_wait_tick;
+                if ((debug_wait_tick & 0x3ff) == 0) {
+                    Jacobi_DebugTryWrite(Debug_Event_out,
+                                         kJacobiDebugSourceCoeffLoader,
+                                         kJacobiDebugPhaseWait,
+                                         wait_code,
+                                         response);
+                }
+#endif
             }
         }
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourceCoeffLoader,
+                             kJacobiDebugPhaseDoneRound,
+                             frame.iter,
+                             frame.packet_count);
+#endif
     }
 }
 
@@ -111,7 +194,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                               tapa::istream<float_v2> &Neg_Rx_in_1,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
                               tapa::ostream<JacobiUpdatedPair> &Updated_out
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                               ,
                               tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
                               const INDEX_TYPE Debug_source
@@ -121,7 +204,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 #pragma HLS loop_flatten off
         const JacobiFrame frame = Frame_in.read();
         if (frame.stop != 0) {
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  Debug_source,
                                  kJacobiDebugPhaseStop,
@@ -133,7 +216,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 
         const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(frame.row_num);
         const INDEX_TYPE num_out = frame.packet_count;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
                              kJacobiDebugPhaseEnterRound,
@@ -148,7 +231,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
             const bool can_emit_update = !Coeff_in.empty() && !Updated_out.full();
             const bool neg_rx_ready = (c_idx == 0) ? !Neg_Rx_in_0.empty() : !Neg_Rx_in_1.empty();
             if (neg_rx_ready && (!is_valid_output || can_emit_update)) {
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 debug_wait_tick = 0;
 #endif
                 float_v2 neg_rx;
@@ -169,7 +252,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                         updated.value[lane] = (coeff.b[lane] + neg_rx[lane]) * coeff.diag_inv[lane];
                     }
                     Updated_out.try_write(updated);
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                     if ((o_idx & 0x3ff) == 0) {
                         Jacobi_DebugTryWrite(Debug_Event_out,
                                              Debug_source,
@@ -189,7 +272,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                 if (o_idx == num_pe_output) {
                     o_idx = 0;
                 }
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
             } else {
                 INDEX_TYPE wait_code = 0;
                 if (!neg_rx_ready) {
@@ -210,7 +293,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 #endif
             }
         }
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
                              kJacobiDebugPhaseDoneRound,
@@ -223,7 +306,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
                              tapa::istreams<JacobiUpdatedPair, 8> &Updated_in,
                              tapa::ostream<float_v16> &X_Write_out
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                              ,
                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out
 #endif
@@ -232,9 +315,16 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
 #pragma HLS loop_flatten off
         const JacobiFrame frame = Frame_in.read();
         if (frame.stop != 0) {
+#ifdef JACOBI_TRACE_ENABLED
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 kJacobiDebugSourcePackWriter,
+                                 kJacobiDebugPhaseStop,
+                                 frame.iter,
+                                 0);
+#endif
             return;
         }
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePackWriter,
                              kJacobiDebugPhaseEnterRound,
@@ -257,7 +347,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
             }
 
             if (all_updated_ready && !X_Write_out.full()) {
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 debug_wait_tick = 0;
 #endif
                 float_v16 x_next;
@@ -282,7 +372,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
 
                 X_Write_out.try_write(x_next);
                 ++packet;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 if ((packet & 0x3ff) == 0 || packet == frame.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourcePackWriter,
@@ -291,7 +381,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
                                          packet);
                 }
 #endif
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
             } else {
                 INDEX_TYPE wait_code = 0;
                 if (!all_updated_ready) {
@@ -316,7 +406,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
 #endif
             }
         }
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePackWriter,
                              kJacobiDebugPhaseDoneRound,
@@ -330,7 +420,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                        tapa::istream<float_v16> &X_Write_in,
                        tapa::ostream<JacobiRoundToken> &Feedback_Token_out,
                        tapa::async_mmap<float_v16> &X
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                        ,
                        tapa::ostream<JacobiDebugEvent> &Debug_Event_out
 #endif
@@ -339,11 +429,18 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
 #pragma HLS loop_flatten off
         const JacobiFrame frame = Frame_in.read();
         if (frame.stop != 0) {
+#ifdef JACOBI_TRACE_ENABLED
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 kJacobiDebugSourceHbmWriter,
+                                 kJacobiDebugPhaseStop,
+                                 frame.iter,
+                                 0);
+#endif
             return;
         }
 
         const INDEX_TYPE iterations_done = frame.iter + 1;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceHbmWriter,
                              kJacobiDebugPhaseEnterRound,
@@ -362,7 +459,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                                      !X.write_data.full();
 
             if (write_issued < frame.packet_count && write_ready) {
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 debug_wait_tick = 0;
 #endif
                 float_v16 x_next;
@@ -370,7 +467,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                 X.write_addr.try_write(write_issued);
                 X.write_data.try_write(x_next);
                 ++write_issued;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 if ((write_issued & 0x3ff) == 0 || write_issued == frame.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceHbmWriter,
@@ -379,7 +476,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                                          write_issued);
                 }
 #endif
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
             } else if (write_issued < frame.packet_count) {
                 INDEX_TYPE wait_code = 0;
                 if (X_Write_in.empty()) {
@@ -403,7 +500,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
             uint8_t num_responses = 0;
             if (X.write_resp.try_read(num_responses)) {
                 write_response += int(num_responses) + 1;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 if ((write_response & 0x3ff) == 0 || write_response >= frame.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceHbmWriter,
@@ -415,7 +512,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
             }
         }
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceHbmWriter,
                              kJacobiDebugPhaseDoneRound,
@@ -431,5 +528,12 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                                                            frame.max_iters,
                                                            iterations_done));
         }
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourceHbmWriter,
+                             kJacobiDebugPhaseFeedback,
+                             frame.iter,
+                             iterations_done);
+#endif
     }
 }

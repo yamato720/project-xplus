@@ -13,6 +13,14 @@
 
 //#define X_TABLE
 
+#if defined(JACOBI_TRACE_ISOTOPE) || defined(JACOBI_TRACE_LIGHT) || defined(JACOBI_DEADLOCK_DEBUG)
+#define JACOBI_TRACE_ENABLED 1
+#endif
+
+#if defined(JACOBI_TRACE_ISOTOPE) || defined(JACOBI_DEADLOCK_DEBUG)
+#define JACOBI_TRACE_FULL 1
+#endif
+
 
 // Cuper TAPA SpMV 的硬件结构常量。
 // 这些常量描述 SpMV 的 slice/batch/HBM 并行度，不是 Jacobi 迭代参数。
@@ -94,7 +102,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmap<float_v16> X,
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                           tapa::mmap<INDEX_TYPE> Debug,
 #endif
                           const INDEX_TYPE Batch_num,

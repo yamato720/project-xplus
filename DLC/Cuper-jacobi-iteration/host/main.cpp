@@ -12,6 +12,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <ap_int.h>
 #include <tapa.h>
@@ -46,13 +47,62 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
 
 static constexpr INDEX_TYPE kJacobiStatusSentinelBase = 0x51510000;
 static constexpr INDEX_TYPE kJacobiDebugSentinelBase = 0x53530000;
+static constexpr INDEX_TYPE kJacobiTraceDebugWords = 256;
+static constexpr INDEX_TYPE kJacobiTracePerSourceBase = 64;
+static constexpr INDEX_TYPE kJacobiTracePerSourceStride = 4;
+static constexpr INDEX_TYPE kJacobiTraceSourceMax = 47;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 
 bool IsJacobiDebugSentinel(const INDEX_TYPE index, const INDEX_TYPE value) {
     return value == kJacobiDebugSentinelBase + index;
 }
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
+const char* JacobiTracePhaseName(const INDEX_TYPE phase) {
+    switch (phase) {
+    case 1: return "enter_round";
+    case 2: return "progress";
+    case 3: return "wait";
+    case 4: return "done_round";
+    case 5: return "recv";
+    case 6: return "send";
+    case 7: return "read_issue";
+    case 8: return "read_resp";
+    case 9: return "write_issue";
+    case 10: return "write_resp";
+    case 11: return "feedback";
+    case 12: return "frame";
+    case 255: return "stop";
+    default: return "unknown";
+    }
+}
+
+void PrintJacobiTraceSourceLabel(const INDEX_TYPE source) {
+    if (source == 1) {
+        cout << "dispatcher";
+    } else if (source == 2) {
+        cout << "ptr_loader";
+    } else if (source == 3) {
+        cout << "vector_loader";
+    } else if (source >= 4 && source < 20) {
+        cout << "matrix_loader[" << (source - 4) << "]";
+    } else if (source >= 20 && source < 36) {
+        cout << "accumulator[" << (source - 20) << "]";
+    } else if (source == 36) {
+        cout << "frame_fork";
+    } else if (source == 37) {
+        cout << "coeff_loader";
+    } else if (source >= 38 && source < 46) {
+        cout << "pair_compute[" << (source - 38) << "]";
+    } else if (source == 46) {
+        cout << "pack_writer";
+    } else if (source == 47) {
+        cout << "x_hbm_writer";
+    } else {
+        cout << "source" << source;
+    }
+}
+
 void PrintJacobiProbeSnapshot(const char* label,
                               const aligned_vector<INDEX_TYPE>& status_data,
                               const aligned_vector<double>& metrics_data) {
@@ -96,41 +146,74 @@ void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
     }
     cout << endl;
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
     PrintJacobiProbeSnapshot("jacobi-prefinish-probe", status_data, metrics_data);
 #endif
 }
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
 void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
     const INDEX_TYPE packed_event = debug_data[2];
     const INDEX_TYPE source = (packed_event >> 24) & 0xff;
     const INDEX_TYPE phase = (packed_event >> 16) & 0xff;
     const INDEX_TYPE lane = packed_event & 0xffff;
 
-    cout << "[jacobi-deadlock-debug] heartbeat=" << debug_data[0]
+    cout << "[jacobi-trace] heartbeat=" << debug_data[0]
          << " event_count=" << debug_data[1]
-         << " last_source=" << source
-         << " last_phase=" << phase
+         << " last_source=";
+    PrintJacobiTraceSourceLabel(source);
+    cout << "(" << source << ")"
+         << " last_phase=" << JacobiTracePhaseName(phase) << "(" << phase << ")"
          << " last_lane=" << lane
          << " last_value=" << debug_data[3]
          << " stop_marker=" << debug_data[15]
          << endl;
 
-    cout << "[jacobi-deadlock-probe] Debug[48..51]="
+    cout << "[jacobi-trace-mmap] write_issue=" << debug_data[5]
+         << " write_resp=" << debug_data[6]
+         << " stop_seen=" << debug_data[7]
+         << endl;
+
+    cout << "[jacobi-trace-probe] Debug[48..51]="
          << debug_data[48] << ","
          << debug_data[49] << ","
          << debug_data[50] << ","
          << debug_data[51]
          << endl;
 
-    cout << "[jacobi-deadlock-debug-slots]";
+    cout << "[jacobi-trace-legacy-slots]";
     for (INDEX_TYPE index = 16; index < 64; ++index) {
         if (!IsJacobiDebugSentinel(index, debug_data[index]) && debug_data[index] != 0) {
             cout << " d" << index << "=" << debug_data[index];
         }
     }
     cout << endl;
+
+    cout << "[jacobi-trace-sources]" << endl;
+    for (INDEX_TYPE source_index = 1; source_index <= kJacobiTraceSourceMax; ++source_index) {
+        const INDEX_TYPE base = kJacobiTracePerSourceBase +
+                                source_index * kJacobiTracePerSourceStride;
+        if (base + 3 >= static_cast<INDEX_TYPE>(debug_data.size())) {
+            break;
+        }
+        const bool touched =
+            !IsJacobiDebugSentinel(base, debug_data[base]) ||
+            !IsJacobiDebugSentinel(base + 1, debug_data[base + 1]) ||
+            !IsJacobiDebugSentinel(base + 2, debug_data[base + 2]) ||
+            !IsJacobiDebugSentinel(base + 3, debug_data[base + 3]);
+        if (!touched) {
+            continue;
+        }
+        cout << "  src=";
+        PrintJacobiTraceSourceLabel(source_index);
+        cout << "(" << source_index << ")"
+             << " phase=" << JacobiTracePhaseName(debug_data[base])
+             << "(" << debug_data[base] << ")"
+             << " lane=" << debug_data[base + 1]
+             << " value=" << debug_data[base + 2]
+             << " event=" << debug_data[base + 3]
+             << endl;
+    }
 }
 #endif
 
@@ -139,7 +222,7 @@ int64_t InvokeCuperJacobiIterationWithPrefinishDump(
     const std::string& bitstream,
     const aligned_vector<INDEX_TYPE>& status_data,
     const aligned_vector<double>& metrics_data,
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
     const aligned_vector<INDEX_TYPE>& debug_data,
 #endif
     Args&&... args) {
@@ -164,13 +247,21 @@ int64_t InvokeCuperJacobiIterationWithPrefinishDump(
     instance.WriteToDevice();
     cout << "[tapa-invoke] after WriteToDevice before Exec" << endl;
     instance.Exec();
+#ifdef JACOBI_TRACE_ENABLED
+    const int sample_delay_ms = EnvInt("JACOBI_PREFINISH_SAMPLE_DELAY_MS", 250);
+    if (sample_delay_ms > 0) {
+        cout << "[tapa-invoke] trace sample delay before ReadFromDevice: "
+             << sample_delay_ms << " ms" << endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(sample_delay_ms));
+    }
+#endif
     cout << "[tapa-invoke] after Exec before ReadFromDevice" << endl;
     instance.ReadFromDevice();
     cout << "[tapa-invoke] after ReadFromDevice before Finish" << endl;
 
     // Finish() 当前可能不返回；ReadFromDevice 后先打印已同步回 host 的 BO 快照。
     PrintJacobiPrefinishSnapshot(status_data, metrics_data);
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
     PrintJacobiDebugBuffer(debug_data);
 #endif
 
@@ -716,8 +807,8 @@ int main(int argc, char* argv[]) {
 
     aligned_vector<INDEX_TYPE> Status_fpga_data(16, 0);
     aligned_vector<double> Metrics_fpga_data(16, 0.0);
-#ifdef JACOBI_DEADLOCK_DEBUG
-    aligned_vector<INDEX_TYPE> Debug_fpga_data(64, 0);
+#ifdef JACOBI_TRACE_ENABLED
+    aligned_vector<INDEX_TYPE> Debug_fpga_data(kJacobiTraceDebugWords, 0);
 #endif
     for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Status_fpga_data.size()); ++index) {
         Status_fpga_data[index] = kJacobiStatusSentinelBase + index;
@@ -725,7 +816,7 @@ int main(int argc, char* argv[]) {
     for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Metrics_fpga_data.size()); ++index) {
         Metrics_fpga_data[index] = kJacobiMetricsSentinelBase - static_cast<double>(index);
     }
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
     for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Debug_fpga_data.size()); ++index) {
         Debug_fpga_data[index] = kJacobiDebugSentinelBase + index;
     }
@@ -746,15 +837,21 @@ int main(int argc, char* argv[]) {
     //   Matrix_fpga_data        -> 16 路 HBM 矩阵数据，reinterpret 为 ap_uint<512>
     //   B/Diag_inv/X           -> packed Jacobi 向量
     //   Status/Metrics         -> kernel 返回状态
-#ifdef JACOBI_DEADLOCK_DEBUG
-    //   Debug                  -> 可选 deadlock debug 槽位，只有宏打开时进入 ABI
-    cout << "\n[jacobi-deadlock-debug] enabled: Debug buffer ABI is active" << endl;
+#ifdef JACOBI_TRACE_ENABLED
+    //   Debug                  -> 可选 trace/debug 槽位，只有宏打开时进入 ABI
+    cout << "\n[jacobi-trace] enabled: Debug buffer ABI is active, mode="
+#ifdef JACOBI_TRACE_FULL
+         << "full"
+#else
+         << "light"
+#endif
+         << endl;
 #endif
     double kernel_time = InvokeCuperJacobiIterationWithPrefinishDump(
                                       bitstream,
                                       Status_fpga_data,
                                       Metrics_fpga_data,
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                                       Debug_fpga_data,
 #endif
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
@@ -764,7 +861,7 @@ int main(int argc, char* argv[]) {
                                       tapa::read_write_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
                                       tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
                                       tapa::read_write_mmap<double>(Metrics_fpga_data),
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                                       tapa::read_write_mmap<INDEX_TYPE>(Debug_fpga_data),
 #endif
                                       SpElement_list_ptr_size,
@@ -799,7 +896,7 @@ int main(int argc, char* argv[]) {
          << " timer_total=" << JacobiCyclesToMs(Metrics_fpga_data[6], jacobi_clock_period_ns)
          << " spmv_update_avg=" << JacobiCyclesToMs(Metrics_fpga_data[7], jacobi_clock_period_ns)
          << " clock_period_ns=" << jacobi_clock_period_ns << endl;
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
     PrintJacobiProbeSnapshot("jacobi-final-probe", Status_fpga_data, Metrics_fpga_data);
     PrintJacobiDebugBuffer(Debug_fpga_data);
 #endif

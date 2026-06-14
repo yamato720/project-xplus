@@ -32,6 +32,14 @@ if [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != ""
   cmd+=(-c "-DJACOBI_DEADLOCK_DEBUG=1")
 fi
 
+if [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_TRACE_ISOTOPE=1")
+fi
+
+if [[ "${JACOBI_TRACE_LIGHT:-0}" != "0" && "${JACOBI_TRACE_LIGHT:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_TRACE_LIGHT=1")
+fi
+
 if [[ "${JACOBI_BLOCKING_ENTRY_PROBE:-0}" != "0" && "${JACOBI_BLOCKING_ENTRY_PROBE:-}" != "" ]]; then
   cmd+=(-c "-DJACOBI_BLOCKING_ENTRY_PROBE=1")
 fi

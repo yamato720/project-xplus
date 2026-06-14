@@ -70,12 +70,13 @@ $$
 
 ## 当前测试状态
 
-当前已经把 no-debug 的完整 `CuperJacobiIteration` full graph 同步为
-`395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版不是 mmap-only
-probe，已经接入完整 Cuper SpMV service 和 Jacobi update，但还没有完成上板 smoke；
-routed timing 仍未收敛。上一版 `CuperJacobiMmapProbeOnly` split-bank probe 已通过
-native XRT smoke，证明 kernel launch、m_axi 写回和 BO sync 边界可用；该 probe 结果
-现在只作为历史边界记录。详细测试流程见 `docs/testing.md`。
+当前已经把 light-trace 的完整 `CuperJacobiIteration` full graph 同步为
+`395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin`。这版不是 mmap-only
+probe，已经接入完整 Cuper SpMV service 和 Jacobi update，并保留 7 路关键 Debug
+trace，但还没有完成上板 smoke；routed timing 仍未收敛。上一版
+`CuperJacobiMmapProbeOnly` split-bank probe 已通过 native XRT smoke，证明 kernel
+launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只作为历史边界记录。
+详细测试流程见 `docs/testing.md`。
 
 已记录数据：
 
@@ -89,7 +90,7 @@ native XRT smoke，证明 kernel launch、m_axi 写回和 BO sync 边界可用�
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7` | `1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a` | `CuperJacobiIteration` no-debug full graph，WNS `-1.480 ns`，待上板 smoke |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | `6dfaf1e3-9707-7f46-b914-1f59ca240993` | `4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5` | `CuperJacobiIteration` light-trace full graph，WNS `-1.789 ns`，待上板 smoke |
 
 ## 常用命令
 
@@ -113,9 +114,15 @@ MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2
 `build-xo` 的 TAPA top 是 `CuperJacobiIteration`，输出默认是
 `cuper-jacobi-iteration-build/CuperJacobiIteration.xo`。
 
-`JACOBI_DEADLOCK_DEBUG=1` 当前启用非阻塞 Debug buffer/event stream；默认不再做入口
-阻塞 mmap probe。若要复现旧 entry probe 行为，需要额外设置
+`JACOBI_TRACE_ISOTOPE=1` 当前启用非阻塞 Debug buffer/event stream，并把关键 task 的
+最后 phase/lane/value 写到 `Debug[64 + source*4 ...]`。host 会在 `Finish()` 前先
+同步并打印 Debug BO，因此 full graph 卡在 `Finish()` 时也能看到最后进度。旧
+`JACOBI_DEADLOCK_DEBUG=1` 仍兼容；若要复现旧 entry probe 行为，需要额外设置
 `JACOBI_BLOCKING_ENTRY_PROBE=1`。
+
+硬件 debug 默认优先使用 `JACOBI_TRACE_LIGHT=1`。light trace 只接 dispatcher、
+ptr loader、vector loader、frame fork、coeff loader、pack writer、X HBM writer
+7 路关键 source，避免 full isotope 的 47 路 DebugMonitor 在 HLS 阶段消耗过高。
 
 mmap-only micro probe：
 

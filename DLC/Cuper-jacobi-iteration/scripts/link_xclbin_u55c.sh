@@ -35,13 +35,23 @@ if [[ "$TOP" == "CuperJacobiMmapProbeOnly" ]]; then
       echo "sp=CuperJacobiMmapProbeOnly_1.Debug:HBM[24]"
     fi
   } > "$CONNECTIVITY_CFG"
-elif [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
-  CONNECTIVITY_CFG="$BUILD_DIR/connectivity_deadlock_debug.cfg"
-  cp "$ROOT_DIR/cfg/connectivity.cfg" "$CONNECTIVITY_CFG"
+elif { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]] ||
+       [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]] ||
+       [[ "${JACOBI_TRACE_LIGHT:-0}" != "0" && "${JACOBI_TRACE_LIGHT:-}" != "" ]]; }; then
+  CONNECTIVITY_CFG="$BUILD_DIR/connectivity_trace_debug.cfg"
+  awk '
+    /^sp=CuperJacobiIteration_1.Metrics:/ {
+      print "sp=CuperJacobiIteration_1.Metrics:HBM[25]"
+      next
+    }
+    { print }
+  ' "$ROOT_DIR/cfg/connectivity.cfg" > "$CONNECTIVITY_CFG"
   {
     echo
-    echo "# Optional deadlock debug output buffer."
-    echo "sp=CuperJacobiIteration_1.Debug:HBM[24]"
+    echo "# Optional trace/debug output buffer. Keep Status/Metrics/Debug split"
+    echo "# so pre-Finish snapshots use the mmap boundary already proven by"
+    echo "# CuperJacobiMmapProbeOnly split-bank smoke."
+    echo "sp=CuperJacobiIteration_1.Debug:HBM[26]"
   } >> "$CONNECTIVITY_CFG"
 fi
 

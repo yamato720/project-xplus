@@ -88,6 +88,37 @@
   `CuperJacobiIteration` full graph demo：
   `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版覆盖上一条同名
   mmap-only micro probe demo，保留 probe 结果作为历史边界记录。
+- 2026-06-14 新增 `JACOBI_TRACE_ISOTOPE=1` trace/debug ABI。它把完整 graph 的关键
+  task 作为 source 编号记录到 Debug BO：dispatcher、ptr/vector loader、16 路
+  matrix loader、16 路 accumulator、frame/coeff loader、8 路 pair compute、
+  pack writer 和 X HBM writer。业务 task 只用 `try_write` 非阻塞发事件，
+  `Jacobi_DebugMonitor` 单独写 `Debug[0..255]`，host 在 `Finish()` 前先
+  `ReadFromDevice()` 并打印 Debug 快照，因此 full graph 卡在 `Finish()` 时也能拿到
+  最后事件。
+- trace 版硬件 connectivity 把 `Status/Metrics/Debug` 分到 `HBM[24]/HBM[25]/HBM[26]`，
+  沿用 mmap-only split-bank probe 已验证过的 mmap 写回边界。默认 trace host 在
+  `Exec` 后等待 `JACOBI_PREFINISH_SAMPLE_DELAY_MS=250` 毫秒再做 pre-Finish 采样；
+  可设为 0 关闭。
+- 已验证 `JACOBI_TRACE_ISOTOPE=1` 的 host 构建和 software/TAPA simulation：
+  `thermal2_n16 MAX_ITERS=1`、`thermal2_n1024 MAX_ITERS=1` 均 `Error Num=0`，
+  Debug[48..51] 可读，47 个 source 槽位在正常返回时均可见。
+- 2026-06-14 full isotope 硬件构建在 `Jacobi_DebugMonitor` HLS/resource synthesis
+  阶段暴露过高开销：47 路 `JacobiDebugEvent` stream 会形成大量 FIFO/peek 端口，
+  单个 `vitis_hls` 进程 RSS 一度接近 70GB，未到 XO 安全点即手动停止。
+- 新增 `JACOBI_TRACE_LIGHT=1` 轻量 trace ABI。light 版仍保留 Debug BO 和
+  pre-Finish 快照，但只连接 7 路关键 source：dispatcher、ptr loader、vector loader、
+  frame fork、coeff loader、pack writer、X HBM writer。matrix loader 16 路、
+  accumulator 16 路和 pair compute 8 路只在 `JACOBI_TRACE_ISOTOPE=1` 或
+  `JACOBI_DEADLOCK_DEBUG=1` 的 full trace 中接入 DebugMonitor。
+- light trace 构建脚本已接入 CMake、子目录 Makefile、根 Makefile、
+  `build_xo_u55c.sh`、`link_xclbin_u55c.sh` 和 `launcher.py`，并沿用 split-bank
+  debug connectivity：`Status/Metrics/Debug` 分别接 HBM[24]/HBM[25]/HBM[26]。
+- 已验证 `JACOBI_TRACE_LIGHT=1` 的 host 构建和 software/TAPA simulation：
+  `thermal2_n16 MAX_ITERS=1`、`thermal2_n1024 MAX_ITERS=1` 均 `Error Num=0`，
+  Debug[48..51]=`1245921841,7,1,8192`，7 个关键 source 槽位在正常返回时可见。
+- 2026-06-14 已生成并同步 light-trace full graph 硬件 demo artifact：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin`。这版覆盖上一条
+  `20260613` no-debug full graph demo 槽，但仍未晋级标准。
 
 ## 当前没有做
 
@@ -95,12 +126,14 @@
   native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
-- 当前完整 `CuperJacobiIteration` no-debug full graph 已生成硬件 bitstream，但 routed
-  timing 仍未收敛：WNS `-1.480 ns`，TNS `-26306.850 ns`，setup failing endpoints
-  `68234`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
+- 当前完整 `CuperJacobiIteration` light-trace full graph 已生成硬件 bitstream，但 routed
+  timing 仍未收敛：WNS `-1.789 ns`，TNS `-29517.641 ns`，setup failing endpoints
+  `72617`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
+- 没有把 isotope trace 版当作性能优化或标准候选；它是定位 `Finish()` 卡住点的
+  debug build 边界。
 
 ## 当前风险
 
@@ -110,7 +143,7 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前同步的 2026-06-13 demo 已切回完整 Jacobi graph，但 timing 未收敛且尚未板测，
+- 当前同步的 2026-06-14 demo 是完整 Jacobi graph light-trace debug 版，但 timing 未收敛且尚未板测，
   不能作为 Jacobi 硬件功能或性能结论。上一版 mmap-only native XRT runner 已证明
   Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
   `Finish()` 收尾问题和 timing closure。
@@ -122,4 +155,8 @@
   pre-Finish dump 能区分“kernel 没覆盖 BO”和“写回已经穿透但值异常”。
 - 已验证 no-debug 与 nonblocking-debug 的 `thermal2_n16 MAX_ITERS=1` software/TAPA
   simulation 均通过，`Error Num=0`；nonblocking-debug 路径无
-  `Debug_Event_Stream` leftover 警告。默认构建目录中的 host 已切回 no-debug ABI。
+  `Debug_Event_Stream` leftover 警告。这条是 2026-06-13 的边界记录；当前硬件 debug
+  demo 已改用 `JACOBI_TRACE_LIGHT=1` ABI。
+- full isotope 47 路 trace 不适合直接作为默认硬件 xclbin 构建；需要硬件 debug 时优先
+  使用 `JACOBI_TRACE_LIGHT=1`，只有在必须细分到 matrix/accumulator/pair compute 时再
+  开 full trace。

@@ -7,7 +7,7 @@
 #include <tapa.h>
 
 #include "jacobi_controller.hpp"
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
 #include "jacobi_deadlock_debug.hpp"
 #endif
 #include "jacobi_stage_timer.hpp"
@@ -43,7 +43,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmap<float_v16> X,
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                           tapa::mmap<INDEX_TYPE> Debug,
 #endif
                           const INDEX_TYPE Batch_num,
@@ -133,11 +133,26 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // 写回 FIFO 解耦 update 拼包和 AXI HBM 写响应抖动；下一轮 token 仍由 HBM writer
     // 在 write response 全部收齐后发出，保证单个 X buffer 不会读到半新半旧数据。
     tapa::stream<float_v16, 128>                               X_Write_Stream("X_Write_Stream");
-#ifdef JACOBI_DEADLOCK_DEBUG
-    // deadlock debug 只在 JACOBI_DEADLOCK_DEBUG 打开时存在。业务 task 只 try_write
+#ifdef JACOBI_TRACE_ENABLED
+    // trace/debug 只在 JACOBI_TRACE_LIGHT、JACOBI_TRACE_ISOTOPE 或
+    // JACOBI_DEADLOCK_DEBUG 打开时存在。light 模式只接关键控制/写回节点；
+    // full 模式才接 matrix/accumulator/pair 细节节点。业务 task 只 try_write
     // 非阻塞事件，DebugMonitor 汇总写 Debug HBM，避免 debug 通路制造新反压。
-    tapa::streams<JacobiDebugEvent, kJacobiDebugStreamCount, 16> Debug_Event_Stream("Debug_Event_Stream");
-    tapa::stream<INDEX_TYPE, 2>                                  Debug_Stop_Stream("Debug_Stop_Stream");
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_Dispatcher_Stream("Debug_Dispatcher_Stream");
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_PtrLoader_Stream("Debug_PtrLoader_Stream");
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_VectorLoader_Stream("Debug_VectorLoader_Stream");
+#ifdef JACOBI_TRACE_FULL
+    tapa::streams<JacobiDebugEvent, HBM_CHANNEL_NUM, 16>          Debug_MatrixLoader_Stream("Debug_MatrixLoader_Stream");
+    tapa::streams<JacobiDebugEvent, HBM_CHANNEL_NUM, 16>          Debug_Accumulator_Stream("Debug_Accumulator_Stream");
+#endif
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_FrameFork_Stream("Debug_FrameFork_Stream");
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_CoeffLoader_Stream("Debug_CoeffLoader_Stream");
+#ifdef JACOBI_TRACE_FULL
+    tapa::streams<JacobiDebugEvent, kJacobiDebugPairStreamCount, 16> Debug_Pair_Stream("Debug_Pair_Stream");
+#endif
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_PackWriter_Stream("Debug_PackWriter_Stream");
+    tapa::stream<JacobiDebugEvent, 16>                            Debug_HbmWriter_Stream("Debug_HbmWriter_Stream");
+    tapa::stream<INDEX_TYPE, 2>                                   Debug_Stop_Stream("Debug_Stop_Stream");
 #endif
 
     tapa::task()
@@ -157,8 +172,8 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Command_Stream,
                 Matrix_Prefetch_Command_Stream,
                 Vector_Destroy_Stop_Stream,
-#ifdef JACOBI_DEADLOCK_DEBUG
-                Debug_Event_Stream[kJacobiDebugStreamDispatcher],
+#ifdef JACOBI_TRACE_ENABLED
+                Debug_Dispatcher_Stream,
                 Debug_Stop_Stream,
 #endif
                 Stage_Event_Stream,
@@ -173,10 +188,23 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(Jacobi_Stage_Timer,
                 Stage_Event_Stream,
                 Stage_Ticks_Stream)
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
         // 非阻塞 debug monitor。它定期写 heartbeat，并记录最后一次收到的事件。
         .invoke(Jacobi_DebugMonitor,
-                Debug_Event_Stream,
+                Debug_Dispatcher_Stream,
+                Debug_PtrLoader_Stream,
+                Debug_VectorLoader_Stream,
+#ifdef JACOBI_TRACE_FULL
+                Debug_MatrixLoader_Stream,
+                Debug_Accumulator_Stream,
+#endif
+                Debug_FrameFork_Stream,
+                Debug_CoeffLoader_Stream,
+#ifdef JACOBI_TRACE_FULL
+                Debug_Pair_Stream,
+#endif
+                Debug_PackWriter_Stream,
+                Debug_HbmWriter_Stream,
                 Debug_Stop_Stream,
                 Debug)
 #endif
@@ -187,7 +215,12 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 SpElement_list_ptr,
                 Command_Stream[0],
-                PE_Param[0])
+                PE_Param[0]
+#ifdef JACOBI_TRACE_ENABLED
+                ,
+                Debug_PtrLoader_Stream
+#endif
+                )
         // 从 HBM 读取当前 X，取负后写入向量广播链首端，使 Core 输出 -R*x_old。
         // Batch_num=0 时 Core 不会消费 X，loader 会跳过读取，让 update 看到 -R*x=0。
         .invoke(Jacobi_Vector_Loader,
@@ -195,13 +228,25 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 X,
                 Command_Stream[1],
-                Vector_X_Stream[0])
+                Vector_X_Stream[0]
+#ifdef JACOBI_TRACE_ENABLED
+                ,
+                Debug_VectorLoader_Stream
+#endif
+                )
         // 16 路矩阵 loader 按预取 command 从各自 HBM channel 拉取矩阵数据到 FIFO。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(SpmvService_MatrixLoader,
                                              Matrix_len,
                                              Matrix_data,
                                              Matrix_Prefetch_Command_Stream,
-                                             Matrix_A_Stream)
+                                             Matrix_A_Stream
+                                             ,
+                                             tapa::seq()
+#ifdef JACOBI_TRACE_FULL
+                                             ,
+                                             Debug_MatrixLoader_Stream
+#endif
+                                             )
         // 16 级 Core 串接：PE_Param 和 Vector_X_Stream 逐级转发，Matrix_A_Stream 每级独占。
         // Core 0 消费 HBM0 的矩阵分片，与广播到本级的 -X 相乘并输出局部乘积。
         .invoke(SpmvService_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
@@ -249,20 +294,37 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke<tapa::join, HBM_CHANNEL_NUM>(SpmvService_Accumulator,
                                              Vector_Y_Param,
                                              Matrix_Mult_Vector_Stream,
-                                             Vector_Y_Stream)
+                                             Vector_Y_Stream
+                                             ,
+                                             tapa::seq()
+#ifdef JACOBI_TRACE_FULL
+                                             ,
+                                             Debug_Accumulator_Stream
+#endif
+                                             )
         // dispatcher 的 frame 同时驱动系数 loader、8 路 pair compute、pack writer 和 HBM writer。
         .invoke(Jacobi_UpdateFrameFork,
                 Update_Frame_Stream,
                 Update_Coeff_Frame_Stream,
                 Update_Pack_Frame_Stream,
                 Update_Hbm_Frame_Stream,
-                Update_Pair_Frame_Stream)
+                Update_Pair_Frame_Stream
+#ifdef JACOBI_TRACE_ENABLED
+                ,
+                Debug_FrameFork_Stream
+#endif
+                )
         // 按更新 frame 顺序读取 B 和 Diag_inv，为每个 row pair 提供 Jacobi 更新系数。
         .invoke(Jacobi_UpdateCoeffLoader,
                 Update_Coeff_Frame_Stream,
                 Update_Coeff_Stream,
                 B,
-                Diag_inv)
+                Diag_inv
+#ifdef JACOBI_TRACE_ENABLED
+                ,
+                Debug_CoeffLoader_Stream
+#endif
+                )
         // 8 个 pair compute 各自消费两路 accumulator 输出；有效位置做 Jacobi 更新，
         // padding 位置只读掉 -Rx，不再单独经过 checker 对齐。
         // 这里改为 frame/stop 驱动的有限 task，避免 detach 无限循环让 Finish 收尾不可观察。
@@ -272,9 +334,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[1],
                 Update_Coeff_Stream[0],
                 Update_Pair_Stream[0]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 0],
+                Debug_Pair_Stream[0],
                 kJacobiDebugSourcePairBase + 0
 #endif
                 )
@@ -284,9 +346,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[3],
                 Update_Coeff_Stream[1],
                 Update_Pair_Stream[1]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 1],
+                Debug_Pair_Stream[1],
                 kJacobiDebugSourcePairBase + 1
 #endif
                 )
@@ -296,9 +358,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[5],
                 Update_Coeff_Stream[2],
                 Update_Pair_Stream[2]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 2],
+                Debug_Pair_Stream[2],
                 kJacobiDebugSourcePairBase + 2
 #endif
                 )
@@ -308,9 +370,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[7],
                 Update_Coeff_Stream[3],
                 Update_Pair_Stream[3]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 3],
+                Debug_Pair_Stream[3],
                 kJacobiDebugSourcePairBase + 3
 #endif
                 )
@@ -320,9 +382,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[9],
                 Update_Coeff_Stream[4],
                 Update_Pair_Stream[4]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 4],
+                Debug_Pair_Stream[4],
                 kJacobiDebugSourcePairBase + 4
 #endif
                 )
@@ -332,9 +394,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[11],
                 Update_Coeff_Stream[5],
                 Update_Pair_Stream[5]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 5],
+                Debug_Pair_Stream[5],
                 kJacobiDebugSourcePairBase + 5
 #endif
                 )
@@ -344,9 +406,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[13],
                 Update_Coeff_Stream[6],
                 Update_Pair_Stream[6]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 6],
+                Debug_Pair_Stream[6],
                 kJacobiDebugSourcePairBase + 6
 #endif
                 )
@@ -356,9 +418,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[15],
                 Update_Coeff_Stream[7],
                 Update_Pair_Stream[7]
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_FULL
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPairBase + 7],
+                Debug_Pair_Stream[7],
                 kJacobiDebugSourcePairBase + 7
 #endif
                 )
@@ -367,9 +429,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Update_Pack_Frame_Stream,
                 Update_Pair_Stream,
                 X_Write_Stream
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamPackWriter]
+                Debug_PackWriter_Stream
 #endif
                 )
         // HBM writer 从 X_Write_Stream 连续写 X；write response 收齐后再反馈下一轮 token。
@@ -378,9 +440,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 X_Write_Stream,
                 Feedback_Token_Stream,
                 X
-#ifdef JACOBI_DEADLOCK_DEBUG
+#ifdef JACOBI_TRACE_ENABLED
                 ,
-                Debug_Event_Stream[kJacobiDebugStreamHbmWriter]
+                Debug_HbmWriter_Stream
 #endif
                 )
     ;
