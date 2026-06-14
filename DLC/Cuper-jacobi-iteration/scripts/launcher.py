@@ -117,6 +117,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 f"cd {shell_quote(root)}",
                 f"export BUILD_DIR={shell_quote(build_dir)}",
                 *(["export JACOBI_DEADLOCK_DEBUG=1"] if os.environ.get("JACOBI_DEADLOCK_DEBUG") not in {None, "", "0"} else []),
+                *(["export JACOBI_BLOCKING_ENTRY_PROBE=1"] if os.environ.get("JACOBI_BLOCKING_ENTRY_PROBE") not in {None, "", "0"} else []),
                 *(["export JACOBI_TOP=" + shell_quote(os.environ["JACOBI_TOP"])] if os.environ.get("JACOBI_TOP") else []),
                 *(["export JACOBI_MMAP_PROBE_SPLIT=1"] if os.environ.get("JACOBI_MMAP_PROBE_SPLIT") not in {None, "", "0"} else []),
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",

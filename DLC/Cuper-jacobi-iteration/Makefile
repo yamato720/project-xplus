@@ -19,6 +19,7 @@ KERNEL_DIR := $(ROOT_DIR)/kernels
 CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 DATA_DIR := $(ROOT_DIR)/data
+JACOBI_DEBUG_ENV := $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") $(if $(JACOBI_BLOCKING_ENTRY_PROBE),JACOBI_BLOCKING_ENTRY_PROBE="$(JACOBI_BLOCKING_ENTRY_PROBE)")
 
 .PHONY: all help tree clean launch launcher build-host build-mmap-probe-xrt-host run-sw regression-sw build-xo link-xclbin build-mmap-probe-xo link-mmap-probe-xclbin link-mmap-probe-xclbin-split hw-tmux run-hw run-mmap-probe-xrt
 
@@ -64,24 +65,24 @@ clean:
 	rm -rf "$(BUILD_DIR)"
 
 launch launcher:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py"
 
 build-host:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/build_host.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/build_host.sh"
 
 build-mmap-probe-xrt-host: build-host
 
 run-sw:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
 
 regression-sw:
-	@BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") CASES="$(strip $(CASE) $(CASES))" "$(PYTHON)" "$(SCRIPT_DIR)/regression_sw.py" --mode "$(or $(MODE),quick)" $(if $(NO_BUILD),--no-build) $(if $(ALLOW_MISSING),--allow-missing) $(if $(TIMEOUT_SEC),--timeout-sec "$(TIMEOUT_SEC)") $(if $(TAU),--tau "$(TAU)")
+	@BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) CASES="$(strip $(CASE) $(CASES))" "$(PYTHON)" "$(SCRIPT_DIR)/regression_sw.py" --mode "$(or $(MODE),quick)" $(if $(NO_BUILD),--no-build) $(if $(ALLOW_MISSING),--allow-missing) $(if $(TIMEOUT_SEC),--timeout-sec "$(TIMEOUT_SEC)") $(if $(TAU),--tau "$(TAU)")
 
 build-xo:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/build_xo_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/build_xo_u55c.sh"
 
 link-xclbin:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
 
 build-mmap-probe-xo:
 	BUILD_DIR="$(BUILD_DIR)" JACOBI_TOP=CuperJacobiMmapProbeOnly "$(SCRIPT_DIR)/build_xo_u55c.sh"
@@ -93,10 +94,10 @@ link-mmap-probe-xclbin-split:
 	BUILD_DIR="$(BUILD_DIR)" JACOBI_TOP=CuperJacobiMmapProbeOnly JACOBI_MMAP_PROBE_SPLIT=1 "$(SCRIPT_DIR)/link_xclbin_u55c.sh"
 
 hw-tmux:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" hw-tmux $(if $(FORCE),--force)
 
 run-hw:
-	BUILD_DIR="$(BUILD_DIR)" $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-hw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"
 
 run-mmap-probe-xrt:
 	BUILD_DIR="$(BUILD_DIR)" $(if $(BITFILE),BITFILE="$(BITFILE)") "$(SCRIPT_DIR)/run_mmap_probe_xrt.sh" $(if $(ROW_NUM),--row-num "$(ROW_NUM)") $(if $(MAX_ITERS),--max-iters "$(MAX_ITERS)") $(if $(COLUMN_NUM),--column-num "$(COLUMN_NUM)") $(if $(WAIT_TIMEOUT_MS),--wait-timeout-ms "$(WAIT_TIMEOUT_MS)") $(if $(SAMPLE_DELAY_MS),--sample-delay-ms "$(SAMPLE_DELAY_MS)")

@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration debug demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiMmapProbeOnly` | mmap-only split-bank probe，timing-clean，native XRT smoke 通过，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260613-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | full graph no-debug demo，已生成并同步，timing 未收敛，待上板 smoke，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -51,33 +51,36 @@ TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
 cuper-tapa-jacobi-u55c-20260613-demo.xclbin
 ```
 
-这版是 `CuperJacobiMmapProbeOnly` split-bank mmap-only 硬件 probe。它只写
-`Status`、`Metrics`、`Debug` 的固定槽位并等待 m_axi write response 后返回，不接入
-完整 `CuperJacobiIteration` dataflow、Cuper SpMV service 或 Jacobi update。它用于先
-验证 kernel 启动、mmap 写回、HBM bank 分配、native XRT BO sync 和 runtime wait
-边界。它覆盖同主线 Jacobi demo 槽，但不替换任何标准文件；当前 `cuper-tapa-jacobi`
-仍然没有标准 bitstream。
+这版是 `CuperJacobiIteration` full graph no-debug 硬件 demo，接入完整 Jacobi
+dataflow、Cuper SpMV service 和 Jacobi update。它覆盖同主线 Jacobi demo 槽，但不
+替换任何标准文件；当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。
 demo xclbin UUID 为
+`b233c1af-6ba7-ebc5-8a5b-c56d348c53c7`，SHA256 为
+`1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a`。
+最终 xclbin info 中 DATA clock 为 207 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建日志为
+`cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。
+
+当前 no-debug ABI 把 `SpElement_list_ptr` 和 `Matrix_data_0` 映射到 HBM[0]，
+`Matrix_data_1..15` 映射到 HBM[1..15]，`B` 在 HBM[20]，`Diag_inv` 在 HBM[21]，
+`X` 在 HBM[22]，`Status` 和 `Metrics` 在 HBM[24]；这版不包含 `Debug` port。
+VPL implementation 和 `.xclbin` 封装都已完成，`Run completed`，总耗时
+`5h 25m 17s`。routed timing 仍未收敛：WNS `-1.480 ns`，TNS `-26306.850 ns`，
+setup failing endpoints `68234`，失败时钟域为 `clk_kernel_00_unbuffered_net`；
+hold worst slack `0.006 ns`。这版尚未完成上板 smoke。
+
+它覆盖的上一版同名 `20260613` mmap-only split-bank probe demo UUID 为
 `380f9de1-e5c1-66ab-b888-db99d2ef3523`，SHA256 为
-`7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1`。
-最终 xclbin info 中 DATA clock 为 300 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 450 MHz。构建目录为
-`cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/`。
+`7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1`。上一版是
+`CuperJacobiMmapProbeOnly`，只写 `Status`、`Metrics`、`Debug` 的固定槽位并等待
+m_axi write response 后返回，不接入完整 Jacobi dataflow。2026-06-13 native XRT
+上板 smoke 已通过，日志在 `logs/jacobi_mmap_probe_hw_20260613_214342/`：
+`ROW_NUM=16` 和 `ROW_NUM=1024` 均为 `rc=0`、`wait_state=COMPLETED`，wait 前 sample
+sync 已能读到 probe magic `1245921841` (`0x4a434231`)。这说明当时板卡、kernel
+launch、split-bank m_axi 写回和 native XRT BO sync 边界可用，但该结论只作为历史
+边界记录，不对应当前 full graph `.xclbin`。
 
-当前 probe ABI 把 `Status`、`Metrics`、`Debug` 分别映射到
-HBM[24]、HBM[25]、HBM[26]。VPL implementation 和 `.xclbin` 封装都已完成，routed
-timing 收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；
-hold worst slack `0.009 ns`。这版仅用于调试 runtime/mmap 边界，不代表完整
-Jacobi graph 已跑通。
-
-2026-06-13 已完成该 split-bank mmap-only demo 的 native XRT 上板 smoke，日志在
-`logs/jacobi_mmap_probe_hw_20260613_214342/`。`ROW_NUM=16` 和 `ROW_NUM=1024`
-均为 `rc=0`、`wait_state=COMPLETED`；wait 前 sample sync 已能读到
-`Status[8]`、`Metrics[8]`、`Debug[48]` 的 probe magic `1245921841`
-(`0x4a434231`)。这说明当前板卡、kernel launch、split-bank m_axi 写回和 native XRT
-BO sync 边界是可用的；完整 Jacobi graph 的 `Finish()` timeout 仍需另行修。
-
-它覆盖的上一版同名 `20260613` entry mmap probe debug demo UUID 为
+再上一版同名 `20260613` entry mmap probe debug demo UUID 为
 `7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为
 `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`。上一版是完整
 `CuperJacobiIteration` graph 上的入口阻塞 mmap probe，routed timing 未收敛：
@@ -85,7 +88,7 @@ WNS `-2.350 ns`，TNS `-60974.352 ns`，failing endpoints `101235`。服务器�
 `thermal2_n16` 与 `thermal2_n1024` 的 `MAX_ITERS=1` 均为 120s timeout，host 停在
 `[tapa-invoke] after ReadFromDevice before Finish`，且 Status[8..11]、
 Metrics[8..11]、Debug[48..51] 入口 probe 全 0。该失败结论只对应旧 UUID，不能
-套用到当前 mmap-only `.xclbin` 文件。再上一版同名 pre-Finish/empty-R demo UUID 为
+套用到当前 full graph no-debug `.xclbin` 文件。再上一版同名 pre-Finish/empty-R demo UUID 为
 `5c9f0e72-5ea9-7142-1e90-690b72d30557`，SHA256 为
 `0d300c1f55c21078f1f24d5e551228ccc75855331585d6669bc3e15ac31b9c26`。上一版上板最小
 smoke 显示 `thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 均停在

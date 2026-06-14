@@ -567,8 +567,9 @@ split-bank: cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/CuperJac
 build log: logs/cuper_jacobi_mmap_probe_hw_20260613.log
 ```
 
-两版 routed timing 均收敛，WNS `0.003 ns`，TNS `0.000 ns`。当前同步到
-`395bitstream/` 的是 split-bank 版本。
+两版 routed timing 均收敛，WNS `0.003 ns`，TNS `0.000 ns`。当时同步到
+`395bitstream/` 的是 split-bank 版本；该同名 demo 槽随后已被 full graph no-debug
+版本覆盖。
 
 上板时用 native runner 直接采样 BO：
 
@@ -591,11 +592,11 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
 关键字段：
 
 ```text
-Kernel: CuperJacobiMmapProbeOnly
-ABI: mmap-only split-bank probe, Status/Metrics/Debug on HBM[24]/HBM[25]/HBM[26]
-UUID: 380f9de1-e5c1-66ab-b888-db99d2ef3523
-SHA256: 7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1
-DATA clock: 300 MHz
+Kernel: CuperJacobiIteration
+ABI: no-debug full graph, B HBM[20], Diag_inv HBM[21], X HBM[22], Status/Metrics HBM[24]
+UUID: b233c1af-6ba7-ebc5-8a5b-c56d348c53c7
+SHA256: 1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a
+DATA clock: 207 MHz
 KERNEL clock: 500 MHz
 HBM clock: 450 MHz
 ```
@@ -603,28 +604,31 @@ HBM clock: 450 MHz
 构建情况：
 
 ```text
-build dir: cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/
-build log: logs/cuper_jacobi_mmap_probe_hw_20260613.log
+build dir: cuper-jacobi-iteration-build/
+build log: cuper-jacobi-iteration-build/logs/build_hw_tmux.log
 VPL: FINISHED, Run Status: impl Complete
 v++ link: Run completed
-total elapsed: 1h 12m 15s
+total elapsed: 5h 25m 17s
 ```
 
 时序状态：
 
 ```text
-Timing constraints are met.
-Setup failing endpoints: 0
-Setup worst slack: 0.003 ns
-Setup total violation: 0.000 ns
-Hold worst slack: 0.009 ns
+Timing constraints are not met.
+Setup failing endpoints: 68234
+Setup worst slack: -1.480 ns
+Setup total violation: -26306.850 ns
+Hold worst slack: 0.006 ns
 ```
 
-因此当前 `.xclbin` 是 timing-clean 的调试/同步 demo artifact，但它不是完整
-Jacobi graph。上一版同名 entry mmap probe Jacobi demo UUID 为
-`7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为
+因此当前 `.xclbin` 是完整 Jacobi graph demo artifact，但仍不是 timing-clean，也还未
+完成板上 smoke。上一版同名 mmap-only split-bank probe demo UUID 为
+`380f9de1-e5c1-66ab-b888-db99d2ef3523`，SHA256 为
+`7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1`；该旧版 native XRT
+probe smoke 通过，只作为 mmap/launch/BO sync 历史边界记录。再上一版同名 entry mmap
+probe Jacobi demo UUID 为 `7bf54cce-83a3-b7e7-97a9-719446658c03`，SHA256 为
 `775d1da4c1c2f51ec58e0569950f618eb159481bf3eddea4e27b8f6a4da9eb24`；该旧版最小上板仍卡
-`Finish()`，旧测试结论只能作为历史记录，不能套用到当前 mmap-only `.xclbin` 文件。
+`Finish()`，旧测试结论只能作为历史记录，不能套用到当前 full graph `.xclbin` 文件。
 
 ## 判定标准
 
@@ -650,11 +654,11 @@ JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-xo
 JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-link-xclbin
 ```
 
-当前同步 demo 的硬件运行命令：
+当前同步 demo 的硬件运行命令先按完整 Jacobi host 跑最小 smoke：
 
 ```bash
 BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
-  ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
+  MAX_ITERS=1 make cuper-jacobi-run-hw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
 ```
 
 当前 demo 已放入同步目录：
@@ -669,7 +673,7 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 测试对象：
 
 ```text
-bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin (historical slot content)
 Kernel: CuperJacobiMmapProbeOnly
 UUID: 380f9de1-e5c1-66ab-b888-db99d2ef3523
 SHA256: 7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1
@@ -681,11 +685,11 @@ logs: logs/jacobi_mmap_probe_hw_20260613_214342/
 ```bash
 make cuper-jacobi-build-mmap-probe-xrt-host
 
-BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
   ROW_NUM=16 COLUMN_NUM=16 MAX_ITERS=1 WAIT_TIMEOUT_MS=5000 SAMPLE_DELAY_MS=100 \
   make cuper-jacobi-run-mmap-probe-xrt
 
-BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
   ROW_NUM=1024 COLUMN_NUM=1024 MAX_ITERS=1 WAIT_TIMEOUT_MS=5000 SAMPLE_DELAY_MS=100 \
   make cuper-jacobi-run-mmap-probe-xrt
 ```
@@ -698,6 +702,37 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 | `ROW_NUM=1024` | 0 | `COMPLETED(4)` | `Status[8..11]=1245921841,1024,1,64`, `Metrics[8..11]=1245921841,1024,1,64`, `Debug[48..51]=1245921841,11,1,8192` |
 
 wait 前的 sample sync 已能读到同样的 magic，说明 kernel 启动、split-bank m_axi 写回、
-write response、native XRT BO sync 和 `run.wait()` 都正常。下一步应回到完整
-`CuperJacobiIteration` graph，优先做 no-Debug full graph 或 one-round/no-feedback
-边界，不再把“数据完全没进去 / kernel 根本没启动”作为首要假设。
+write response、native XRT BO sync 和 `run.wait()` 都正常。该记录对应旧 UUID，不再
+对应当前同名 full graph `.xclbin`；当前 full graph 仍需单独上板 smoke。
+
+### 2026-06-13 full graph 非阻塞 debug 边界
+
+mmap-only micro probe 通过后，源码把完整 graph 的入口阻塞 probe 从默认 debug 路径中
+移除：
+
+```text
+JACOBI_DEADLOCK_DEBUG=1:
+  启用 Debug buffer 和 event stream
+  不再入口阻塞写 Debug[0] / Debug[48..51]
+  不再入口阻塞写 Status[8..11] / Metrics[8..11]
+
+JACOBI_DEADLOCK_DEBUG=1 JACOBI_BLOCKING_ENTRY_PROBE=1:
+  显式恢复旧入口阻塞 probe
+```
+
+host 同时把 Status/Metrics/Debug 初始化为 sentinel，并改用 `read_write_mmap` 传参，
+便于上板 timeout 时区分“kernel 没覆盖 BO”和“D2H/写回已经穿透但值异常”。
+
+已完成验证：
+
+| 命令/模式 | 结果 |
+| --- | --- |
+| `git diff --check` | 通过 |
+| `bash -n` build/link/run 脚本 | 通过 |
+| `python3 -m py_compile scripts/launcher.py` | 通过 |
+| no-debug `thermal2_n16 MAX_ITERS=1` software | `Status=1`, `Iterations=1`, `Error Num=0` |
+| nonblocking-debug `thermal2_n16 MAX_ITERS=1` software | `Status=1`, `Iterations=1`, `Error Num=0`，无 `Debug_Event_Stream` leftover 警告 |
+
+当前构建目录中的 host 已重新切回 no-debug ABI。下一版完整 graph bitstream 建议先构建
+不带 `JACOBI_BLOCKING_ENTRY_PROBE` 的 full graph；如果仍卡 `Finish()`，优先查看
+pre-Finish dump 中 sentinel 是否被覆盖。

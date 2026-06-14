@@ -32,6 +32,10 @@ if [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != ""
   cmd+=(-c "-DJACOBI_DEADLOCK_DEBUG=1")
 fi
 
+if [[ "${JACOBI_BLOCKING_ENTRY_PROBE:-0}" != "0" && "${JACOBI_BLOCKING_ENTRY_PROBE:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_BLOCKING_ENTRY_PROBE=1")
+fi
+
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
 printf '\n'

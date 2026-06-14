@@ -1,12 +1,12 @@
 # Cuper Jacobi 测试流程
 
 本文记录 `DLC/Cuper-jacobi-iteration` 当前 demo 的测试口径。当前阶段已有
-software/TAPA simulation 结果；完整 `CuperJacobiIteration` graph 的 entry mmap probe
-demo 仍会在 `Finish()` 阶段 timeout。当前同步 demo 已切换为 timing-clean 的
-`CuperJacobiMmapProbeOnly` split-bank mmap-only probe，并已通过 native XRT 上板
-smoke。该结果只证明 kernel 启动、m_axi 写回、HBM bank 分配和 BO sync 边界，不代表
-完整 Jacobi graph 已跑通。上一版 pre-Finish/empty-R demo 的上板失败记录保留在本文
-历史小节中。
+software/TAPA simulation 结果；此前完整 `CuperJacobiIteration` graph 的 entry mmap
+probe demo 会在 `Finish()` 阶段 timeout。之后的 `CuperJacobiMmapProbeOnly`
+split-bank mmap-only probe 已通过 native XRT 上板 smoke，证明 kernel launch、
+m_axi 写回、HBM bank 分配和 BO sync 边界可用。当前同步 demo 已切回 no-debug 的
+完整 `CuperJacobiIteration` full graph，已经生成 `.xclbin` 并同步到 `395bitstream/`，
+但 routed timing 仍未收敛，尚未完成上板 smoke。
 
 ## 1. 测试对象
 
@@ -70,11 +70,12 @@ make cuper-jacobi-regression-sw CASE=thermal2_n65536 NO_BUILD=1
 make cuper-jacobi-regression-sw CASES="cant thermal2_n65536" NO_BUILD=1
 ```
 
-`run-sw` 不需要 `BITFILE`。当前同步 demo 是 `CuperJacobiMmapProbeOnly`，用 native
-XRT runner 验证 mmap 写回边界：
+`run-sw` 不需要 `BITFILE`。mmap-only micro probe 的历史边界验证仍可用 native XRT
+runner 复现，但当前同名 demo 文件已经被 full graph 覆盖；若要复现该历史 probe，
+需要使用对应归档或重新构建 `CuperJacobiMmapProbeOnly` xclbin：
 
 ```bash
-BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
+BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
   ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
 ```
 
@@ -91,24 +92,24 @@ BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin \
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin` |
-| 构建目录 | `cuper-tapa-jacobi-u55c-20260613-mmap-probe-split-bank-build/` |
-| Kernel | `CuperJacobiMmapProbeOnly` |
-| ABI | mmap-only split-bank probe，`Status/Metrics/Debug` 分别在 HBM[24]/HBM[25]/HBM[26] |
-| UUID | `380f9de1-e5c1-66ab-b888-db99d2ef3523` |
-| SHA256 | `7f0ff7e5b7999d77174105ea5cf0d44629a0b9a43521c8efdc29a70ace5d77f1` |
-| DATA / KERNEL / HBM clock | `300 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；hold worst slack `0.009 ns` |
+| 构建目录 | `cuper-jacobi-iteration-build/` |
+| Kernel | `CuperJacobiIteration` |
+| ABI | no-debug full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics` HBM[24] |
+| UUID | `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7` |
+| SHA256 | `1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a` |
+| DATA / KERNEL / HBM clock | `207 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛：WNS `-1.480 ns`，TNS `-26306.850 ns`，setup failing endpoints `68234`；hold worst slack `0.006 ns` |
 
-Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；split-bank
-构建总耗时 `1h 12m 15s`，汇总日志在
-`logs/cuper_jacobi_mmap_probe_hw_20260613.log`。这版已同步到 `395bitstream/`，只用于
-验证 kernel 启动、mmap 写回、HBM bank 分配和 native XRT BO sync 边界，不代表完整
-Jacobi graph 已跑通。上一版同名 entry mmap probe demo UUID 为
-`7bf54cce-83a3-b7e7-97a9-719446658c03`，上板 `thermal2_n16` 和 `thermal2_n1024`
-的 `MAX_ITERS=1` 均卡在 `after ReadFromDevice before Finish`，入口 probe 全 0；
-旧测试结论只作为历史记录。
+Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；构建总耗时
+`5h 25m 17s`，汇总日志在
+`cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。这版已同步到 `395bitstream/`，
+覆盖上一版同名 mmap-only probe demo，但还没有完成板上 smoke。上一版 mmap-only
+probe UUID 为 `380f9de1-e5c1-66ab-b888-db99d2ef3523`，native XRT smoke 通过；再上一版
+entry mmap probe demo UUID 为 `7bf54cce-83a3-b7e7-97a9-719446658c03`，上板
+`thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 均卡在
+`after ReadFromDevice before Finish`，入口 probe 全 0。旧测试结论只作为历史记录。
 
-2026-06-13 已完成当前 split-bank mmap-only demo 的 native XRT 上板 smoke：
+2026-06-13 已完成上一版 split-bank mmap-only demo 的 native XRT 上板 smoke：
 
 ```text
 logs: logs/jacobi_mmap_probe_hw_20260613_214342/
@@ -138,7 +139,49 @@ native XRT BO sync 不通”不再是当前最优先嫌疑；完整 graph 的问
 TAPA/FRT `Finish()`、完整 graph stop/drain、debug 阻塞写对 graph 的影响，以及旧
 full graph artifact 的 timing violation。
 
-## 3.2 finite pair compute 源码验证
+## 3.2 full graph debug 边界调整
+
+2026-06-13 mmap-only micro probe 通过后，完整 graph 不再默认使用入口阻塞式 mmap
+probe：
+
+- `JACOBI_DEADLOCK_DEBUG=1` 仍启用 `Debug` buffer 和 event stream，但
+  `Jacobi_DebugMonitor` 不再在入口阻塞写 `Debug[0]` / `Debug[48..51]`。
+- `Jacobi_RoundDispatcher` 不再默认阻塞写 `Status[8..11]` /
+  `Metrics[8..11]`。
+- 若要复现旧入口 probe，需要同时设置
+  `JACOBI_DEADLOCK_DEBUG=1 JACOBI_BLOCKING_ENTRY_PROBE=1`。
+- host 现在把 `Status`、`Metrics`、`Debug` 初始化为 sentinel，并用
+  `read_write_mmap` 传参。若上板卡在 `Finish()` 且 pre-Finish dump 仍是 sentinel，
+  说明 kernel 没覆盖这些槽位；若变成 0 或部分改变，则说明 D2H/写回边界已经穿透。
+
+本轮源码验证：
+
+```bash
+git diff --check
+bash -n DLC/Cuper-jacobi-iteration/scripts/build_xo_u55c.sh \
+       DLC/Cuper-jacobi-iteration/scripts/link_xclbin_u55c.sh \
+       DLC/Cuper-jacobi-iteration/scripts/build_host.sh \
+       DLC/Cuper-jacobi-iteration/scripts/run_hw.sh
+python3 -m py_compile DLC/Cuper-jacobi-iteration/scripts/launcher.py
+make cuper-jacobi-build-host
+MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+JACOBI_DEADLOCK_DEBUG=1 make cuper-jacobi-build-host
+JACOBI_DEADLOCK_DEBUG=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+make cuper-jacobi-build-host
+```
+
+结果：
+
+| 模式 | 数据集 | 结果 |
+| --- | --- | --- |
+| no-debug full graph software | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0` |
+| nonblocking-debug full graph software | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`，无 `Debug_Event_Stream` leftover 警告 |
+
+当前默认构建已切回 no-debug host。下一版完整 graph 硬件构建应优先不带
+`JACOBI_BLOCKING_ENTRY_PROBE`；如果仍卡 `Finish()`，用 sentinel 判断
+`Status/Metrics/Debug` 是否被 kernel 覆盖。
+
+## 3.3 finite pair compute 源码验证
 
 2026-06-12 复测当时的 395 Jacobi demo 后，`thermal2_n1024 MAX_ITERS=1` 仍然卡在
 `after ReadFromDevice before Finish`。当前源码已按
@@ -174,7 +217,7 @@ XO: cuper-jacobi-iteration-build/CuperJacobiIteration.xo generated
 `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`；该 artifact 已包含
 finite pair compute 改动。
 
-## 3.3 finite pair compute 硬件构建
+## 3.4 finite pair compute 硬件构建
 
 构建目录：
 
@@ -211,7 +254,7 @@ Hold worst slack: 0.005 ns
 这版已搬到 Jacobi demo 槽，但仍不是 timing-clean bitstream；还没有完成板上
 `hw` 验证。
 
-## 3.4 pre-Finish/empty-R 源码验证和硬件构建
+## 3.5 pre-Finish/empty-R 源码验证和硬件构建
 
 当时上一版 finite-pair demo 上板 `thermal2_n16 MAX_ITERS=1` 仍 timeout，host 停在
 `after ReadFromDevice before Finish`；probe 显示 CU 已 `IDLE`，firewall GOOD，
@@ -250,7 +293,7 @@ elapsed: 3h 47m 24s
 
 这版已经覆盖 Jacobi demo 槽。后续上板验证显示它仍然不能正常返回，见下一节。
 
-## 3.5 pre-Finish/empty-R 上板失败与入口 mmap probe
+## 3.6 pre-Finish/empty-R 上板失败与入口 mmap probe
 
 服务器侧复测上一版 pre-Finish/empty-R 395 demo：
 
@@ -332,7 +375,7 @@ XO: cuper-jacobi-iteration-build/CuperJacobiIteration.xo generated
 这一步先证明源码和 XO 能通过。随后已用 entry mmap probe 源码重新生成完整
 `.xclbin` 并同步到 Jacobi demo 槽，见下一节。
 
-## 3.6 entry mmap probe 硬件构建
+## 3.7 entry mmap probe 硬件构建
 
 构建结果：
 
@@ -367,7 +410,7 @@ Hold worst slack: 0.009 ns
 它仍不是 timing-clean bitstream。新版上板 smoke 结果见下一节；上一版
 pre-Finish/empty-R demo 的 `Finish()` 不返回结论只对应旧 UUID。
 
-## 3.7 entry mmap probe 上板失败记录
+## 3.8 entry mmap probe 上板失败记录
 
 服务器侧复测当前 entry mmap probe 395 demo：
 
@@ -402,7 +445,7 @@ prefinish Debug[48..51]: 0,0,0,0
 DLC/Cuper-jacobi-iteration/docs/entry_mmap_probe_failure_analysis.md
 ```
 
-## 3.8 mmap-only micro top 与 native XRT runner
+## 3.9 mmap-only micro top 与 native XRT runner
 
 已按 `entry_mmap_probe_failure_analysis.md` 的 P0/P1 建议新增独立 debug top 和
 native XRT runner：
@@ -492,11 +535,12 @@ host 会打印这些 Jacobi 专用字段：
 后续硬件测试按下面顺序补记录：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
-2. 当前同步的 `CuperJacobiMmapProbeOnly` split-bank xclbin 已用 native XRT runner
-   通过 `ROW_NUM=16/1024` smoke；后续如改 runner 或 bank 分配再复测该边界。
-3. 等完整 `CuperJacobiIteration` graph 重新生成 xclbin 后，再上板跑 `cant.mtx`、
-   `thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
-4. 对完整 graph 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
+2. 历史 `CuperJacobiMmapProbeOnly` split-bank xclbin 已用 native XRT runner
+   通过 `ROW_NUM=16/1024` smoke；后续如改 runner 或 bank 分配再重建并复测该边界。
+3. 当前同步的完整 `CuperJacobiIteration` no-debug xclbin 已生成，但 timing 未收敛；
+   上板先从 `thermal2_n16 MAX_ITERS=1` 和 `thermal2_n1024 MAX_ITERS=1` smoke 开始。
+4. 再补 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
+5. 对完整 graph 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
    `jacobi-stage-*` 和 `Error Num`。
-5. 同步更新 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`
+6. 同步更新 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`
    和 `395bitstream/README.md`。

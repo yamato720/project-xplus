@@ -91,7 +91,7 @@ write_metrics_resp:
     }
 }
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#if defined(JACOBI_DEADLOCK_DEBUG) && defined(JACOBI_BLOCKING_ENTRY_PROBE)
 inline void Jacobi_WriteStatusProbe(tapa::async_mmap<INDEX_TYPE> &Status,
                                     const INDEX_TYPE Row_num,
                                     const INDEX_TYPE Max_iters) {
@@ -161,7 +161,7 @@ void Jacobi_RoundDispatcher(
     (void)Tau;
     unsigned long long spmv_update_work_packets = 0;
 
-#ifdef JACOBI_DEADLOCK_DEBUG
+#if defined(JACOBI_DEADLOCK_DEBUG) && defined(JACOBI_BLOCKING_ENTRY_PROBE)
     // Dispatcher 是 Status/Metrics 的唯一 writer。入口阻塞写可以确认该 task 已启动、
     // HBM[24] 上 Status/Metrics BO 可写，且写响应能回到 kernel。
     Jacobi_WriteStatusProbe(Status, Row_num, Max_iters);

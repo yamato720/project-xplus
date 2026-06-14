@@ -92,6 +92,13 @@ else()
     message(STATUS "Cuper Jacobi deadlock debug is disabled")
 endif()
 
+if(DEFINED ENV{JACOBI_BLOCKING_ENTRY_PROBE} AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "" AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_BLOCKING_ENTRY_PROBE=1)
+    message(STATUS "Cuper Jacobi blocking entry probe is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi blocking entry probe is disabled")
+endif()
+
 # -----------------------------------------------------------------------------
 # 4. 链接库 (保持你的手动链接逻辑，但改为变量管理)
 # -----------------------------------------------------------------------------

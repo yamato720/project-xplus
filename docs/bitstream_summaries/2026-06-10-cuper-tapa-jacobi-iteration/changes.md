@@ -80,19 +80,24 @@
   `cuper-jacobi-link-mmap-probe-xclbin-split`。
 - 2026-06-13 已在 tmux 中生成 mmap-only micro probe same-bank 与 split-bank 两版
   xclbin。两版 routed timing 均收敛，WNS `0.003 ns`，TNS `0.000 ns`。
-- 已把 split-bank 版本同步到 Jacobi demo 槽：
-  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。当前同步文件的 kernel
+- 当时已把 split-bank 版本同步到 Jacobi demo 槽：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。该历史文件的 kernel
   是 `CuperJacobiMmapProbeOnly`，不是完整 `CuperJacobiIteration` graph；它用于验证
-  mmap/ABI/runtime 边界。
+  mmap/ABI/runtime 边界，现已被后续 full graph demo 覆盖。
+- 2026-06-14 已把默认完整 graph 构建切回 no-debug ABI，生成并同步新的
+  `CuperJacobiIteration` full graph demo：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260613-demo.xclbin`。这版覆盖上一条同名
+  mmap-only micro probe demo，保留 probe 结果作为历史边界记录。
 
 ## 当前没有做
 
-- mmap-only micro top 已生成 timing-clean `.xclbin`，且 split-bank 同步 demo 已完成
+- mmap-only micro top 已生成 timing-clean `.xclbin`，且当时的 split-bank 同步 demo 已完成
   native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
-- 完整 `CuperJacobiIteration` 仍没有 timing-clean、可正常返回的硬件 bitstream；上一版
-  entry mmap probe demo routed timing 未收敛，WNS `-2.350 ns`。
+- 当前完整 `CuperJacobiIteration` no-debug full graph 已生成硬件 bitstream，但 routed
+  timing 仍未收敛：WNS `-1.480 ns`，TNS `-26306.850 ns`，setup failing endpoints
+  `68234`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -105,6 +110,16 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前同步的 2026-06-13 demo 是 mmap-only micro probe，不是完整 Jacobi graph，不能
-  作为 Jacobi 算法功能或性能结论。native XRT runner 已证明 Status/Metrics/Debug BO
-  sync 和 kernel launch 边界可用；下一步回到完整 graph 的 `Finish()` 收尾问题。
+- 当前同步的 2026-06-13 demo 已切回完整 Jacobi graph，但 timing 未收敛且尚未板测，
+  不能作为 Jacobi 硬件功能或性能结论。上一版 mmap-only native XRT runner 已证明
+  Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
+  `Finish()` 收尾问题和 timing closure。
+- 2026-06-13 mmap-only probe 通过后，完整 graph debug 改成默认非阻塞：
+  `JACOBI_DEADLOCK_DEBUG=1` 只启用 Debug buffer/event stream，不再入口阻塞写
+  Debug/Status/Metrics probe；旧入口阻塞 probe 需要额外设置
+  `JACOBI_BLOCKING_ENTRY_PROBE=1`。
+- host 对 Status/Metrics/Debug 使用 sentinel 初始化并改为 `read_write_mmap`，让
+  pre-Finish dump 能区分“kernel 没覆盖 BO”和“写回已经穿透但值异常”。
+- 已验证 no-debug 与 nonblocking-debug 的 `thermal2_n16 MAX_ITERS=1` software/TAPA
+  simulation 均通过，`Error Num=0`；nonblocking-debug 路径无
+  `Debug_Event_Stream` leftover 警告。默认构建目录中的 host 已切回 no-debug ABI。

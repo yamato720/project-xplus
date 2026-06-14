@@ -3,6 +3,11 @@
 // Jacobi deadlock debug 辅助模块。
 // 只有定义 JACOBI_DEADLOCK_DEBUG 时才会被顶层接入。所有业务 task 只用
 // try_write 发事件，避免 debug 通路反过来阻塞正常数据流。
+//
+// 注意：完整 full graph 默认不再做入口阻塞式 mmap probe。mmap-only micro top 已经
+// 证明 Status/Metrics/Debug 写回链路可用；full graph 里继续等待 Debug write response
+// 会把调试路径变成新的 Finish 风险点。若确实要恢复旧入口阻塞探针，可以额外定义
+// JACOBI_BLOCKING_ENTRY_PROBE。
 
 #include <ap_int.h>
 #include <tapa.h>
@@ -81,6 +86,7 @@ void Jacobi_DebugMonitor(
     tapa::istreams<JacobiDebugEvent, kJacobiDebugStreamCount> &Debug_Event_in,
     tapa::istream<INDEX_TYPE> &Debug_Stop_in,
     tapa::async_mmap<INDEX_TYPE> &Debug) {
+#ifdef JACOBI_BLOCKING_ENTRY_PROBE
     // 先做阻塞写并等待 AXI write response。它只阻塞 debug task，不会反压业务流；
     // 但可以证明 Debug mmap 端口是否在 kernel 入口阶段已经可写。
     Jacobi_DebugWriteBlocking(Debug, 0, kJacobiDebugProbeMagic);
@@ -96,6 +102,7 @@ void Jacobi_DebugMonitor(
     Jacobi_DebugWriteBlocking(Debug,
                               kJacobiDebugProbeSlotStopDrain,
                               kJacobiDebugStopDrainCycles);
+#endif
 
     INDEX_TYPE heartbeat = 0;
     INDEX_TYPE event_count = 0;
@@ -118,6 +125,40 @@ debug_monitor_loop:
         uint8_t num_responses = 0;
         (void)Debug.write_resp.try_read(num_responses);
 
+        if (!stop_seen && !Debug_Stop_in.empty()) {
+            INDEX_TYPE stop = 0;
+            Debug_Stop_in.try_read(stop);
+            stop_seen = true;
+            stop_drain_count = 0;
+#ifndef JACOBI_BLOCKING_ENTRY_PROBE
+            // full graph debug 默认是 best-effort。收到 stop 后丢弃未发出的
+            // debug 写，避免 Debug mmap 端口异常反过来阻止整个 graph Finish。
+            pending_count = 0;
+            pending_index = 0;
+#endif
+        }
+
+        if (stop_seen && stop_drain_count >= kJacobiDebugStopDrainCycles) {
+#ifdef JACOBI_BLOCKING_ENTRY_PROBE
+            Jacobi_DebugWriteBlocking(Debug, 0, heartbeat);
+            Jacobi_DebugWriteBlocking(Debug, 15, kJacobiDebugPhaseStop);
+#endif
+            return;
+        }
+
+#ifndef JACOBI_BLOCKING_ENTRY_PROBE
+        if (stop_seen) {
+        drain_debug_events_after_stop:
+            for (INDEX_TYPE offset = 0; offset < kJacobiDebugStreamCount; ++offset) {
+#pragma HLS unroll
+                JacobiDebugEvent dropped_event;
+                (void)Debug_Event_in[offset].try_read(dropped_event);
+            }
+            ++stop_drain_count;
+            continue;
+        }
+#endif
+
         if (pending_index < pending_count) {
             if (!Debug.write_addr.full() && !Debug.write_data.full()) {
                 Debug.write_addr.try_write(pending_addr[pending_index]);
@@ -127,13 +168,6 @@ debug_monitor_loop:
         } else {
             pending_count = 0;
             pending_index = 0;
-
-            if (!stop_seen && !Debug_Stop_in.empty()) {
-                INDEX_TYPE stop = 0;
-                Debug_Stop_in.try_read(stop);
-                stop_seen = true;
-                stop_drain_count = 0;
-            }
 
             JacobiDebugEvent event;
             bool has_event = false;
@@ -157,10 +191,6 @@ debug_monitor_loop:
                 pending_addr[3] = 16 + (event.source & 0x1f);
                 pending_data[3] = event.value;
                 pending_count = 4;
-            } else if (stop_seen && stop_drain_count >= kJacobiDebugStopDrainCycles) {
-                Jacobi_DebugWriteBlocking(Debug, 0, heartbeat);
-                Jacobi_DebugWriteBlocking(Debug, 15, kJacobiDebugPhaseStop);
-                return;
             } else if ((heartbeat & 0x3ff) == 0) {
                 pending_addr[0] = 0;
                 pending_data[0] = heartbeat;

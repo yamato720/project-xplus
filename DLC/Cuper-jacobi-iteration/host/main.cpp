@@ -44,6 +44,14 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
     return cycles * clock_period_ns * 1.0e-6;
 }
 
+static constexpr INDEX_TYPE kJacobiStatusSentinelBase = 0x51510000;
+static constexpr INDEX_TYPE kJacobiDebugSentinelBase = 0x53530000;
+static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
+
+bool IsJacobiDebugSentinel(const INDEX_TYPE index, const INDEX_TYPE value) {
+    return value == kJacobiDebugSentinelBase + index;
+}
+
 #ifdef JACOBI_DEADLOCK_DEBUG
 void PrintJacobiProbeSnapshot(const char* label,
                               const aligned_vector<INDEX_TYPE>& status_data,
@@ -118,7 +126,7 @@ void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
 
     cout << "[jacobi-deadlock-debug-slots]";
     for (INDEX_TYPE index = 16; index < 64; ++index) {
-        if (debug_data[index] != 0) {
+        if (!IsJacobiDebugSentinel(index, debug_data[index]) && debug_data[index] != 0) {
             cout << " d" << index << "=" << debug_data[index];
         }
     }
@@ -711,6 +719,17 @@ int main(int argc, char* argv[]) {
 #ifdef JACOBI_DEADLOCK_DEBUG
     aligned_vector<INDEX_TYPE> Debug_fpga_data(64, 0);
 #endif
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Status_fpga_data.size()); ++index) {
+        Status_fpga_data[index] = kJacobiStatusSentinelBase + index;
+    }
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Metrics_fpga_data.size()); ++index) {
+        Metrics_fpga_data[index] = kJacobiMetricsSentinelBase - static_cast<double>(index);
+    }
+#ifdef JACOBI_DEADLOCK_DEBUG
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Debug_fpga_data.size()); ++index) {
+        Debug_fpga_data[index] = kJacobiDebugSentinelBase + index;
+    }
+#endif
     cout << "  \tDone" << endl;
 
     // FPGA Jacobi
@@ -743,10 +762,10 @@ int main(int argc, char* argv[]) {
                                       tapa::read_only_mmap<float>(B_fpga_data).reinterpret<float_v16>(),
                                       tapa::read_only_mmap<float>(Diag_inv_fpga_data).reinterpret<float_v16>(),
                                       tapa::read_write_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
-                                      tapa::write_only_mmap<INDEX_TYPE>(Status_fpga_data),
-                                      tapa::write_only_mmap<double>(Metrics_fpga_data),
+                                      tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
+                                      tapa::read_write_mmap<double>(Metrics_fpga_data),
 #ifdef JACOBI_DEADLOCK_DEBUG
-                                      tapa::write_only_mmap<INDEX_TYPE>(Debug_fpga_data),
+                                      tapa::read_write_mmap<INDEX_TYPE>(Debug_fpga_data),
 #endif
                                       SpElement_list_ptr_size,
                                       SpElement_list_ptr_max_len,
