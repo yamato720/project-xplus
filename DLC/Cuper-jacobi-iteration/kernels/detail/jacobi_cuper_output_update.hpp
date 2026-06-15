@@ -194,7 +194,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                               tapa::istream<float_v2> &Neg_Rx_in_1,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
                               tapa::ostream<JacobiUpdatedPair> &Updated_out
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                               ,
                               tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
                               const INDEX_TYPE Debug_source
@@ -204,7 +204,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 #pragma HLS loop_flatten off
         const JacobiFrame frame = Frame_in.read();
         if (frame.stop != 0) {
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  Debug_source,
                                  kJacobiDebugPhaseStop,
@@ -216,7 +216,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 
         const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(frame.row_num);
         const INDEX_TYPE num_out = frame.packet_count;
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
                              kJacobiDebugPhaseEnterRound,
@@ -231,7 +231,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
             const bool can_emit_update = !Coeff_in.empty() && !Updated_out.full();
             const bool neg_rx_ready = (c_idx == 0) ? !Neg_Rx_in_0.empty() : !Neg_Rx_in_1.empty();
             if (neg_rx_ready && (!is_valid_output || can_emit_update)) {
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 debug_wait_tick = 0;
 #endif
                 float_v2 neg_rx;
@@ -252,7 +252,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                         updated.value[lane] = (coeff.b[lane] + neg_rx[lane]) * coeff.diag_inv[lane];
                     }
                     Updated_out.try_write(updated);
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                     if ((o_idx & 0x3ff) == 0) {
                         Jacobi_DebugTryWrite(Debug_Event_out,
                                              Debug_source,
@@ -272,7 +272,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                 if (o_idx == num_pe_output) {
                     o_idx = 0;
                 }
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
             } else {
                 INDEX_TYPE wait_code = 0;
                 if (!neg_rx_ready) {
@@ -293,7 +293,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
 #endif
             }
         }
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
                              kJacobiDebugPhaseDoneRound,

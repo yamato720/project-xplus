@@ -53,23 +53,30 @@ cuper-tapa-jacobi-u55c-20260614-demo.xclbin
 
 这版是 `CuperJacobiIteration` full graph light-trace 硬件 debug demo，接入完整 Jacobi
 dataflow、Cuper SpMV service 和 Jacobi update，并通过 `JACOBI_TRACE_LIGHT=1` 增加
-7 路关键进度 trace。它覆盖同主线 Jacobi demo 槽，但不替换任何标准文件；当前
+15 路关键进度 trace，额外覆盖 8 路 `pair_compute[0..7]`。它覆盖同主线 Jacobi demo
+槽，但不替换任何标准文件；当前
 `cuper-tapa-jacobi` 仍然没有标准 bitstream。demo xclbin UUID 为
-`6dfaf1e3-9707-7f46-b914-1f59ca240993`，SHA256 为
-`4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5`。
-最终 xclbin info 中 DATA clock 为 195 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 439 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建日志为
+`ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
+`ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。
+最终 xclbin info 中 DATA clock 为 164 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建日志为
 `cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。
 
 当前 light-trace ABI 把 `SpElement_list_ptr` 和 `Matrix_data_0` 映射到 HBM[0]，
 `Matrix_data_1..15` 映射到 HBM[1..15]，`B` 在 HBM[20]，`Diag_inv` 在 HBM[21]，
 `X` 在 HBM[22]，`Status` 在 HBM[24]，`Metrics` 在 HBM[25]，`Debug` 在 HBM[26]。
 VPL implementation 和 `.xclbin` 封装都已完成，`Run completed`，v++ link 总耗时
-`4h 10m 40s`。routed timing 仍未收敛：WNS `-1.789 ns`，TNS `-29517.641 ns`，
-setup failing endpoints `72617`，主要失败时钟域为 `clk_kernel_00_unbuffered_net`；
-hold worst slack `0.006 ns`。这版尚未完成上板 smoke。
+`3h 52m 35s`。routed timing 仍未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，
+setup failing endpoints `101497`，主要失败时钟域为 `clk_kernel_00_unbuffered_net`；
+hold worst slack `0.008 ns`。这版尚未完成上板 smoke。
 
-它覆盖的上一版 `20260613` no-debug full graph demo UUID 为
+它覆盖的上一版同名 `20260614` 7 路 light-trace full graph demo UUID 为
+`6dfaf1e3-9707-7f46-b914-1f59ca240993`，SHA256 为
+`4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5`。服务器侧复测该版
+后，`thermal2_n16` 和 `thermal2_n1024` 的 `MAX_ITERS=1` 已返回通过，
+`thermal2_n65536` 仍卡在 `Finish()`；该结果只对应旧 UUID。
+
+再上一版 `20260613` no-debug full graph demo UUID 为
 `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7`，SHA256 为
 `1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a`。上一版是完整
 `CuperJacobiIteration` no-debug graph，routed timing 未收敛：WNS `-1.480 ns`，

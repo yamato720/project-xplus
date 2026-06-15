@@ -11,7 +11,7 @@ xclbin Information
    Kernels:                CuperJacobiIteration
    Signature:              
    Content:                Bitstream
-   UUID (xclbin):          6dfaf1e3-9707-7f46-b914-1f59ca240993
+   UUID (xclbin):          ef3b1102-90ec-551a-d1e9-55fb6c023da5
    UUID (IINTF):           b7ac1abe1e3e1cb686d5a81232452676
    Sections:               BITSTREAM, MEM_TOPOLOGY, IP_LAYOUT, CONNECTIVITY, 
                            CLOCK_FREQ_TOPOLOGY, BUILD_METADATA, 
@@ -39,7 +39,7 @@ Scalable Clocks
    Name:      hbm_aclk
    Index:     0
    Type:      SYSTEM
-   Frequency: 439 MHz
+   Frequency: 450 MHz
 
    Name:      KERNEL_CLK
    Index:     1
@@ -49,7 +49,7 @@ Scalable Clocks
    Name:      DATA_CLK
    Index:     2
    Type:      DATA
-   Frequency: 195 MHz
+   Frequency: 164 MHz
 
 System Clocks
 ------
@@ -57,7 +57,7 @@ System Clocks
    Type:           SCALABLE 
    Default Freq:   300 MHz
    Requested Freq: 300 MHz
-   Achieved Freq:  195.2 MHz
+   Achieved Freq:  164 MHz
 
    Name:           ulp_ucs_aclk_kernel_01 
    Type:           SCALABLE 

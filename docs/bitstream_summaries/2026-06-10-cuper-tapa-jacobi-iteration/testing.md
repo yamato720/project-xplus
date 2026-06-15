@@ -61,9 +61,13 @@ JACOBI_TRACE_ISOTOPE=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitespa
 | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0` | Debug[48..51]=`1245921841,47,1,8192`; pack writer 和 X HBM writer 均进入 stop |
 | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0` | 47 个 source 槽位均可见；matrix loader value=`144`，vector loader value=`64` |
 
-硬件 trace link 会把 `Status/Metrics/Debug` 分到 `HBM[24]/HBM[25]/HBM[26]`。host 默认
-在 `Exec` 后等待 `JACOBI_PREFINISH_SAMPLE_DELAY_MS=250` 毫秒再做 pre-Finish
-`ReadFromDevice()`，这个值可通过环境变量调整。
+硬件 trace link 会把 `Status/Metrics/Debug` 分到 `HBM[24]/HBM[25]/HBM[26]`。当前
+host trace ABI 默认在 `Finish()` 前做周期性 BO sync：首次等待
+`JACOBI_PREFINISH_SAMPLE_DELAY_MS=250` 毫秒，之后按
+`JACOBI_PREFINISH_POLL_INTERVAL_MS=1000` 毫秒采样，最多
+`JACOBI_PREFINISH_POLL_COUNT=60` 次；若采样中看到 `Status[0]` 已被覆盖，会提前进入
+`Finish()`。默认每 `JACOBI_PREFINISH_FULL_DUMP_INTERVAL=10` 次采样打印一次完整 Debug
+source 表，设为 0 可只保留简短 summary。
 
 ## 已执行命令
 
@@ -655,13 +659,13 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
 
 ```text
 Kernel: CuperJacobiIteration
-ABI: light-trace full graph, B HBM[20], Diag_inv HBM[21], X HBM[22],
+ABI: 15-source light-trace full graph, B HBM[20], Diag_inv HBM[21], X HBM[22],
      Status/Metrics/Debug HBM[24]/HBM[25]/HBM[26]
-UUID: 6dfaf1e3-9707-7f46-b914-1f59ca240993
-SHA256: 4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5
-DATA clock: 195 MHz
+UUID: ef3b1102-90ec-551a-d1e9-55fb6c023da5
+SHA256: ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2
+DATA clock: 164 MHz
 KERNEL clock: 500 MHz
-HBM clock: 439 MHz
+HBM clock: 450 MHz
 ```
 
 构建情况：
@@ -678,14 +682,18 @@ total elapsed: 4h 10m 40s
 
 ```text
 Timing constraints are not met.
-Setup failing endpoints: 72617
-Setup worst slack: -1.789 ns
-Setup total violation: -29517.641 ns
-Hold worst slack: 0.006 ns
+Setup failing endpoints: 101497
+Setup worst slack: -2.764 ns
+Setup total violation: -70810.594 ns
+Hold worst slack: 0.008 ns
 ```
 
-因此当前 `.xclbin` 是完整 Jacobi graph light-trace debug demo artifact，但仍不是
-timing-clean，也还未完成板上 smoke。上一版 `20260613` no-debug full graph demo UUID 为
+因此当前 `.xclbin` 是完整 Jacobi graph 15 路 light-trace debug demo artifact，但仍
+不是 timing-clean，也还未完成板上 smoke。上一版同名 `20260614` 7 路 light-trace
+full graph demo UUID 为 `6dfaf1e3-9707-7f46-b914-1f59ca240993`，SHA256 为
+`4f162b092f73cf6cf9c07a74af24d2545f8dec13ba0f59565e45d5206735c1f5`；该旧版的
+`thermal2_n16` / `thermal2_n1024` 上板通过、`thermal2_n65536` 卡 `Finish()` 结果只
+对应旧 UUID。再上一版 `20260613` no-debug full graph demo UUID 为
 `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7`，SHA256 为
 `1ed33e0b1d6929b388a64b85c5f70187d082e867c4ab1288d84f1adb6a80092a`；该旧版只是构建完成，
 尚未完成上板 smoke。再上一版 mmap-only split-bank probe demo UUID 为
@@ -697,7 +705,9 @@ probe smoke 通过，只作为 mmap/launch/BO sync 历史边界记录。
 
 full isotope 构建曾在 `Jacobi_DebugMonitor` HLS/resource synthesis 阶段暴露过高成本：
 47 路 trace stream 让单个 `vitis_hls` 进程接近 70GB RSS，未到 XO 安全点即手动停止。
-随后改为 `JACOBI_TRACE_LIGHT=1`，只接 7 路关键 trace source。
+随后改为 `JACOBI_TRACE_LIGHT=1`。当前同步的 `20260614-demo` 接 15 路关键 trace
+source，额外加入 `pair_compute[0..7]`，用于观察 update 阶段是否在等待
+accumulator/coeff/pack。
 
 软件级验证：
 
@@ -705,6 +715,7 @@ full isotope 构建曾在 `Jacobi_DebugMonitor` HLS/resource synthesis 阶段暴
 JACOBI_TRACE_LIGHT=1 make cuper-jacobi-build-host
 JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
 JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536
 git diff --check
 ```
 
@@ -712,8 +723,10 @@ git diff --check
 
 | 模式 | 数据集 | 结果 |
 | --- | --- | --- |
-| light-trace full graph software | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, Debug[48..51]=`1245921841,7,1,8192` |
-| light-trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, Debug[48..51]=`1245921841,7,1,8192` |
+| 7 路 light-trace full graph software | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, Debug[48..51]=`1245921841,7,1,8192` |
+| 7 路 light-trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, Debug[48..51]=`1245921841,7,1,8192` |
+| 15 路 light-trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, pair_compute[0..7] 均进入 stop |
+| 15 路 light-trace full graph software | `thermal2_n65536 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`, pair_compute[0..7]、pack_writer、x_hbm_writer 均进入 stop |
 | whitespace check | `git diff --check` | 通过 |
 
 硬件构建命令：
@@ -722,8 +735,9 @@ git diff --check
 JACOBI_TRACE_ISOTOPE=0 JACOBI_TRACE_LIGHT=1 FORCE=1 make cuper-jacobi-hw-tmux
 ```
 
-构建在 tmux `cuper_jacobi_iteration_hw_build` 中完成，`Run completed`，并同步到
-Jacobi demo 槽。这个结果只说明 bitstream 已生成；板上 smoke 仍待执行。
+构建在 tmux `cuper_jacobi_iteration_hw_build` 中完成，`Run completed`，总耗时
+`3h 52m 35s`，并同步到 Jacobi demo 槽。这个结果只说明 bitstream 已生成；板上
+smoke 仍待执行。
 
 ## 判定标准
 
@@ -830,5 +844,5 @@ host 同时把 Status/Metrics/Debug 初始化为 sentinel，并改用 `read_writ
 
 这条记录对应 2026-06-13 的 no-debug/nonblocking-debug 边界。当前同步 demo 已改为
 `JACOBI_TRACE_LIGHT=1` 的完整 graph，并继续保持不带 `JACOBI_BLOCKING_ENTRY_PROBE`。
-如果仍卡 `Finish()`，优先查看 pre-Finish dump、light-trace 7 路进度槽和 sentinel
+如果仍卡 `Finish()`，优先查看 pre-Finish dump、light-trace 15 路进度槽和 sentinel
 是否被覆盖。

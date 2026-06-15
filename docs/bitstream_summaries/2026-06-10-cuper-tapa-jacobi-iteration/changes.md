@@ -96,7 +96,7 @@
   `ReadFromDevice()` 并打印 Debug 快照，因此 full graph 卡在 `Finish()` 时也能拿到
   最后事件。
 - trace 版硬件 connectivity 把 `Status/Metrics/Debug` 分到 `HBM[24]/HBM[25]/HBM[26]`，
-  沿用 mmap-only split-bank probe 已验证过的 mmap 写回边界。默认 trace host 在
+  沿用 mmap-only split-bank probe 已验证过的 mmap 写回边界。当时 trace host 在
   `Exec` 后等待 `JACOBI_PREFINISH_SAMPLE_DELAY_MS=250` 毫秒再做 pre-Finish 采样；
   可设为 0 关闭。
 - 已验证 `JACOBI_TRACE_ISOTOPE=1` 的 host 构建和 software/TAPA simulation：
@@ -119,6 +119,18 @@
 - 2026-06-14 已生成并同步 light-trace full graph 硬件 demo artifact：
   `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin`。这版覆盖上一条
   `20260613` no-debug full graph demo 槽，但仍未晋级标准。
+- 服务器侧复测 `20260614-demo` 后，`thermal2_n16` 和 `thermal2_n1024` 的
+  `MAX_ITERS=1` 已返回通过，`thermal2_n65536` 仍卡在 `Finish()`。为定位这个规模相关
+  问题，当时源码把后续 light trace 从 7 路扩到 15 路，新增 8 路
+  `pair_compute[0..7]`；host 在 trace ABI 下默认做 60 次 pre-Finish 周期同步，每次
+  输出简短 Debug summary，每 10 次输出完整 source 表，并在看到 `Status[0]` 被覆盖时
+  提前进入 `Finish()`。该结果只对应旧 7 路 UUID。
+- 2026-06-15 已用 `JACOBI_TRACE_ISOTOPE=0 JACOBI_TRACE_LIGHT=1 FORCE=1 make
+  cuper-jacobi-hw-tmux` 生成并同步 15 路 light-trace full graph demo：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin`。新 UUID 为
+  `ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
+  `ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。它覆盖同名
+  7 路 light-trace demo 槽，但仍不是标准 bitstream，尚未上板 smoke。
 
 ## 当前没有做
 
@@ -126,9 +138,9 @@
   native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
-- 当前完整 `CuperJacobiIteration` light-trace full graph 已生成硬件 bitstream，但 routed
-  timing 仍未收敛：WNS `-1.789 ns`，TNS `-29517.641 ns`，setup failing endpoints
-  `72617`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
+- 当前完整 `CuperJacobiIteration` 15 路 light-trace full graph 已生成硬件 bitstream，但
+  routed timing 仍未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，setup failing
+  endpoints `101497`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -143,7 +155,7 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前同步的 2026-06-14 demo 是完整 Jacobi graph light-trace debug 版，但 timing 未收敛且尚未板测，
+- 当前同步的 2026-06-14 demo 是完整 Jacobi graph 15 路 light-trace debug 版，但 timing 未收敛且尚未板测，
   不能作为 Jacobi 硬件功能或性能结论。上一版 mmap-only native XRT runner 已证明
   Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
   `Finish()` 收尾问题和 timing closure。

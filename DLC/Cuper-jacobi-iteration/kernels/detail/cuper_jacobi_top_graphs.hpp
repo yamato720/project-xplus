@@ -135,8 +135,8 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<float_v16, 128>                               X_Write_Stream("X_Write_Stream");
 #ifdef JACOBI_TRACE_ENABLED
     // trace/debug 只在 JACOBI_TRACE_LIGHT、JACOBI_TRACE_ISOTOPE 或
-    // JACOBI_DEADLOCK_DEBUG 打开时存在。light 模式只接关键控制/写回节点；
-    // full 模式才接 matrix/accumulator/pair 细节节点。业务 task 只 try_write
+    // JACOBI_DEADLOCK_DEBUG 打开时存在。light 模式接关键控制、pair update 和写回节点；
+    // full 模式额外接 matrix/accumulator 细节节点。业务 task 只 try_write
     // 非阻塞事件，DebugMonitor 汇总写 Debug HBM，避免 debug 通路制造新反压。
     tapa::stream<JacobiDebugEvent, 16>                            Debug_Dispatcher_Stream("Debug_Dispatcher_Stream");
     tapa::stream<JacobiDebugEvent, 16>                            Debug_PtrLoader_Stream("Debug_PtrLoader_Stream");
@@ -147,9 +147,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
     tapa::stream<JacobiDebugEvent, 16>                            Debug_FrameFork_Stream("Debug_FrameFork_Stream");
     tapa::stream<JacobiDebugEvent, 16>                            Debug_CoeffLoader_Stream("Debug_CoeffLoader_Stream");
-#ifdef JACOBI_TRACE_FULL
     tapa::streams<JacobiDebugEvent, kJacobiDebugPairStreamCount, 16> Debug_Pair_Stream("Debug_Pair_Stream");
-#endif
     tapa::stream<JacobiDebugEvent, 16>                            Debug_PackWriter_Stream("Debug_PackWriter_Stream");
     tapa::stream<JacobiDebugEvent, 16>                            Debug_HbmWriter_Stream("Debug_HbmWriter_Stream");
     tapa::stream<INDEX_TYPE, 2>                                   Debug_Stop_Stream("Debug_Stop_Stream");
@@ -200,9 +198,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
                 Debug_FrameFork_Stream,
                 Debug_CoeffLoader_Stream,
-#ifdef JACOBI_TRACE_FULL
                 Debug_Pair_Stream,
-#endif
                 Debug_PackWriter_Stream,
                 Debug_HbmWriter_Stream,
                 Debug_Stop_Stream,
@@ -334,7 +330,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[1],
                 Update_Coeff_Stream[0],
                 Update_Pair_Stream[0]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[0],
                 kJacobiDebugSourcePairBase + 0
@@ -346,7 +342,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[3],
                 Update_Coeff_Stream[1],
                 Update_Pair_Stream[1]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[1],
                 kJacobiDebugSourcePairBase + 1
@@ -358,7 +354,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[5],
                 Update_Coeff_Stream[2],
                 Update_Pair_Stream[2]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[2],
                 kJacobiDebugSourcePairBase + 2
@@ -370,7 +366,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[7],
                 Update_Coeff_Stream[3],
                 Update_Pair_Stream[3]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[3],
                 kJacobiDebugSourcePairBase + 3
@@ -382,7 +378,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[9],
                 Update_Coeff_Stream[4],
                 Update_Pair_Stream[4]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[4],
                 kJacobiDebugSourcePairBase + 4
@@ -394,7 +390,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[11],
                 Update_Coeff_Stream[5],
                 Update_Pair_Stream[5]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[5],
                 kJacobiDebugSourcePairBase + 5
@@ -406,7 +402,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[13],
                 Update_Coeff_Stream[6],
                 Update_Pair_Stream[6]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[6],
                 kJacobiDebugSourcePairBase + 6
@@ -418,7 +414,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Vector_Y_Stream[15],
                 Update_Coeff_Stream[7],
                 Update_Pair_Stream[7]
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                 ,
                 Debug_Pair_Stream[7],
                 kJacobiDebugSourcePairBase + 7

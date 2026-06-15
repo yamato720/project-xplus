@@ -131,9 +131,10 @@ void PrintJacobiProbeSnapshot(const char* label,
 }
 #endif
 
-void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
+void PrintJacobiPrefinishSnapshot(const char* label,
+                                  const aligned_vector<INDEX_TYPE>& status_data,
                                   const aligned_vector<double>& metrics_data) {
-    cout << "[jacobi-prefinish] Status[0..2]="
+    cout << "[" << label << "] Status[0..2]="
          << status_data[0] << ","
          << status_data[1] << ","
          << status_data[2]
@@ -147,11 +148,42 @@ void PrintJacobiPrefinishSnapshot(const aligned_vector<INDEX_TYPE>& status_data,
     cout << endl;
 
 #ifdef JACOBI_TRACE_ENABLED
-    PrintJacobiProbeSnapshot("jacobi-prefinish-probe", status_data, metrics_data);
+    std::string probe_label = std::string(label) + "-probe";
+    PrintJacobiProbeSnapshot(probe_label.c_str(), status_data, metrics_data);
 #endif
 }
 
 #ifdef JACOBI_TRACE_ENABLED
+bool JacobiKernelStatusAvailable(const aligned_vector<INDEX_TYPE>& status_data) {
+    return !status_data.empty() && status_data[0] != kJacobiStatusSentinelBase;
+}
+
+void PrintJacobiDebugSummary(const char* label,
+                             const aligned_vector<INDEX_TYPE>& debug_data) {
+    const INDEX_TYPE packed_event = debug_data[2];
+    const INDEX_TYPE source = (packed_event >> 24) & 0xff;
+    const INDEX_TYPE phase = (packed_event >> 16) & 0xff;
+    const INDEX_TYPE lane = packed_event & 0xffff;
+
+    cout << "[" << label << "] heartbeat=" << debug_data[0]
+         << " event_count=" << debug_data[1]
+         << " last_source=";
+    PrintJacobiTraceSourceLabel(source);
+    cout << "(" << source << ")"
+         << " last_phase=" << JacobiTracePhaseName(phase) << "(" << phase << ")"
+         << " last_lane=" << lane
+         << " last_value=" << debug_data[3]
+         << " write_issue=" << debug_data[5]
+         << " write_resp=" << debug_data[6]
+         << " stop_seen=" << debug_data[7]
+         << " Debug[48..51]="
+         << debug_data[48] << ","
+         << debug_data[49] << ","
+         << debug_data[50] << ","
+         << debug_data[51]
+         << endl;
+}
+
 void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
     const INDEX_TYPE packed_event = debug_data[2];
     const INDEX_TYPE source = (packed_event >> 24) & 0xff;
@@ -248,22 +280,50 @@ int64_t InvokeCuperJacobiIterationWithPrefinishDump(
     cout << "[tapa-invoke] after WriteToDevice before Exec" << endl;
     instance.Exec();
 #ifdef JACOBI_TRACE_ENABLED
-    const int sample_delay_ms = EnvInt("JACOBI_PREFINISH_SAMPLE_DELAY_MS", 250);
-    if (sample_delay_ms > 0) {
-        cout << "[tapa-invoke] trace sample delay before ReadFromDevice: "
-             << sample_delay_ms << " ms" << endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(sample_delay_ms));
+    const int prefinish_poll_count =
+        std::max(1, EnvInt("JACOBI_PREFINISH_POLL_COUNT", 60));
+    const int initial_delay_ms = EnvInt("JACOBI_PREFINISH_SAMPLE_DELAY_MS", 250);
+    const int poll_interval_ms = EnvInt("JACOBI_PREFINISH_POLL_INTERVAL_MS", 1000);
+    const int full_dump_interval = EnvInt("JACOBI_PREFINISH_FULL_DUMP_INTERVAL", 10);
+    cout << "[tapa-invoke] trace pre-Finish polling: count="
+         << prefinish_poll_count
+         << " initial_delay_ms=" << initial_delay_ms
+         << " interval_ms=" << poll_interval_ms
+         << " full_dump_interval=" << full_dump_interval << endl;
+
+    for (int sample = 0; sample < prefinish_poll_count; ++sample) {
+        const int delay_ms = (sample == 0) ? initial_delay_ms : poll_interval_ms;
+        if (delay_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+        }
+
+        cout << "[tapa-invoke] before ReadFromDevice sample "
+             << (sample + 1) << "/" << prefinish_poll_count << endl;
+        instance.ReadFromDevice();
+
+        std::string sample_label = "jacobi-prefinish#" + std::to_string(sample + 1);
+        PrintJacobiPrefinishSnapshot(sample_label.c_str(), status_data, metrics_data);
+        PrintJacobiDebugSummary("jacobi-prefinish-trace", debug_data);
+
+        const bool status_available = JacobiKernelStatusAvailable(status_data);
+        const bool should_full_dump =
+            status_available ||
+            (full_dump_interval > 0 && ((sample + 1) % full_dump_interval == 0));
+        if (should_full_dump) {
+            PrintJacobiDebugBuffer(debug_data);
+        }
+
+        if (status_available) {
+            cout << "[tapa-invoke] kernel status visible before Finish, stop polling" << endl;
+            break;
+        }
     }
-#endif
+#else
     cout << "[tapa-invoke] after Exec before ReadFromDevice" << endl;
     instance.ReadFromDevice();
-    cout << "[tapa-invoke] after ReadFromDevice before Finish" << endl;
-
-    // Finish() 当前可能不返回；ReadFromDevice 后先打印已同步回 host 的 BO 快照。
-    PrintJacobiPrefinishSnapshot(status_data, metrics_data);
-#ifdef JACOBI_TRACE_ENABLED
-    PrintJacobiDebugBuffer(debug_data);
+    PrintJacobiPrefinishSnapshot("jacobi-prefinish", status_data, metrics_data);
 #endif
+    cout << "[tapa-invoke] after ReadFromDevice before Finish" << endl;
 
     instance.Finish();
     cout << "[tapa-invoke] after Finish" << endl;
