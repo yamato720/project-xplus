@@ -135,14 +135,15 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<float_v16, 128>                               X_Write_Stream("X_Write_Stream");
 #ifdef JACOBI_TRACE_ENABLED
     // trace/debug 只在 JACOBI_TRACE_LIGHT、JACOBI_TRACE_ISOTOPE 或
-    // JACOBI_DEADLOCK_DEBUG 打开时存在。light 模式接关键控制、pair update 和写回节点；
-    // full 模式额外接 matrix/accumulator 细节节点。业务 task 只 try_write
+    // JACOBI_DEADLOCK_DEBUG 打开时存在。light 模式接关键控制、matrix loader0
+    // 首拍、pair update 和写回节点；full 模式额外接全部 matrix/accumulator
+    // 细节节点。业务 task 只 try_write
     // 非阻塞事件，DebugMonitor 汇总写 Debug HBM，避免 debug 通路制造新反压。
     tapa::stream<JacobiDebugEvent, 16>                            Debug_Dispatcher_Stream("Debug_Dispatcher_Stream");
     tapa::stream<JacobiDebugEvent, 16>                            Debug_PtrLoader_Stream("Debug_PtrLoader_Stream");
     tapa::stream<JacobiDebugEvent, 16>                            Debug_VectorLoader_Stream("Debug_VectorLoader_Stream");
-#ifdef JACOBI_TRACE_FULL
     tapa::streams<JacobiDebugEvent, HBM_CHANNEL_NUM, 16>          Debug_MatrixLoader_Stream("Debug_MatrixLoader_Stream");
+#ifdef JACOBI_TRACE_FULL
     tapa::streams<JacobiDebugEvent, HBM_CHANNEL_NUM, 16>          Debug_Accumulator_Stream("Debug_Accumulator_Stream");
 #endif
     tapa::stream<JacobiDebugEvent, 16>                            Debug_FrameFork_Stream("Debug_FrameFork_Stream");
@@ -192,8 +193,8 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Debug_Dispatcher_Stream,
                 Debug_PtrLoader_Stream,
                 Debug_VectorLoader_Stream,
-#ifdef JACOBI_TRACE_FULL
                 Debug_MatrixLoader_Stream,
+#ifdef JACOBI_TRACE_FULL
                 Debug_Accumulator_Stream,
 #endif
                 Debug_FrameFork_Stream,
@@ -238,7 +239,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Matrix_A_Stream
                                              ,
                                              tapa::seq()
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                                              ,
                                              Debug_MatrixLoader_Stream
 #endif

@@ -12,7 +12,17 @@ mkdir -p "$BUILD_DIR"
 TOP="${JACOBI_TOP:-CuperJacobiIteration}"
 OUTPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
 WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_$TOP}"
-CLOCK_PERIOD="${CLOCK_PERIOD:-2.0}"
+if [[ "${CLOCK_PERIOD:-}" == "" ]]; then
+  if [[ "$TOP" == "CuperJacobiIteration" ]] &&
+     { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]] ||
+       [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]] ||
+       [[ "${JACOBI_TRACE_LIGHT:-0}" != "0" && "${JACOBI_TRACE_LIGHT:-}" != "" ]]; }; then
+    # debug full graph 先保守降频，避免 timing violation 污染大规模硬件判断。
+    CLOCK_PERIOD="4.0"
+  else
+    CLOCK_PERIOD="2.0"
+  fi
+fi
 JOBS="${JOBS:-$(nproc)}"
 
 cmd=(

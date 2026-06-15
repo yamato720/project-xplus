@@ -181,6 +181,14 @@ void PrintJacobiDebugSummary(const char* label,
          << debug_data[49] << ","
          << debug_data[50] << ","
          << debug_data[51]
+         << " Debug[52..63]=";
+    for (INDEX_TYPE index = 52; index < 64; ++index) {
+        if (index != 52) {
+            cout << ",";
+        }
+        cout << debug_data[index];
+    }
+    cout
          << endl;
 }
 
@@ -211,6 +219,21 @@ void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
          << debug_data[49] << ","
          << debug_data[50] << ","
          << debug_data[51]
+         << endl;
+
+    cout << "[jacobi-trace-fixed] "
+         << "dispatcher_first_token=" << debug_data[52]
+         << " matrix_prefetch_issued=" << debug_data[53]
+         << " ptr_loader_first_cmd=" << debug_data[54]
+         << " ptr_loader_first_read=" << debug_data[55]
+         << " vector_loader_first_cmd=" << debug_data[56]
+         << " matrix0_first_cmd=" << debug_data[57]
+         << " matrix0_first_beat=" << debug_data[58]
+         << " monitor_heartbeat=" << debug_data[59]
+         << " monitor_write_issue=" << debug_data[60]
+         << " monitor_write_resp=" << debug_data[61]
+         << " monitor_stop=" << debug_data[62]
+         << " monitor_stream_count=" << debug_data[63]
          << endl;
 
     cout << "[jacobi-trace-legacy-slots]";

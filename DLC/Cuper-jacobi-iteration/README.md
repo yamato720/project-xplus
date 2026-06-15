@@ -73,7 +73,8 @@ $$
 当前已经把 light-trace 的完整 `CuperJacobiIteration` full graph 同步为
 `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin`。这版不是 mmap-only
 probe，已经接入完整 Cuper SpMV service 和 Jacobi update，并保留 15 路关键 Debug
-trace，包括 8 路 `pair_compute[0..7]`；但还没有完成上板 smoke，routed timing 仍未收敛。上一版
+trace 以及 matrix loader0 首拍固定槽，包括 8 路 `pair_compute[0..7]`；但还没有完成上板
+smoke，routed timing 已在 150 MHz DATA clock 下收敛。上一版
 `CuperJacobiMmapProbeOnly` split-bank probe 已通过 native XRT smoke，证明 kernel
 launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只作为历史边界记录。
 详细测试流程见 `docs/testing.md`。
@@ -90,7 +91,7 @@ launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只作为�
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | `ef3b1102-90ec-551a-d1e9-55fb6c023da5` | `ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2` | `CuperJacobiIteration` 15 路 light-trace full graph，WNS `-2.764 ns`，待上板 smoke |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1` | `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab` | `CuperJacobiIteration` light-trace full graph，DATA 150 MHz，WNS `0.003 ns`，待上板 smoke |
 
 ## 常用命令
 
@@ -121,11 +122,11 @@ MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2
 `JACOBI_BLOCKING_ENTRY_PROBE=1`。
 
 硬件 debug 默认优先使用 `JACOBI_TRACE_LIGHT=1`。light trace 只接 dispatcher、
-ptr loader、vector loader、frame fork、coeff loader、8 路 pair compute、
-pack writer、X HBM writer 共 15 路关键 source，避免 full isotope 的 47 路
+ptr loader、vector loader、matrix loader0、frame fork、coeff loader、8 路 pair compute、
+pack writer、X HBM writer 共 16 个关键 stream，避免 full isotope 的 47 路
 DebugMonitor 在 HLS 阶段消耗过高。当前源码还会在 hardware run 的 `Finish()` 前按
 `JACOBI_PREFINISH_POLL_COUNT` / `JACOBI_PREFINISH_POLL_INTERVAL_MS` 周期同步
-Debug BO；已同步的 `20260614-demo` xclbin 已是 15 路 light trace。
+Debug BO；已同步的 `20260614-demo` xclbin 已是 light trace full graph debug 版。
 
 mmap-only micro probe：
 

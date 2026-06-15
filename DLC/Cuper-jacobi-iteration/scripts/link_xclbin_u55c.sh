@@ -11,6 +11,7 @@ TOP="${JACOBI_TOP:-CuperJacobiIteration}"
 INPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
 OUTPUT_XCLBIN="${2:-$BUILD_DIR/$TOP.xclbin}"
 CONNECTIVITY_CFG="$ROOT_DIR/cfg/connectivity.cfg"
+JACOBI_DEBUG_GRAPH=0
 
 if [[ ! -f "$INPUT_XO" ]]; then
   echo "Missing XO: $INPUT_XO" >&2
@@ -38,6 +39,7 @@ if [[ "$TOP" == "CuperJacobiMmapProbeOnly" ]]; then
 elif { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]] ||
        [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]] ||
        [[ "${JACOBI_TRACE_LIGHT:-0}" != "0" && "${JACOBI_TRACE_LIGHT:-}" != "" ]]; }; then
+  JACOBI_DEBUG_GRAPH=1
   CONNECTIVITY_CFG="$BUILD_DIR/connectivity_trace_debug.cfg"
   awk '
     /^sp=CuperJacobiIteration_1.Metrics:/ {
@@ -55,10 +57,20 @@ elif { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" !
   } >> "$CONNECTIVITY_CFG"
 fi
 
+VPP_FREQ_ARGS=()
+if [[ "$TOP" == "CuperJacobiIteration" && "$JACOBI_DEBUG_GRAPH" == "1" ]]; then
+  JACOBI_KERNEL_FREQUENCY="${JACOBI_KERNEL_FREQUENCY:-150}"
+  # v++ 2022.2 这里用 MHz。先用全 kernel 频率降压，目标是拿到 timing 更可信的
+  # full graph debug xclbin；性能版可通过 JACOBI_KERNEL_FREQUENCY 覆盖。
+  VPP_FREQ_ARGS+=(--kernel_frequency "$JACOBI_KERNEL_FREQUENCY")
+  echo "Jacobi debug link frequency: ${JACOBI_KERNEL_FREQUENCY} MHz"
+fi
+
 cmd=(
   v++ --link
   --target hw
   --platform "$XPLATFORM"
+  "${VPP_FREQ_ARGS[@]}"
   --config "$CONNECTIVITY_CFG"
   --temp_dir "$BUILD_DIR/vpp_tmp"
   --log_dir "$BUILD_DIR/logs"

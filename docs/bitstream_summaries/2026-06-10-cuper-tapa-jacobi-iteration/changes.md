@@ -131,6 +131,12 @@
   `ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
   `ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。它覆盖同名
   7 路 light-trace demo 槽，但仍不是标准 bitstream，尚未上板 smoke。
+- 2026-06-15 随后按同一 light-trace ABI 重新构建 timing-clean 版本，默认把 TAPA
+  `CLOCK_PERIOD` 调到 `4.0`，link 侧把 DATA clock 请求降到 `150 MHz`。新的
+  `20260614-demo` UUID 为 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
+  `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。routed timing
+  已收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`。它覆盖
+  上一条 164 MHz timing-fail demo 槽，但仍不是标准 bitstream，尚未上板 smoke。
 
 ## 当前没有做
 
@@ -138,9 +144,8 @@
   native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
-- 当前完整 `CuperJacobiIteration` 15 路 light-trace full graph 已生成硬件 bitstream，但
-  routed timing 仍未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，setup failing
-  endpoints `101497`。它还没有完成板上 smoke，不能作为可正常返回的硬件结论。
+- 当前完整 `CuperJacobiIteration` light-trace full graph 已生成 150 MHz timing-clean
+  硬件 bitstream，但还没有完成板上 smoke，不能作为可正常返回的硬件结论。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -155,7 +160,7 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前同步的 2026-06-14 demo 是完整 Jacobi graph 15 路 light-trace debug 版，但 timing 未收敛且尚未板测，
+- 当前同步的 2026-06-14 demo 是完整 Jacobi graph light-trace debug 版，timing 已收敛但尚未板测，
   不能作为 Jacobi 硬件功能或性能结论。上一版 mmap-only native XRT runner 已证明
   Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
   `Finish()` 收尾问题和 timing closure。

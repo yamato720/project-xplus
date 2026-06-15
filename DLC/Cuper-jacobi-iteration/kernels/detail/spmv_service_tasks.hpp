@@ -65,9 +65,30 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
         // SpElement_list_ptr 长度是 Batch_num + 1，Core 用相邻两个边界确定
         // 每个 column batch 需要消费的 Matrix_data beat 范围。
         const INDEX_TYPE batch_num_plus_1 = Batch_num + 1;
-        Cuper_ReadSpElementPtrPackets(batch_num_plus_1,
-                                      SpElement_list_ptr,
-                                      PE_Param);
+    read_sp_element_ptr_packets:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < batch_num_plus_1;) {
+#pragma HLS loop_tripcount min=1 max=800
+#pragma HLS pipeline II=1
+            if ((i_request < batch_num_plus_1) && !SpElement_list_ptr.read_addr.full()) {
+                SpElement_list_ptr.read_addr.try_write(i_request);
+#ifdef JACOBI_TRACE_ENABLED
+                if (i_request == 0) {
+                    Jacobi_DebugTryWrite(Debug_Event_out,
+                                         kJacobiDebugSourcePtrLoader,
+                                         kJacobiDebugPhaseReadIssue,
+                                         0,
+                                         batch_num_plus_1);
+                }
+#endif
+                ++i_request;
+            }
+            if (!PE_Param.full() && !SpElement_list_ptr.read_data.empty()) {
+                INDEX_TYPE ptr_word = 0;
+                SpElement_list_ptr.read_data.try_read(ptr_word);
+                PE_Param.try_write(ptr_word);
+                ++i_response;
+            }
+        }
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePtrLoader,
@@ -87,45 +108,72 @@ void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
                               tapa::ostream<ap_uint<512>> &Matrix_A_Stream
                               ,
                               const INDEX_TYPE Debug_channel
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
                               ,
                               tapa::ostream<JacobiDebugEvent> &Debug_Event_out
 #endif
                               ) {
-#ifdef JACOBI_TRACE_FULL
+#ifdef JACOBI_TRACE_ENABLED
     const INDEX_TYPE Debug_source = kJacobiDebugSourceMatrixLoaderBase + Debug_channel;
 #endif
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
-#ifdef JACOBI_TRACE_FULL
-            Jacobi_DebugTryWrite(Debug_Event_out,
-                                 Debug_source,
-                                 kJacobiDebugPhaseStop,
-                                 0,
-                                 Matrix_len);
+#ifdef JACOBI_TRACE_ENABLED
+            if (Debug_channel == 0) {
+                Jacobi_DebugTryWrite(Debug_Event_out,
+                                     Debug_source,
+                                     kJacobiDebugPhaseStop,
+                                     0,
+                                     Matrix_len);
+            }
 #endif
             return;
         }
 
-#ifdef JACOBI_TRACE_FULL
-        Jacobi_DebugTryWrite(Debug_Event_out,
-                             Debug_source,
-                             kJacobiDebugPhaseRecv,
-                             0,
-                             Matrix_len);
+#ifdef JACOBI_TRACE_ENABLED
+        if (Debug_channel == 0) {
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 Debug_source,
+                                 kJacobiDebugPhaseRecv,
+                                 0,
+                                 Matrix_len);
+        }
 #endif
         // Matrix_data 的布局仍沿用 Cuper：一个 512-bit beat 内含 8 个 64-bit SpElement slot。
-        Cuper_ReadMatrixPackets(Matrix_len,
-                                Matrix_data,
-                                Matrix_A_Stream);
-#ifdef JACOBI_TRACE_FULL
-        Jacobi_DebugTryWrite(Debug_Event_out,
-                             Debug_source,
-                             kJacobiDebugPhaseDoneRound,
-                             0,
-                             Matrix_len);
+    read_matrix_packets:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < Matrix_len;) {
+#pragma HLS loop_tripcount min = 1 max = 200000
+#pragma HLS pipeline II = 1
+            if ((i_request < Matrix_len) && !Matrix_data.read_addr.full()) {
+                Matrix_data.read_addr.try_write(i_request);
+                ++i_request;
+            }
+            if (!Matrix_A_Stream.full() && !Matrix_data.read_data.empty()) {
+                ap_uint<512> word;
+                Matrix_data.read_data.try_read(word);
+                Matrix_A_Stream.try_write(word);
+                ++i_response;
+#ifdef JACOBI_TRACE_ENABLED
+                if (Debug_channel == 0 && (i_response == 1 || i_response == Matrix_len)) {
+                    Jacobi_DebugTryWrite(Debug_Event_out,
+                                         Debug_source,
+                                         kJacobiDebugPhaseReadResp,
+                                         0,
+                                         i_response);
+                }
+#endif
+            }
+        }
+#ifdef JACOBI_TRACE_ENABLED
+        if (Debug_channel == 0) {
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 Debug_source,
+                                 kJacobiDebugPhaseDoneRound,
+                                 0,
+                                 Matrix_len);
+        }
 #endif
     }
 }

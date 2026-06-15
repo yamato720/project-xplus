@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | full graph light-trace debug demo，已生成并同步，timing 未收敛，待上板 smoke，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | full graph light-trace debug demo，已生成并同步，150 MHz timing-clean，待上板 smoke，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -53,12 +53,12 @@ cuper-tapa-jacobi-u55c-20260614-demo.xclbin
 
 这版是 `CuperJacobiIteration` full graph light-trace 硬件 debug demo，接入完整 Jacobi
 dataflow、Cuper SpMV service 和 Jacobi update，并通过 `JACOBI_TRACE_LIGHT=1` 增加
-15 路关键进度 trace，额外覆盖 8 路 `pair_compute[0..7]`。它覆盖同主线 Jacobi demo
+16 路关键进度 trace，额外覆盖 matrix loader0 首拍和 8 路 `pair_compute[0..7]`。它覆盖同主线 Jacobi demo
 槽，但不替换任何标准文件；当前
 `cuper-tapa-jacobi` 仍然没有标准 bitstream。demo xclbin UUID 为
-`ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
-`ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。
-最终 xclbin info 中 DATA clock 为 164 MHz，KERNEL clock 为 500 MHz，
+`3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
+`4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。
+最终 xclbin info 中 DATA clock 为 150 MHz，KERNEL clock 为 500 MHz，
 HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建日志为
 `cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。
 
@@ -66,9 +66,14 @@ HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建
 `Matrix_data_1..15` 映射到 HBM[1..15]，`B` 在 HBM[20]，`Diag_inv` 在 HBM[21]，
 `X` 在 HBM[22]，`Status` 在 HBM[24]，`Metrics` 在 HBM[25]，`Debug` 在 HBM[26]。
 VPL implementation 和 `.xclbin` 封装都已完成，`Run completed`，v++ link 总耗时
-`3h 52m 35s`。routed timing 仍未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，
-setup failing endpoints `101497`，主要失败时钟域为 `clk_kernel_00_unbuffered_net`；
-hold worst slack `0.008 ns`。这版尚未完成上板 smoke。
+`3h 52m 13s`。routed timing 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，
+setup failing endpoints `0`，hold worst slack `0.009 ns`。这版尚未完成上板 smoke。
+
+它覆盖的上一版同名 `20260614` 15 路 light-trace full graph demo UUID 为
+`ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
+`ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。上一版 DATA clock
+为 164 MHz，routed timing 未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，
+setup failing endpoints `101497`。该失败风险只对应旧 UUID。
 
 它覆盖的上一版同名 `20260614` 7 路 light-trace full graph demo UUID 为
 `6dfaf1e3-9707-7f46-b914-1f59ca240993`，SHA256 为
