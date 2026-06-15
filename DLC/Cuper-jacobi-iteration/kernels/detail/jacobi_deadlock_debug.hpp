@@ -16,15 +16,14 @@
 
 static constexpr INDEX_TYPE kJacobiDebugBufferWords = 256;
 
-static constexpr INDEX_TYPE kJacobiDebugStreamDispatcher = 0;
+static constexpr INDEX_TYPE kJacobiDebugStreamController = 0;
 static constexpr INDEX_TYPE kJacobiDebugStreamPtrLoader = 1;
 static constexpr INDEX_TYPE kJacobiDebugStreamVectorLoader = 2;
 static constexpr INDEX_TYPE kJacobiDebugStreamMatrixLoaderBase = 3;
 static constexpr INDEX_TYPE kJacobiDebugStreamAccumulatorBase =
     kJacobiDebugStreamMatrixLoaderBase + HBM_CHANNEL_NUM;
-static constexpr INDEX_TYPE kJacobiDebugStreamFrameFork =
+static constexpr INDEX_TYPE kJacobiDebugStreamCoeffLoader =
     kJacobiDebugStreamAccumulatorBase + HBM_CHANNEL_NUM;
-static constexpr INDEX_TYPE kJacobiDebugStreamCoeffLoader = kJacobiDebugStreamFrameFork + 1;
 static constexpr INDEX_TYPE kJacobiDebugPairStreamCount = 8;
 static constexpr INDEX_TYPE kJacobiDebugStreamPairBase = kJacobiDebugStreamCoeffLoader + 1;
 static constexpr INDEX_TYPE kJacobiDebugStreamPackWriter =
@@ -32,13 +31,11 @@ static constexpr INDEX_TYPE kJacobiDebugStreamPackWriter =
 static constexpr INDEX_TYPE kJacobiDebugStreamHbmWriter = kJacobiDebugStreamPackWriter + 1;
 static constexpr INDEX_TYPE kJacobiDebugFullStreamCount = kJacobiDebugStreamHbmWriter + 1;
 
-static constexpr INDEX_TYPE kJacobiDebugLightStreamDispatcher = 0;
+static constexpr INDEX_TYPE kJacobiDebugLightStreamController = 0;
 static constexpr INDEX_TYPE kJacobiDebugLightStreamPtrLoader = 1;
 static constexpr INDEX_TYPE kJacobiDebugLightStreamVectorLoader = 2;
-static constexpr INDEX_TYPE kJacobiDebugLightStreamMatrixLoader0 = 3;
-static constexpr INDEX_TYPE kJacobiDebugLightStreamFrameFork = 4;
-static constexpr INDEX_TYPE kJacobiDebugLightStreamCoeffLoader = 5;
-static constexpr INDEX_TYPE kJacobiDebugLightStreamPairBase = 6;
+static constexpr INDEX_TYPE kJacobiDebugLightStreamCoeffLoader = 3;
+static constexpr INDEX_TYPE kJacobiDebugLightStreamPairBase = 4;
 static constexpr INDEX_TYPE kJacobiDebugLightStreamPackWriter =
     kJacobiDebugLightStreamPairBase + kJacobiDebugPairStreamCount;
 static constexpr INDEX_TYPE kJacobiDebugLightStreamHbmWriter = kJacobiDebugLightStreamPackWriter + 1;
@@ -49,15 +46,14 @@ static constexpr INDEX_TYPE kJacobiDebugStreamCount = kJacobiDebugFullStreamCoun
 static constexpr INDEX_TYPE kJacobiDebugStreamCount = kJacobiDebugLightStreamHbmWriter + 1;
 #endif
 
-static constexpr INDEX_TYPE kJacobiDebugSourceDispatcher = 1;
+static constexpr INDEX_TYPE kJacobiDebugSourceController = 1;
 static constexpr INDEX_TYPE kJacobiDebugSourcePtrLoader = 2;
 static constexpr INDEX_TYPE kJacobiDebugSourceVectorLoader = 3;
 static constexpr INDEX_TYPE kJacobiDebugSourceMatrixLoaderBase = 4;
 static constexpr INDEX_TYPE kJacobiDebugSourceAccumulatorBase =
     kJacobiDebugSourceMatrixLoaderBase + HBM_CHANNEL_NUM;
-static constexpr INDEX_TYPE kJacobiDebugSourceFrameFork =
+static constexpr INDEX_TYPE kJacobiDebugSourceCoeffLoader =
     kJacobiDebugSourceAccumulatorBase + HBM_CHANNEL_NUM;
-static constexpr INDEX_TYPE kJacobiDebugSourceCoeffLoader = kJacobiDebugSourceFrameFork + 1;
 static constexpr INDEX_TYPE kJacobiDebugSourcePairBase = kJacobiDebugSourceCoeffLoader + 1;
 static constexpr INDEX_TYPE kJacobiDebugSourcePackWriter =
     kJacobiDebugSourcePairBase + kJacobiDebugPairStreamCount;
@@ -78,7 +74,7 @@ static constexpr INDEX_TYPE kJacobiDebugPhaseFrame = 12;
 static constexpr INDEX_TYPE kJacobiDebugPhaseStop = 255;
 
 static constexpr INDEX_TYPE kJacobiDebugStopDrainCycles = 8192;
-static constexpr INDEX_TYPE kJacobiDebugHeartbeatMask = 0x3fff;
+static constexpr INDEX_TYPE kJacobiDebugHeartbeatMask = 0x3ffff;
 static constexpr INDEX_TYPE kJacobiDebugPerSourceBase = 64;
 static constexpr INDEX_TYPE kJacobiDebugPerSourceStride = 4;
 
@@ -89,21 +85,6 @@ static constexpr INDEX_TYPE kJacobiDebugProbeSlotMagic = 48;
 static constexpr INDEX_TYPE kJacobiDebugProbeSlotStreamCount = 49;
 static constexpr INDEX_TYPE kJacobiDebugProbeSlotPhase = 50;
 static constexpr INDEX_TYPE kJacobiDebugProbeSlotStopDrain = 51;
-
-// Debug[52..63] 是 pre-Finish 固定观测槽。它们不依赖最终 Status/Metrics 写回；
-// host 周期性 sync Debug BO 时可以用这些槽位判断 full graph 至少推进到了哪一步。
-static constexpr INDEX_TYPE kJacobiDebugFixedDispatcherFirstToken = 52;
-static constexpr INDEX_TYPE kJacobiDebugFixedMatrixPrefetchIssued = 53;
-static constexpr INDEX_TYPE kJacobiDebugFixedPtrLoaderFirstCommand = 54;
-static constexpr INDEX_TYPE kJacobiDebugFixedPtrLoaderFirstRead = 55;
-static constexpr INDEX_TYPE kJacobiDebugFixedVectorLoaderFirstCommand = 56;
-static constexpr INDEX_TYPE kJacobiDebugFixedMatrixLoader0FirstCommand = 57;
-static constexpr INDEX_TYPE kJacobiDebugFixedMatrixLoader0FirstBeat = 58;
-static constexpr INDEX_TYPE kJacobiDebugFixedMonitorHeartbeat = 59;
-static constexpr INDEX_TYPE kJacobiDebugFixedMonitorWriteIssue = 60;
-static constexpr INDEX_TYPE kJacobiDebugFixedMonitorWriteResp = 61;
-static constexpr INDEX_TYPE kJacobiDebugFixedMonitorStop = 62;
-static constexpr INDEX_TYPE kJacobiDebugFixedMonitorStreamCount = 63;
 
 struct JacobiDebugEvent {
     INDEX_TYPE source;
@@ -138,40 +119,6 @@ inline void Jacobi_DebugTryWrite(tapa::ostream<JacobiDebugEvent> &Debug_Event_ou
     Debug_Event_out.try_write(event);
 }
 
-inline INDEX_TYPE Jacobi_DebugFixedSlot(const JacobiDebugEvent &event) {
-#pragma HLS inline
-    if (event.source == kJacobiDebugSourceDispatcher &&
-        event.phase == kJacobiDebugPhaseRecv) {
-        return kJacobiDebugFixedDispatcherFirstToken;
-    }
-    if (event.source == kJacobiDebugSourceDispatcher &&
-        event.phase == kJacobiDebugPhaseSend &&
-        (event.lane == 10 || event.lane == 11)) {
-        return kJacobiDebugFixedMatrixPrefetchIssued;
-    }
-    if (event.source == kJacobiDebugSourcePtrLoader &&
-        event.phase == kJacobiDebugPhaseRecv) {
-        return kJacobiDebugFixedPtrLoaderFirstCommand;
-    }
-    if (event.source == kJacobiDebugSourcePtrLoader &&
-        event.phase == kJacobiDebugPhaseReadIssue) {
-        return kJacobiDebugFixedPtrLoaderFirstRead;
-    }
-    if (event.source == kJacobiDebugSourceVectorLoader &&
-        event.phase == kJacobiDebugPhaseRecv) {
-        return kJacobiDebugFixedVectorLoaderFirstCommand;
-    }
-    if (event.source == kJacobiDebugSourceMatrixLoaderBase &&
-        event.phase == kJacobiDebugPhaseRecv) {
-        return kJacobiDebugFixedMatrixLoader0FirstCommand;
-    }
-    if (event.source == kJacobiDebugSourceMatrixLoaderBase &&
-        event.phase == kJacobiDebugPhaseReadResp) {
-        return kJacobiDebugFixedMatrixLoader0FirstBeat;
-    }
-    return -1;
-}
-
 inline void Jacobi_DebugWriteBlocking(tapa::async_mmap<INDEX_TYPE> &Debug,
                                       const INDEX_TYPE addr,
                                       const INDEX_TYPE value) {
@@ -187,12 +134,11 @@ wait_debug_write_resp:
 
 #ifdef JACOBI_TRACE_FULL
 inline bool Jacobi_DebugTryReadStreamByIndex(
-    tapa::istream<JacobiDebugEvent> &Debug_Dispatcher_in,
+    tapa::istream<JacobiDebugEvent> &Debug_Controller_in,
     tapa::istream<JacobiDebugEvent> &Debug_PtrLoader_in,
     tapa::istream<JacobiDebugEvent> &Debug_VectorLoader_in,
     tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_MatrixLoader_in,
     tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_Accumulator_in,
-    tapa::istream<JacobiDebugEvent> &Debug_FrameFork_in,
     tapa::istream<JacobiDebugEvent> &Debug_CoeffLoader_in,
     tapa::istreams<JacobiDebugEvent, kJacobiDebugPairStreamCount> &Debug_Pair_in,
     tapa::istream<JacobiDebugEvent> &Debug_PackWriter_in,
@@ -203,8 +149,8 @@ inline bool Jacobi_DebugTryReadStreamByIndex(
     // 轻量轮询：每拍只访问一个 trace 输入。这样仍能覆盖全部 source，
     // 但避免 HLS 为 47 路输入综合一个巨大的动态扫描/优先级网络。
     switch (stream_index) {
-        case kJacobiDebugStreamDispatcher:
-            return Debug_Dispatcher_in.try_read(event);
+        case kJacobiDebugStreamController:
+            return Debug_Controller_in.try_read(event);
         case kJacobiDebugStreamPtrLoader:
             return Debug_PtrLoader_in.try_read(event);
         case kJacobiDebugStreamVectorLoader:
@@ -273,8 +219,6 @@ inline bool Jacobi_DebugTryReadStreamByIndex(
             return Debug_Accumulator_in[14].try_read(event);
         case kJacobiDebugStreamAccumulatorBase + 15:
             return Debug_Accumulator_in[15].try_read(event);
-        case kJacobiDebugStreamFrameFork:
-            return Debug_FrameFork_in.try_read(event);
         case kJacobiDebugStreamCoeffLoader:
             return Debug_CoeffLoader_in.try_read(event);
         case kJacobiDebugStreamPairBase + 0:
@@ -303,11 +247,9 @@ inline bool Jacobi_DebugTryReadStreamByIndex(
 }
 #else
 inline bool Jacobi_DebugTryReadStreamByIndex(
-    tapa::istream<JacobiDebugEvent> &Debug_Dispatcher_in,
+    tapa::istream<JacobiDebugEvent> &Debug_Controller_in,
     tapa::istream<JacobiDebugEvent> &Debug_PtrLoader_in,
     tapa::istream<JacobiDebugEvent> &Debug_VectorLoader_in,
-    tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_MatrixLoader_in,
-    tapa::istream<JacobiDebugEvent> &Debug_FrameFork_in,
     tapa::istream<JacobiDebugEvent> &Debug_CoeffLoader_in,
     tapa::istreams<JacobiDebugEvent, kJacobiDebugPairStreamCount> &Debug_Pair_in,
     tapa::istream<JacobiDebugEvent> &Debug_PackWriter_in,
@@ -317,16 +259,12 @@ inline bool Jacobi_DebugTryReadStreamByIndex(
 #pragma HLS inline
     // 硬件 light trace 只保留关键控制/写回路径，避免 full isotope 的 47 路输入端口。
     switch (stream_index) {
-        case kJacobiDebugLightStreamDispatcher:
-            return Debug_Dispatcher_in.try_read(event);
+        case kJacobiDebugLightStreamController:
+            return Debug_Controller_in.try_read(event);
         case kJacobiDebugLightStreamPtrLoader:
             return Debug_PtrLoader_in.try_read(event);
         case kJacobiDebugLightStreamVectorLoader:
             return Debug_VectorLoader_in.try_read(event);
-        case kJacobiDebugLightStreamMatrixLoader0:
-            return Debug_MatrixLoader_in[0].try_read(event);
-        case kJacobiDebugLightStreamFrameFork:
-            return Debug_FrameFork_in.try_read(event);
         case kJacobiDebugLightStreamCoeffLoader:
             return Debug_CoeffLoader_in.try_read(event);
         case kJacobiDebugLightStreamPairBase + 0:
@@ -356,14 +294,13 @@ inline bool Jacobi_DebugTryReadStreamByIndex(
 #endif
 
 void Jacobi_DebugMonitor(
-    tapa::istream<JacobiDebugEvent> &Debug_Dispatcher_in,
+    tapa::istream<JacobiDebugEvent> &Debug_Controller_in,
     tapa::istream<JacobiDebugEvent> &Debug_PtrLoader_in,
     tapa::istream<JacobiDebugEvent> &Debug_VectorLoader_in,
-    tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_MatrixLoader_in,
 #ifdef JACOBI_TRACE_FULL
+    tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_MatrixLoader_in,
     tapa::istreams<JacobiDebugEvent, HBM_CHANNEL_NUM> &Debug_Accumulator_in,
 #endif
-    tapa::istream<JacobiDebugEvent> &Debug_FrameFork_in,
     tapa::istream<JacobiDebugEvent> &Debug_CoeffLoader_in,
     tapa::istreams<JacobiDebugEvent, kJacobiDebugPairStreamCount> &Debug_Pair_in,
     tapa::istream<JacobiDebugEvent> &Debug_PackWriter_in,
@@ -400,7 +337,7 @@ void Jacobi_DebugMonitor(
     INDEX_TYPE pending_data[12];
 #pragma HLS array_partition variable=pending_addr complete
 #pragma HLS array_partition variable=pending_data complete
-    INDEX_TYPE pending_count = 12;
+    INDEX_TYPE pending_count = 5;
     INDEX_TYPE pending_index = 0;
     pending_addr[0] = 0;
     pending_data[0] = kJacobiDebugProbeMagic;
@@ -412,20 +349,6 @@ void Jacobi_DebugMonitor(
     pending_data[3] = kJacobiDebugPhaseEnterRound;
     pending_addr[4] = kJacobiDebugProbeSlotStopDrain;
     pending_data[4] = kJacobiDebugStopDrainCycles;
-    pending_addr[5] = kJacobiDebugFixedMonitorHeartbeat;
-    pending_data[5] = heartbeat;
-    pending_addr[6] = kJacobiDebugFixedMonitorWriteIssue;
-    pending_data[6] = write_issue_count;
-    pending_addr[7] = kJacobiDebugFixedMonitorWriteResp;
-    pending_data[7] = write_response_count;
-    pending_addr[8] = kJacobiDebugFixedMonitorStop;
-    pending_data[8] = 0;
-    pending_addr[9] = kJacobiDebugFixedMonitorStreamCount;
-    pending_data[9] = kJacobiDebugStreamCount;
-    pending_addr[10] = 4;
-    pending_data[10] = kJacobiDebugProbeMagic;
-    pending_addr[11] = 15;
-    pending_data[11] = kJacobiDebugPhaseEnterRound;
 
 debug_monitor_loop:
     for (;;) {
@@ -479,25 +402,16 @@ debug_monitor_loop:
                 pending_data[2] = write_response_count;
                 pending_addr[3] = 7;
                 pending_data[3] = stop_seen ? 1 : 0;
-                pending_addr[4] = kJacobiDebugFixedMonitorHeartbeat;
-                pending_data[4] = heartbeat;
-                pending_addr[5] = kJacobiDebugFixedMonitorWriteIssue;
-                pending_data[5] = write_issue_count;
-                pending_addr[6] = kJacobiDebugFixedMonitorWriteResp;
-                pending_data[6] = write_response_count;
-                pending_addr[7] = kJacobiDebugFixedMonitorStop;
-                pending_data[7] = stop_seen ? 1 : 0;
-                pending_count = 8;
+                pending_count = 4;
             } else {
                 JacobiDebugEvent event;
                 const INDEX_TYPE current_poll_index = poll_index;
 #ifdef JACOBI_TRACE_FULL
-                bool has_event = Jacobi_DebugTryReadStreamByIndex(Debug_Dispatcher_in,
+                bool has_event = Jacobi_DebugTryReadStreamByIndex(Debug_Controller_in,
                                                                   Debug_PtrLoader_in,
                                                                   Debug_VectorLoader_in,
                                                                   Debug_MatrixLoader_in,
                                                                   Debug_Accumulator_in,
-                                                                  Debug_FrameFork_in,
                                                                   Debug_CoeffLoader_in,
                                                                   Debug_Pair_in,
                                                                   Debug_PackWriter_in,
@@ -505,11 +419,9 @@ debug_monitor_loop:
                                                                   current_poll_index,
                                                                   event);
 #else
-                bool has_event = Jacobi_DebugTryReadStreamByIndex(Debug_Dispatcher_in,
+                bool has_event = Jacobi_DebugTryReadStreamByIndex(Debug_Controller_in,
                                                                   Debug_PtrLoader_in,
                                                                   Debug_VectorLoader_in,
-                                                                  Debug_MatrixLoader_in,
-                                                                  Debug_FrameFork_in,
                                                                   Debug_CoeffLoader_in,
                                                                   Debug_Pair_in,
                                                                   Debug_PackWriter_in,
@@ -541,14 +453,7 @@ debug_monitor_loop:
                     pending_data[6] = event.value;
                     pending_addr[7] = source_slot + 3;
                     pending_data[7] = event_count;
-                    const INDEX_TYPE fixed_slot = Jacobi_DebugFixedSlot(event);
-                    if (fixed_slot >= 0) {
-                        pending_addr[8] = fixed_slot;
-                        pending_data[8] = Jacobi_DebugPackEvent(event);
-                        pending_count = 9;
-                    } else {
-                        pending_count = 8;
-                    }
+                    pending_count = 8;
                 }
             }
         }

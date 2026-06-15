@@ -137,6 +137,23 @@
   `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。routed timing
   已收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`。它覆盖
   上一条 164 MHz timing-fail demo 槽，但仍不是标准 bitstream，尚未上板 smoke。
+- 2026-06-15 根据前一版 timing-clean 但 `thermal2_n16 MAX_ITERS=1` 仍卡 `Finish()`
+  的结果，删除旧 `RoundToken`/`FeedbackToken` 自循环和 `UpdateFrameFork` 控制路径，
+  改成 `Jacobi_MasterController` 显式推进每轮 command/ack：controller 每轮发
+  matrix loader、SpMV compute、update command，等待 `Jacobi_XHbmWriter` 的
+  `JacobiUpdateDone` 后进入下一轮，最后统一广播 stop 并写 Status/Metrics。
+- 已验证 master-controller 版的 host 构建和 software/TAPA simulation：trace ABI
+  `thermal2_n16`、`thermal2_n1024`、`thermal2_n65536` 的 `MAX_ITERS=1` 均
+  `Error Num=0`；no-trace `thermal2_n16 MAX_ITERS=1` 也 `Error Num=0`。
+- 2026-06-15 已用 `JACOBI_TRACE_LIGHT=1 FORCE=1 make cuper-jacobi-hw-tmux` 生成并
+  同步 master-controller light-trace full graph demo：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin`。UUID 为
+  `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720`，SHA256 为
+  `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7`。DATA/KERNEL/HBM
+  clock 为 `150/500/450 MHz`，routed timing 已收敛：WNS `0.003 ns`，TNS
+  `0.000 ns`，setup failing endpoints `0`，hold worst slack `0.009 ns`。v++ link
+  总耗时 `3h 27m 40s`。它覆盖上一条 `20260614-demo` timing-clean 旧控制流 demo 槽，
+  但仍不是标准 bitstream，尚未上板 smoke。
 
 ## 当前没有做
 
@@ -144,8 +161,9 @@
   native XRT 上板 smoke。`ROW_NUM=16` / `ROW_NUM=1024` 均为 `rc=0`、
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
-- 当前完整 `CuperJacobiIteration` light-trace full graph 已生成 150 MHz timing-clean
-  硬件 bitstream，但还没有完成板上 smoke，不能作为可正常返回的硬件结论。
+- 当前完整 `CuperJacobiIteration` master-controller light-trace full graph 已生成
+  150 MHz timing-clean 硬件 bitstream，但还没有完成板上 smoke，不能作为可正常返回的
+  硬件结论。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
@@ -160,8 +178,9 @@
   如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
-- 当前同步的 2026-06-14 demo 是完整 Jacobi graph light-trace debug 版，timing 已收敛但尚未板测，
-  不能作为 Jacobi 硬件功能或性能结论。上一版 mmap-only native XRT runner 已证明
+- 当前同步的 2026-06-15 demo 是完整 Jacobi graph master-controller light-trace debug
+  版，timing 已收敛但尚未板测，不能作为 Jacobi 硬件功能或性能结论。上一版
+  mmap-only native XRT runner 已证明
   Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
   `Finish()` 收尾问题和 timing closure。
 - 2026-06-13 mmap-only probe 通过后，完整 graph debug 改成默认非阻塞：

@@ -10,8 +10,8 @@ DLC/Cuper-jacobi-iteration/
 `Makefile` 的 `cuper-jacobi-*` 目标。`CuperJacobiMmapProbeOnly` split-bank
 mmap-only debug xclbin 已通过 native XRT 上板 smoke，用于排除基本 kernel launch、
 split-bank m_axi 写回和 BO sync 边界；当前同步 demo 是 `JACOBI_TRACE_LIGHT=1`
-的完整 `CuperJacobiIteration` full graph debug 版。新版把 DATA clock 降到 150 MHz，
-routed timing 已收敛，但尚未完成上板 smoke。
+的完整 `CuperJacobiIteration` master-controller full graph debug 版。新版把 DATA
+clock 降到 150 MHz，routed timing 已收敛，但尚未完成上板 smoke。
 
 ## 版本定位
 
@@ -21,8 +21,8 @@ routed timing 已收敛，但尚未完成上板 smoke。
 | 顶层 kernel | `CuperJacobiIteration` |
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
-| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；当前同步的是 150 MHz timing-clean light-trace full graph，待上板 smoke |
+| 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
+| 版本状态 | software/TAPA simulation 通过；当前同步的是 150 MHz timing-clean master-controller light-trace full graph，待上板 smoke |
 | 是否建议晋级标准 | 暂不建议，当前还未完成硬件 smoke |
 
 这条主线做普通 Jacobi iteration：
@@ -43,8 +43,10 @@ $$
 x_i^{(k+1)} = (b_i + (-R x^{(k)})_i)\mathrm{diag\_inv}_i
 $$
 
-写回端在整轮 SpMV/update 完成后才反馈下一轮 token，因此当前实现用单个 `X` buffer
-原地更新；`Status[1]` 固定为 `0`，表示最终结果在 `X`。
+当前实现用单个 `X` buffer 原地更新；`Status[1]` 固定为 `0`，表示最终结果在 `X`。
+轮次推进由 `Jacobi_MasterController` 统一控制：每轮显式发矩阵 loader、SpMV compute
+和 update command，等待 `Jacobi_XHbmWriter` 回传 X 写回 done ack 后再进入下一轮；
+最终由 controller 统一广播 stop 并写 Status/Metrics。
 
 ## 当前 HBM/ABI
 
@@ -69,31 +71,34 @@ $$
 
 | 项目 | 内容 |
 | --- | --- |
-| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` |
-| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin.info` |
+| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
+| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin.info` |
 | 构建目录 | `cuper-jacobi-iteration-build/` |
 | Kernel | `CuperJacobiIteration` |
-| ABI | light-trace full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics/Debug` HBM[24]/HBM[25]/HBM[26] |
-| UUID | `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1` |
-| SHA256 | `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab` |
+| ABI | master-controller light-trace full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics/Debug` HBM[24]/HBM[25]/HBM[26] |
+| UUID | `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720` |
+| SHA256 | `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7` |
 | DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
 | 时序状态 | 已收敛，WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
 
 这个文件是当前 full graph debug demo artifact，不是标准 bitstream。Vitis link 已完成
-implementation 和 `.xclbin` 封装；v++ link 总耗时 `3h 52m 13s`。它覆盖了上一版
-同名 `20260614` 15 路 light-trace full graph demo，旧 UUID
+implementation 和 `.xclbin` 封装；v++ link 总耗时 `3h 27m 40s`。它覆盖了上一版
+`20260614` timing-clean light-trace full graph demo，旧 UUID
+`3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1` 的最小上板 `Finish()` timeout 结论只作为
+历史记录，不对应当前 master-controller 文件。再上一版同名 `20260614` 15 路
+light-trace full graph demo，旧 UUID
 `ef3b1102-90ec-551a-d1e9-55fb6c023da5` 的 164 MHz timing-fail 结论只作为历史记录。
 再上一版同名 `20260614` 7 路 light-trace full graph demo，旧 UUID
 `6dfaf1e3-9707-7f46-b914-1f59ca240993` 的上板结果只作为历史记录，不对应当前文件。
 再上一版 `20260613` no-debug full graph demo，旧 UUID
 `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7` 的构建结论只作为历史记录。
 
-已同步的 `20260614-demo` light trace 接入 16 个关键 stream，在保留较低 DebugMonitor
-压力的同时增加 matrix loader0 首拍固定槽和 8 路 pair compute 可见性：
+已同步的 `20260615-demo` light trace 接入 14 个关键 stream，跟随 master-controller
+控制流记录 controller、loader、update 和写回可见性：
 
 ```text
-dispatcher, ptr_loader, vector_loader, frame_fork,
-coeff_loader, pair_compute[0..7], pack_writer, x_hbm_writer
+controller, ptr_loader, vector_loader, coeff_loader,
+pair_compute[0..7], pack_writer, x_hbm_writer
 ```
 
 full isotope 47 路 trace 仍可通过 `JACOBI_TRACE_ISOTOPE=1` 打开，但它的

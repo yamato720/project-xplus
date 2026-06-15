@@ -92,22 +92,25 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
 
 | 项目 | 内容 |
 | --- | --- |
-| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260614-demo.xclbin` |
+| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
 | 构建目录 | `cuper-jacobi-iteration-build/` |
 | Kernel | `CuperJacobiIteration` |
-| ABI | light-trace full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics/Debug` HBM[24]/HBM[25]/HBM[26] |
-| UUID | `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1` |
-| SHA256 | `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab` |
+| ABI | master-controller light-trace full graph；`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics/Debug` HBM[24]/HBM[25]/HBM[26] |
+| UUID | `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720` |
+| SHA256 | `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7` |
 | DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
 | 时序状态 | 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`；hold worst slack `0.009 ns` |
 
 Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；构建总耗时
-`3h 52m 13s`，汇总日志在
+`3h 27m 40s`，汇总日志在
 `cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。这版已同步到 `395bitstream/`，
-覆盖上一版同名 `20260614` 15 路 light-trace full graph demo，但还没有完成板上
-smoke。上一版 15 路 demo UUID 为 `ef3b1102-90ec-551a-d1e9-55fb6c023da5`，DATA clock
-为 `164 MHz`，timing 未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`。再上一版
-7 路 demo UUID 为 `6dfaf1e3-9707-7f46-b914-1f59ca240993`，
+覆盖上一版 `20260614` timing-clean light-trace full graph demo，但还没有完成板上
+smoke。上一版 timing-clean demo UUID 为 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，
+仍使用旧 token/frame 自传播控制路径；它在最小 `thermal2_n16 MAX_ITERS=1` 上板仍卡
+`Finish()`，该结果只对应旧 UUID。再上一版 15 路 demo UUID 为
+`ef3b1102-90ec-551a-d1e9-55fb6c023da5`，DATA clock 为 `164 MHz`，timing 未收敛：
+WNS `-2.764 ns`，TNS `-70810.594 ns`。再上一版 7 路 demo UUID 为
+`6dfaf1e3-9707-7f46-b914-1f59ca240993`，
 其上板 `thermal2_n16` 和 `thermal2_n1024` 已通过、`thermal2_n65536` 仍卡
 `Finish()`；该结果只对应旧 UUID。再上一版 no-debug demo UUID 为
 `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7`，构建完成但未板测；mmap-only probe UUID 为
@@ -218,16 +221,15 @@ Debug[64 + source*4 + 3] source last event_count
 当前 source 编号覆盖：
 
 ```text
-1 dispatcher
+1 controller
 2 ptr_loader
 3 vector_loader
 4..19 matrix_loader[0..15]
 20..35 accumulator[0..15]
-36 frame_fork
-37 coeff_loader
-38..45 pair_compute[0..7]
-46 pack_writer
-47 x_hbm_writer
+36 coeff_loader
+37..44 pair_compute[0..7]
+45 pack_writer
+46 x_hbm_writer
 ```
 
 构建命令：
@@ -269,20 +271,17 @@ full isotope 版在硬件构建中代价过高：47 路 trace stream 会让 `Jac
 70GB RSS。当前硬件 debug 默认改用 `JACOBI_TRACE_LIGHT=1`。
 
 light trace 仍保留 Debug BO、pre-Finish dump 和 `Debug[48..51]` probe。当前已同步的
-`20260614-demo` xclbin 接 16 个 light trace stream，额外接入 matrix loader0 首拍和
-8 路 pair compute，用来定位 update 阶段是在等 matrix/pointer/vector、accumulator、
-coeff，还是 pack/writeback：
+`20260615-demo` xclbin 已切到 master-controller 控制流，接 14 个 light trace stream，
+用来定位 controller、ptr/vector loader、coeff、pair、pack/writeback 的最后进度：
 
 ```text
-1 dispatcher
+1 controller
 2 ptr_loader
 3 vector_loader
-4 matrix_loader0
-36 frame_fork
-37 coeff_loader
-38..45 pair_compute[0..7]
-46 pack_writer
-47 x_hbm_writer
+36 coeff_loader
+37..44 pair_compute[0..7]
+45 pack_writer
+46 x_hbm_writer
 ```
 
 已跑软件验证：
@@ -300,8 +299,8 @@ JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitespars
 | --- | --- | --- |
 | 7 路 light trace full graph software | `thermal2_n16 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; Debug[48..51]=`1245921841,7,1,8192` |
 | 7 路 light trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; 7 个关键 source 槽位均可见 |
-| 16 路 light trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; matrix loader0 首拍和 pair_compute[0..7] 槽位均可见 |
-| 16 路 light trace full graph software | `thermal2_n65536 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; matrix loader0、pair_compute[0..7]、pack_writer、x_hbm_writer 均进入 stop |
+| 14 路 master-controller light trace full graph software | `thermal2_n1024 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; controller、pair_compute[0..7]、pack_writer、x_hbm_writer 均进入 stop |
+| 14 路 master-controller light trace full graph software | `thermal2_n65536 MAX_ITERS=1` | `Status=1`, `Iterations=1`, `Error Num=0`; controller、pair_compute[0..7]、pack_writer、x_hbm_writer 均进入 stop |
 
 硬件构建命令：
 
@@ -309,8 +308,9 @@ JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitespars
 JACOBI_TRACE_ISOTOPE=0 JACOBI_TRACE_LIGHT=1 FORCE=1 make cuper-jacobi-hw-tmux
 ```
 
-该命令已生成并同步当前 `20260614-demo` xclbin；这只是 debug demo，尚未上板
-smoke。
+该命令已生成并同步当前 `20260615-demo` xclbin；这只是 debug demo，尚未上板
+smoke。当前源码已取消旧 `RoundToken`/`FeedbackToken` 和 `Jacobi_UpdateFrameFork`，
+改由 `Jacobi_MasterController` 直接发 command，并由 X HBM writer 回 done ack。
 
 ## 3.3 finite pair compute 源码验证
 

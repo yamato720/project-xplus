@@ -5,6 +5,8 @@
 // 两路 accumulator 输出，按 Cuper 原 checker 顺序丢弃 padding，然后立即完成两 lane 的
 // x_next = (b + (-R*x_old)) * diag_inv。写回拆成 pack FIFO 和 HBM writer 两段：
 // pack 端只负责按 HBM float_v16 宽度收包，HBM writer 独立写 X 并等待 write response。
+// 轮次开始/停止由 Jacobi_MasterController 直接广播 JacobiUpdateCommand，不再使用
+// 后端 frame fork 和 writer 自反馈 token。
 
 #include <tapa.h>
 
@@ -33,41 +35,7 @@ inline void Jacobi_SplitCoeffPair(const float_v16 &b,
     pair.diag_inv[1] = diag_inv[(lane_pair << 1) + 1];
 }
 
-void Jacobi_UpdateFrameFork(tapa::istream<JacobiFrame> &Frame_in,
-                            tapa::ostream<JacobiFrame> &Coeff_Frame_out,
-                            tapa::ostream<JacobiFrame> &Pack_Frame_out,
-                            tapa::ostream<JacobiFrame> &Hbm_Frame_out,
-                            tapa::ostreams<JacobiFrame, 8> &Pair_Frame_out
-#ifdef JACOBI_TRACE_ENABLED
-                            ,
-                            tapa::ostream<JacobiDebugEvent> &Debug_Event_out
-#endif
-                            ) {
-    for (;;) {
-#pragma HLS pipeline II=1
-        const JacobiFrame frame = Frame_in.read();
-#ifdef JACOBI_TRACE_ENABLED
-        Jacobi_DebugTryWrite(Debug_Event_out,
-                             kJacobiDebugSourceFrameFork,
-                             frame.stop != 0 ? kJacobiDebugPhaseStop : kJacobiDebugPhaseFrame,
-                             frame.iter,
-                             frame.packet_count);
-#endif
-        Coeff_Frame_out.write(frame);
-        Pack_Frame_out.write(frame);
-        Hbm_Frame_out.write(frame);
-    fork_pair_frames:
-        for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
-#pragma HLS unroll
-            Pair_Frame_out[lane_pair].write(frame);
-        }
-        if (frame.stop != 0) {
-            return;
-        }
-    }
-}
-
-void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
+void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiUpdateCommand> &Command_in,
                               tapa::ostreams<JacobiCoeffPair, 8> &Coeff_out,
                               tapa::async_mmap<float_v16> &B,
                               tapa::async_mmap<float_v16> &Diag_inv
@@ -78,13 +46,13 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                               ) {
     for (;;) {
 #pragma HLS loop_flatten off
-        const JacobiFrame frame = Frame_in.read();
-        if (frame.stop != 0) {
+        const JacobiUpdateCommand command = Command_in.read();
+        if (command.stop != 0) {
 #ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  kJacobiDebugSourceCoeffLoader,
                                  kJacobiDebugPhaseStop,
-                                 frame.iter,
+                                 command.iter,
                                  0);
 #endif
             return;
@@ -93,27 +61,27 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceCoeffLoader,
                              kJacobiDebugPhaseRecv,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
         INDEX_TYPE debug_wait_tick = 0;
 #endif
 
     load_coeff_packets:
-        for (INDEX_TYPE request = 0, response = 0; response < frame.packet_count;) {
+        for (INDEX_TYPE request = 0, response = 0; response < command.packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
-            if (request < frame.packet_count &&
+            if (request < command.packet_count &&
                 !B.read_addr.full() &&
                 !Diag_inv.read_addr.full()) {
                 B.read_addr.try_write(request);
                 Diag_inv.read_addr.try_write(request);
                 ++request;
 #ifdef JACOBI_TRACE_ENABLED
-                if ((request & 0x3ff) == 0 || request == frame.packet_count) {
+                if ((request & 0x3ff) == 0 || request == command.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceCoeffLoader,
                                          kJacobiDebugPhaseReadIssue,
-                                         frame.iter,
+                                         command.iter,
                                          request);
                 }
 #endif
@@ -146,11 +114,11 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
                 }
                 ++response;
 #ifdef JACOBI_TRACE_ENABLED
-                if ((response & 0x3ff) == 0 || response == frame.packet_count) {
+                if ((response & 0x3ff) == 0 || response == command.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceCoeffLoader,
                                          kJacobiDebugPhaseReadResp,
-                                         frame.iter,
+                                         command.iter,
                                          response);
                 }
 #endif
@@ -183,13 +151,13 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiFrame> &Frame_in,
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceCoeffLoader,
                              kJacobiDebugPhaseDoneRound,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
 #endif
     }
 }
 
-void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
                               tapa::istream<float_v2> &Neg_Rx_in_0,
                               tapa::istream<float_v2> &Neg_Rx_in_1,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
@@ -202,8 +170,8 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
                               ) {
     for (;;) {
 #pragma HLS loop_flatten off
-        const JacobiFrame frame = Frame_in.read();
-        if (frame.stop != 0) {
+        const JacobiUpdateCommand command = Command_in.read();
+        if (command.stop != 0) {
 #ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  Debug_source,
@@ -214,13 +182,13 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
             return;
         }
 
-        const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(frame.row_num);
-        const INDEX_TYPE num_out = frame.packet_count;
+        const INDEX_TYPE num_pe_output = spmv_service_num_checker_pe_outputs(command.row_num);
+        const INDEX_TYPE num_out = command.packet_count;
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
                              kJacobiDebugPhaseEnterRound,
-                             frame.iter,
+                             command.iter,
                              num_out);
         INDEX_TYPE debug_wait_tick = 0;
 #endif
@@ -303,7 +271,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiFrame> &Frame_in,
     }
 }
 
-void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
+void Jacobi_UpdatePackWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
                              tapa::istreams<JacobiUpdatedPair, 8> &Updated_in,
                              tapa::ostream<float_v16> &X_Write_out
 #ifdef JACOBI_TRACE_ENABLED
@@ -313,13 +281,13 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
                              ) {
     for (;;) {
 #pragma HLS loop_flatten off
-        const JacobiFrame frame = Frame_in.read();
-        if (frame.stop != 0) {
+        const JacobiUpdateCommand command = Command_in.read();
+        if (command.stop != 0) {
 #ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  kJacobiDebugSourcePackWriter,
                                  kJacobiDebugPhaseStop,
-                                 frame.iter,
+                                 command.iter,
                                  0);
 #endif
             return;
@@ -328,13 +296,13 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePackWriter,
                              kJacobiDebugPhaseEnterRound,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
         INDEX_TYPE debug_wait_tick = 0;
 #endif
 
     pack_packets:
-        for (INDEX_TYPE packet = 0; packet < frame.packet_count;) {
+        for (INDEX_TYPE packet = 0; packet < command.packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
             bool all_updated_ready = true;
@@ -365,7 +333,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
                 for (INDEX_TYPE lane = 0; lane < 16; ++lane) {
 #pragma HLS unroll
                     const INDEX_TYPE row = (packet << 4) + lane;
-                    if (row >= frame.row_num) {
+                    if (row >= command.row_num) {
                         x_next[lane] = 0.0f;
                     }
                 }
@@ -373,11 +341,11 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
                 X_Write_out.try_write(x_next);
                 ++packet;
 #ifdef JACOBI_TRACE_ENABLED
-                if ((packet & 0x3ff) == 0 || packet == frame.packet_count) {
+                if ((packet & 0x3ff) == 0 || packet == command.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourcePackWriter,
                                          kJacobiDebugPhaseProgress,
-                                         frame.iter,
+                                         command.iter,
                                          packet);
                 }
 #endif
@@ -410,15 +378,15 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiFrame> &Frame_in,
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePackWriter,
                              kJacobiDebugPhaseDoneRound,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
 #endif
     }
 }
 
-void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
+void Jacobi_XHbmWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
                        tapa::istream<float_v16> &X_Write_in,
-                       tapa::ostream<JacobiRoundToken> &Feedback_Token_out,
+                       tapa::ostream<JacobiUpdateDone> &Done_out,
                        tapa::async_mmap<float_v16> &X
 #ifdef JACOBI_TRACE_ENABLED
                        ,
@@ -427,38 +395,37 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                        ) {
     for (;;) {
 #pragma HLS loop_flatten off
-        const JacobiFrame frame = Frame_in.read();
-        if (frame.stop != 0) {
+        const JacobiUpdateCommand command = Command_in.read();
+        if (command.stop != 0) {
 #ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  kJacobiDebugSourceHbmWriter,
                                  kJacobiDebugPhaseStop,
-                                 frame.iter,
+                                 command.iter,
                                  0);
 #endif
             return;
         }
 
-        const INDEX_TYPE iterations_done = frame.iter + 1;
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceHbmWriter,
                              kJacobiDebugPhaseEnterRound,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
         INDEX_TYPE debug_wait_tick = 0;
 #endif
 
     write_packets:
         for (INDEX_TYPE write_issued = 0, write_response = 0;
-             write_response < frame.packet_count;) {
+             write_response < command.packet_count;) {
 #pragma HLS loop_tripcount min=1 max=500000
 #pragma HLS pipeline II=1
             const bool write_ready = !X_Write_in.empty() &&
                                      !X.write_addr.full() &&
                                      !X.write_data.full();
 
-            if (write_issued < frame.packet_count && write_ready) {
+            if (write_issued < command.packet_count && write_ready) {
 #ifdef JACOBI_TRACE_ENABLED
                 debug_wait_tick = 0;
 #endif
@@ -468,7 +435,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                 X.write_data.try_write(x_next);
                 ++write_issued;
 #ifdef JACOBI_TRACE_ENABLED
-                if ((write_issued & 0x3ff) == 0 || write_issued == frame.packet_count) {
+                if ((write_issued & 0x3ff) == 0 || write_issued == command.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceHbmWriter,
                                          kJacobiDebugPhaseProgress,
@@ -477,7 +444,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
                 }
 #endif
 #ifdef JACOBI_TRACE_ENABLED
-            } else if (write_issued < frame.packet_count) {
+            } else if (write_issued < command.packet_count) {
                 INDEX_TYPE wait_code = 0;
                 if (X_Write_in.empty()) {
                     wait_code = 1;
@@ -501,7 +468,7 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
             if (X.write_resp.try_read(num_responses)) {
                 write_response += int(num_responses) + 1;
 #ifdef JACOBI_TRACE_ENABLED
-                if ((write_response & 0x3ff) == 0 || write_response >= frame.packet_count) {
+                if ((write_response & 0x3ff) == 0 || write_response >= command.packet_count) {
                     Jacobi_DebugTryWrite(Debug_Event_out,
                                          kJacobiDebugSourceHbmWriter,
                                          kJacobiDebugPhaseProgress,
@@ -516,24 +483,16 @@ void Jacobi_XHbmWriter(tapa::istream<JacobiFrame> &Frame_in,
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceHbmWriter,
                              kJacobiDebugPhaseDoneRound,
-                             frame.iter,
-                             frame.packet_count);
+                             command.iter,
+                             command.packet_count);
 #endif
-        if (iterations_done >= frame.max_iters) {
-            Feedback_Token_out.write(Jacobi_MakeStopToken(frame.row_num,
-                                                          frame.max_iters,
-                                                          iterations_done));
-        } else {
-            Feedback_Token_out.write(Jacobi_MakeRoundToken(frame.row_num,
-                                                           frame.max_iters,
-                                                           iterations_done));
-        }
+        Done_out.write(Jacobi_MakeUpdateDone(command.iter, command.packet_count));
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourceHbmWriter,
                              kJacobiDebugPhaseFeedback,
-                             frame.iter,
-                             iterations_done);
+                             command.iter,
+                             command.packet_count);
 #endif
     }
 }

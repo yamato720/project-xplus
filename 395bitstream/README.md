@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260614-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | full graph light-trace debug demo，已生成并同步，150 MHz timing-clean，待上板 smoke，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，已生成并同步，150 MHz timing-clean，待上板 smoke，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -48,16 +48,19 @@ deadlock-debug 单 `X` ABI 通过，`thermal2_n262144` 早期 software run 通�
 TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
 
 ```text
-cuper-tapa-jacobi-u55c-20260614-demo.xclbin
+cuper-tapa-jacobi-u55c-20260615-demo.xclbin
 ```
 
-这版是 `CuperJacobiIteration` full graph light-trace 硬件 debug demo，接入完整 Jacobi
-dataflow、Cuper SpMV service 和 Jacobi update，并通过 `JACOBI_TRACE_LIGHT=1` 增加
-16 路关键进度 trace，额外覆盖 matrix loader0 首拍和 8 路 `pair_compute[0..7]`。它覆盖同主线 Jacobi demo
-槽，但不替换任何标准文件；当前
-`cuper-tapa-jacobi` 仍然没有标准 bitstream。demo xclbin UUID 为
-`3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
-`4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。
+这版是 `CuperJacobiIteration` master-controller full graph light-trace 硬件 debug demo，
+接入完整 Jacobi dataflow、Cuper SpMV service 和 Jacobi update。当前控制流取消旧的
+`RoundToken`/`FeedbackToken` 自循环和 `UpdateFrameFork`，改由
+`Jacobi_MasterController` 每轮显式发矩阵/compute/update command，并等待
+`Jacobi_XHbmWriter` 的 done ack 后进入下一轮或统一 stop。`JACOBI_TRACE_LIGHT=1`
+保留 controller、ptr/vector loader、coeff loader、8 路 `pair_compute[0..7]`、
+pack writer 和 X HBM writer 的 14 路关键进度 trace。它覆盖同主线 Jacobi demo
+槽，但不替换任何标准文件；当前 `cuper-tapa-jacobi` 仍然没有标准 bitstream。
+demo xclbin UUID 为 `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720`，SHA256 为
+`78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7`。
 最终 xclbin info 中 DATA clock 为 150 MHz，KERNEL clock 为 500 MHz，
 HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建日志为
 `cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。
@@ -66,10 +69,16 @@ HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建
 `Matrix_data_1..15` 映射到 HBM[1..15]，`B` 在 HBM[20]，`Diag_inv` 在 HBM[21]，
 `X` 在 HBM[22]，`Status` 在 HBM[24]，`Metrics` 在 HBM[25]，`Debug` 在 HBM[26]。
 VPL implementation 和 `.xclbin` 封装都已完成，`Run completed`，v++ link 总耗时
-`3h 52m 13s`。routed timing 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，
+`3h 27m 40s`。routed timing 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，
 setup failing endpoints `0`，hold worst slack `0.009 ns`。这版尚未完成上板 smoke。
 
-它覆盖的上一版同名 `20260614` 15 路 light-trace full graph demo UUID 为
+它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
+`3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
+`4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。该版仍使用旧的
+token/frame 自传播控制路径，150 MHz timing 已收敛，但服务器侧最小
+`thermal2_n16 MAX_ITERS=1` 上板仍卡 `Finish()`；该失败结论只对应旧 UUID。
+
+它覆盖的再上一版同名 `20260614` 15 路 light-trace full graph demo UUID 为
 `ef3b1102-90ec-551a-d1e9-55fb6c023da5`，SHA256 为
 `ba3db5ae3cc0e2720425097eec7110cd59bcc0b2b4a62608204046e0c5c7feb2`。上一版 DATA clock
 为 164 MHz，routed timing 未收敛：WNS `-2.764 ns`，TNS `-70810.594 ns`，

@@ -50,7 +50,7 @@ static constexpr INDEX_TYPE kJacobiDebugSentinelBase = 0x53530000;
 static constexpr INDEX_TYPE kJacobiTraceDebugWords = 256;
 static constexpr INDEX_TYPE kJacobiTracePerSourceBase = 64;
 static constexpr INDEX_TYPE kJacobiTracePerSourceStride = 4;
-static constexpr INDEX_TYPE kJacobiTraceSourceMax = 47;
+static constexpr INDEX_TYPE kJacobiTraceSourceMax = 46;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 
 bool IsJacobiDebugSentinel(const INDEX_TYPE index, const INDEX_TYPE value) {
@@ -79,7 +79,7 @@ const char* JacobiTracePhaseName(const INDEX_TYPE phase) {
 
 void PrintJacobiTraceSourceLabel(const INDEX_TYPE source) {
     if (source == 1) {
-        cout << "dispatcher";
+        cout << "controller";
     } else if (source == 2) {
         cout << "ptr_loader";
     } else if (source == 3) {
@@ -89,14 +89,12 @@ void PrintJacobiTraceSourceLabel(const INDEX_TYPE source) {
     } else if (source >= 20 && source < 36) {
         cout << "accumulator[" << (source - 20) << "]";
     } else if (source == 36) {
-        cout << "frame_fork";
-    } else if (source == 37) {
         cout << "coeff_loader";
-    } else if (source >= 38 && source < 46) {
-        cout << "pair_compute[" << (source - 38) << "]";
-    } else if (source == 46) {
+    } else if (source >= 37 && source < 45) {
+        cout << "pair_compute[" << (source - 37) << "]";
+    } else if (source == 45) {
         cout << "pack_writer";
-    } else if (source == 47) {
+    } else if (source == 46) {
         cout << "x_hbm_writer";
     } else {
         cout << "source" << source;
@@ -221,19 +219,15 @@ void PrintJacobiDebugBuffer(const aligned_vector<INDEX_TYPE>& debug_data) {
          << debug_data[51]
          << endl;
 
-    cout << "[jacobi-trace-fixed] "
-         << "dispatcher_first_token=" << debug_data[52]
-         << " matrix_prefetch_issued=" << debug_data[53]
-         << " ptr_loader_first_cmd=" << debug_data[54]
-         << " ptr_loader_first_read=" << debug_data[55]
-         << " vector_loader_first_cmd=" << debug_data[56]
-         << " matrix0_first_cmd=" << debug_data[57]
-         << " matrix0_first_beat=" << debug_data[58]
-         << " monitor_heartbeat=" << debug_data[59]
-         << " monitor_write_issue=" << debug_data[60]
-         << " monitor_write_resp=" << debug_data[61]
-         << " monitor_stop=" << debug_data[62]
-         << " monitor_stream_count=" << debug_data[63]
+    cout << "[jacobi-trace-legacy-fixed-slots] "
+         << "Debug[52..63]=";
+    for (INDEX_TYPE index = 52; index < 64; ++index) {
+        if (index != 52) {
+            cout << ",";
+        }
+        cout << debug_data[index];
+    }
+    cout << " (unused by current master-controller trace)"
          << endl;
 
     cout << "[jacobi-trace-legacy-slots]";
