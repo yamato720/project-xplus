@@ -153,7 +153,14 @@
   clock 为 `150/500/450 MHz`，routed timing 已收敛：WNS `0.003 ns`，TNS
   `0.000 ns`，setup failing endpoints `0`，hold worst slack `0.009 ns`。v++ link
   总耗时 `3h 27m 40s`。它覆盖上一条 `20260614-demo` timing-clean 旧控制流 demo 槽，
-  但仍不是标准 bitstream，尚未上板 smoke。
+  但仍不是标准 bitstream。
+- 2026-06-15 已完成该 master-controller demo 的 demo-only 上板测试，日志在
+  `logs/jacobi_full_graph_hw_20260615_223100_master_controller/`。`MAX_ITERS=1`
+  从 `thermal2_n16` 到完整 `thermal2` 全部返回并校验通过；完整固定轮数按 CPU
+  reference 到 `tau=1e-5` 的轮数设置 `MAX_ITERS`，`thermal2_n1024` /
+  `thermal2_n65536` / `thermal2_n131072` / `thermal2_n262144` / 完整 `thermal2`
+  分别跑 `451/743/842/900/24409` 轮并通过。完整 `thermal2` 的 CPU reference
+  时间为 `173375 ms`，FPGA kernel 时间为 `113035 ms`。
 
 ## 当前没有做
 
@@ -162,11 +169,12 @@
   `wait_state=COMPLETED`，wait 前 sample sync 已读到 `Status/Metrics/Debug`
   probe magic。
 - 当前完整 `CuperJacobiIteration` master-controller light-trace full graph 已生成
-  150 MHz timing-clean 硬件 bitstream，但还没有完成板上 smoke，不能作为可正常返回的
-  硬件结论。
+  150 MHz timing-clean 硬件 bitstream，并已通过 demo-only 单轮和完整固定轮数上板测试。
+  但它仍是 debug demo，不是标准 bitstream。
 - 没有把 HBM 使用压回 16 个通道。
 - 没有把 Jacobi 变成 PCG 预条件子。
-- 没有生成正式 `source.diff`；当前版本还没有硬件 demo-only 性能确认。
+- 没有生成正式 `source.diff`；当前版本证明 Jacobi full graph 功能边界已打通，但还不是
+  标准/性能优化晋级候选。
 - 没有把 isotope trace 版当作性能优化或标准候选；它是定位 `Finish()` 卡住点的
   debug build 边界。
 
@@ -179,10 +187,9 @@
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
 - 当前同步的 2026-06-15 demo 是完整 Jacobi graph master-controller light-trace debug
-  版，timing 已收敛但尚未板测，不能作为 Jacobi 硬件功能或性能结论。上一版
-  mmap-only native XRT runner 已证明
-  Status/Metrics/Debug BO sync 和 kernel launch 边界可用；下一步回到完整 graph 的
-  `Finish()` 收尾问题和 timing closure。
+  版，timing 已收敛且已板测通过。它仍然是固定轮数实现，`Status=1` 表示到达
+  `MAX_ITERS`，不是硬件内部 early-exit；如果要作为长期标准，需要补真实收敛判断或
+  明确固定轮数 ABI，并减少 debug ABI/HBM 额外通道依赖。
 - 2026-06-13 mmap-only probe 通过后，完整 graph debug 改成默认非阻塞：
   `JACOBI_DEADLOCK_DEBUG=1` 只启用 Debug buffer/event stream，不再入口阻塞写
   Debug/Status/Metrics probe；旧入口阻塞 probe 需要额外设置

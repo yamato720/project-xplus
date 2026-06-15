@@ -6,8 +6,8 @@ probe demo 会在 `Finish()` 阶段 timeout。之后的 `CuperJacobiMmapProbeOnl
 split-bank mmap-only probe 已通过 native XRT 上板 smoke，证明 kernel launch、
 m_axi 写回、HBM bank 分配和 BO sync 边界可用。当前同步 demo 是
 `JACOBI_TRACE_LIGHT=1` 的完整 `CuperJacobiIteration` full graph，
-已经生成 `.xclbin` 并同步到 `395bitstream/`，routed timing 已收敛，尚未完成
-上板 smoke。
+已经生成 `.xclbin` 并同步到 `395bitstream/`，routed timing 已收敛，demo-only
+上板已通过单轮和完整固定轮数测试。
 
 ## 1. 测试对象
 
@@ -86,7 +86,7 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
 | --- | --- | ---: | --- | --- |
 | `cant.mtx` | N=62,451, NNZ=4,007,383, R NNZ=3,944,932 | 2 | 当前 deadlock-debug 单 `X` ABI 通过 | `Status=1`, `Final buffer=0`, `Iterations=2`, `Final diff=0`, `Error Num=0` |
 | `thermal2_n65536` | N=65,536, NNZ=437,000, R NNZ=371,464 | 1 | 当前 deadlock-debug 单 `X` ABI 通过 | `Status=1`, `Final buffer=0`, `Iterations=1`, `Final diff=0`, `Error Num=0` |
-| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | 早期 software run 通过 | `Final diff=1.41496`, `Error Num=0`；还需用当前 root target 补跑 |
+| `thermal2_n262144` | N=262,144, NNZ=1,748,980 | 1 | software 与 2026-06-15 hardware demo 均通过 | hardware `FPGA ms=1.112300`, `spmv_update_packets=16384`, `Error Num=0` |
 
 ## 3.1 当前 demo bitstream
 
@@ -104,8 +104,8 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
 Vitis link 已完成 implementation 和 `.xclbin` 封装，`Run completed`；构建总耗时
 `3h 27m 40s`，汇总日志在
 `cuper-jacobi-iteration-build/logs/build_hw_tmux.log`。这版已同步到 `395bitstream/`，
-覆盖上一版 `20260614` timing-clean light-trace full graph demo，但还没有完成板上
-smoke。上一版 timing-clean demo UUID 为 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，
+覆盖上一版 `20260614` timing-clean light-trace full graph demo，并已完成 demo-only
+上板单轮和完整固定轮数测试。上一版 timing-clean demo UUID 为 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，
 仍使用旧 token/frame 自传播控制路径；它在最小 `thermal2_n16 MAX_ITERS=1` 上板仍卡
 `Finish()`，该结果只对应旧 UUID。再上一版 15 路 demo UUID 为
 `ef3b1102-90ec-551a-d1e9-55fb6c023da5`，DATA clock 为 `164 MHz`，timing 未收敛：
@@ -308,8 +308,8 @@ JACOBI_TRACE_LIGHT=1 MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitespars
 JACOBI_TRACE_ISOTOPE=0 JACOBI_TRACE_LIGHT=1 FORCE=1 make cuper-jacobi-hw-tmux
 ```
 
-该命令已生成并同步当前 `20260615-demo` xclbin；这只是 debug demo，尚未上板
-smoke。当前源码已取消旧 `RoundToken`/`FeedbackToken` 和 `Jacobi_UpdateFrameFork`，
+该命令已生成并同步当前 `20260615-demo` xclbin；这只是 debug demo，后续 demo-only
+上板已通过。当前源码已取消旧 `RoundToken`/`FeedbackToken` 和 `Jacobi_UpdateFrameFork`，
 改由 `Jacobi_MasterController` 直接发 command，并由 X HBM writer 回 done ack。
 
 ## 3.3 finite pair compute 源码验证
@@ -663,15 +663,62 @@ host 会打印这些 Jacobi 专用字段：
 
 ## 5. 后续补测
 
-后续硬件测试按下面顺序补记录：
+后续如改动硬件或 ABI，按下面顺序补记录：
 
 1. 先跑 `make cuper-jacobi-build-host` 和 software smoke，确认 host/ABI 没坏。
 2. 历史 `CuperJacobiMmapProbeOnly` split-bank xclbin 已用 native XRT runner
    通过 `ROW_NUM=16/1024` smoke；后续如改 runner 或 bank 分配再重建并复测该边界。
-3. 当前同步的完整 `CuperJacobiIteration` light-trace xclbin 已生成且 timing clean；
-   上板先从 `thermal2_n16 MAX_ITERS=1` 和 `thermal2_n1024 MAX_ITERS=1` smoke 开始。
-4. 再补 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`。
+3. 当前同步的完整 `CuperJacobiIteration` light-trace xclbin 已生成、timing clean，
+   且已通过 2026-06-15 demo-only 上板；新版本仍先从 `thermal2_n16 MAX_ITERS=1`
+   和 `thermal2_n1024 MAX_ITERS=1` smoke 开始。
+4. 再补 `cant.mtx`、`thermal2_n65536`、`thermal2_n262144` 的 `MAX_ITERS=1/2`
+   以及需要的完整固定轮数。
 5. 对完整 graph 记录 `Status`、`Final buffer`、`Iterations`、`Final diff`、
    `jacobi-stage-*` 和 `Error Num`。
 6. 同步更新 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`
    和 `395bitstream/README.md`。
+
+## 6. 2026-06-15 master-controller demo-only 上板结果
+
+测试对象：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin
+Kernel: CuperJacobiIteration
+UUID: c37ecdbf-92ab-5d06-11bd-e2f9edc7f720
+SHA256: 78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7
+logs: logs/jacobi_full_graph_hw_20260615_223100_master_controller/
+```
+
+本轮用 `JACOBI_TRACE_LIGHT=1` host 运行。`MAX_ITERS=1` 从 `thermal2_n16`
+到完整 `thermal2` 全部 `rc=0`、`Correctness Verification: Passed`、
+`Error Num=0`：
+
+| 数据集 | CPU diff | FPGA ms | spmv_update packets |
+| --- | ---: | ---: | ---: |
+| `thermal2_n16` | 1.17029 | 0.157074 | 1 |
+| `thermal2_n1024` | 1.17326 | 0.144711 | 64 |
+| `thermal2_n4096` | 1.29186 | 0.147567 | 256 |
+| `thermal2_n16384` | 1.12363 | 0.194424 | 1024 |
+| `thermal2_n65536` | 1.11631 | 0.374841 | 4096 |
+| `thermal2_n131072` | 1.32690 | 0.646992 | 8192 |
+| `thermal2_n262144` | 1.41496 | 1.112300 | 16384 |
+| `thermal2` | 1.00000 | 4.806930 | 76753 |
+
+完整固定轮数先用 CPU reference 得到达到 `tau=1e-5` 的轮数，再以同一
+`MAX_ITERS` 上板。当前硬件不做内部 early-exit，`Status=1` 表示跑到
+`MAX_ITERS`：
+
+| 数据集 | MAX_ITERS | CPU diff | CPU reference ms | FPGA ms | spmv_update packets |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n1024` | 451 | 9.95398e-06 | 0.952020 | 2.664400 | 28864 |
+| `thermal2_n65536` | 743 | 9.95398e-06 | 238.969 | 182.212 | 3043330 |
+| `thermal2_n131072` | 842 | 9.89437e-06 | 546.462 | 411.684 | 6897660 |
+| `thermal2_n262144` | 900 | 9.95398e-06 | 1181.58 | 882.205 | 14745600 |
+| `thermal2` | 24409 | 9.98378e-06 | 173375 | 113035 | 1873460000 |
+
+结论：当前 master-controller full graph 不是死锁。完整 `thermal2` 在 60 次
+pre-Finish 采样期间仍显示 sentinel，但随后 `Finish()` 返回，最终 trace 显示
+controller 到 `done_round`，loader、8 路 pair compute、pack writer 和 X HBM writer
+均进入 stop。后续若继续工程化，需要把固定轮数 ABI 和真实收敛判断取舍说清楚，并让
+Status/Metrics 在长运行中周期性可见。

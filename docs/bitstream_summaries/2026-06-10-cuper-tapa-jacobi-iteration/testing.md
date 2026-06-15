@@ -188,8 +188,8 @@ Final diff: 1.41496
 Error Num: 0
 ```
 
-结论：早期 software run 通过；还需要用当前根 `Makefile`
-`cuper-jacobi-run-sw` 目标补跑，补齐 `jacobi-stage-*` 计数。
+结论：早期 software run 通过；当前 `20260615-demo` 后续已补硬件
+`MAX_ITERS=1`，`FPGA ms=1.112300`、`spmv_update_packets=16384`、`Error Num=0`。
 
 ### 2026-06-12 post-sync quick regression
 
@@ -689,7 +689,7 @@ Hold worst slack: 0.009 ns
 ```
 
 因此当前 `.xclbin` 是完整 Jacobi graph master-controller light-trace debug demo
-artifact，已经 timing-clean，但还未完成板上 smoke。上一版 `20260614`
+artifact，已经 timing-clean，并已完成 2026-06-15 demo-only 上板测试。上一版 `20260614`
 timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
 `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`；该旧版仍使用
@@ -745,8 +745,7 @@ JACOBI_TRACE_ISOTOPE=0 JACOBI_TRACE_LIGHT=1 FORCE=1 make cuper-jacobi-hw-tmux
 ```
 
 构建在 tmux `cuper_jacobi_iteration_hw_build` 中完成，`Run completed`，总耗时
-`3h 27m 40s`，并同步到 Jacobi demo 槽。这个结果只说明 bitstream 已生成；板上
-smoke 仍待执行。
+`3h 27m 40s`，并同步到 Jacobi demo 槽。后续 2026-06-15 demo-only 上板结果见本文末尾。
 
 ## 判定标准
 
@@ -855,3 +854,48 @@ host 同时把 Status/Metrics/Debug 初始化为 sentinel，并改用 `read_writ
 `JACOBI_TRACE_LIGHT=1` 的完整 graph，并继续保持不带 `JACOBI_BLOCKING_ENTRY_PROBE`。
 如果仍卡 `Finish()`，优先查看 pre-Finish dump、light-trace 固定槽/source 槽和 sentinel
 是否被覆盖。
+
+### 2026-06-15 master-controller full graph demo-only 上板
+
+测试对象：
+
+```text
+bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin
+Kernel: CuperJacobiIteration
+UUID: c37ecdbf-92ab-5d06-11bd-e2f9edc7f720
+SHA256: 78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7
+logs: logs/jacobi_full_graph_hw_20260615_223100_master_controller/
+```
+
+host 以 `JACOBI_TRACE_LIGHT=1` 构建和运行。当前硬件没有内部收敛 early-exit；
+完整固定轮数先由 CPU reference 跑到 `tau=1e-5` 得到轮数，再用同一个
+`MAX_ITERS` 上板。因此 `Status=1` 表示跑到 `MAX_ITERS`，不是硬件自动收敛。
+
+单轮结果：
+
+| 数据集 | MAX_ITERS | CPU diff | FPGA ms | iterations | spmv_update packets | 结果 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 1 | 1.17029 | 0.157074 | 1 | 1 | pass |
+| `thermal2_n1024` | 1 | 1.17326 | 0.144711 | 1 | 64 | pass |
+| `thermal2_n4096` | 1 | 1.29186 | 0.147567 | 1 | 256 | pass |
+| `thermal2_n16384` | 1 | 1.12363 | 0.194424 | 1 | 1024 | pass |
+| `thermal2_n65536` | 1 | 1.11631 | 0.374841 | 1 | 4096 | pass |
+| `thermal2_n131072` | 1 | 1.32690 | 0.646992 | 1 | 8192 | pass |
+| `thermal2_n262144` | 1 | 1.41496 | 1.112300 | 1 | 16384 | pass |
+| `thermal2` | 1 | 1.00000 | 4.806930 | 1 | 76753 | pass |
+
+完整固定轮数结果：
+
+| 数据集 | MAX_ITERS | CPU diff | CPU reference ms | FPGA ms | iterations | spmv_update packets | 结果 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `thermal2_n1024` | 451 | 9.95398e-06 | 0.952020 | 2.664400 | 451 | 28864 | pass |
+| `thermal2_n65536` | 743 | 9.95398e-06 | 238.969 | 182.212 | 743 | 3043330 | pass |
+| `thermal2_n131072` | 842 | 9.89437e-06 | 546.462 | 411.684 | 842 | 6897660 | pass |
+| `thermal2_n262144` | 900 | 9.95398e-06 | 1181.58 | 882.205 | 900 | 14745600 | pass |
+| `thermal2` | 24409 | 9.98378e-06 | 173375 | 113035 | 24409 | 1873460000 | pass |
+
+完整 `thermal2` 长运行不是死锁。pre-Finish 60 次采样期间 Status/Metrics 仍保持
+sentinel，随后 `Finish()` 返回，最终 trace 显示 controller 到 `done_round`，
+ptr/vector/coeff loader、8 路 `pair_compute`、pack writer、X HBM writer 均进入 stop。
+这说明当前 debug 可见性仍偏后置：长运行过程中不一定能通过 Status/Metrics 看到进度，
+但 kernel 最终完成并写回结果。

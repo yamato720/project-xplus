@@ -11,7 +11,9 @@ DLC/Cuper-jacobi-iteration/
 mmap-only debug xclbin 已通过 native XRT 上板 smoke，用于排除基本 kernel launch、
 split-bank m_axi 写回和 BO sync 边界；当前同步 demo 是 `JACOBI_TRACE_LIGHT=1`
 的完整 `CuperJacobiIteration` master-controller full graph debug 版。新版把 DATA
-clock 降到 150 MHz，routed timing 已收敛，但尚未完成上板 smoke。
+clock 降到 150 MHz，routed timing 已收敛，并已完成 demo-only 上板：单轮
+`MAX_ITERS=1` 覆盖到完整 `thermal2`，完整固定轮数覆盖 `thermal2_n1024`、
+`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2`。
 
 ## 版本定位
 
@@ -22,8 +24,8 @@ clock 降到 150 MHz，routed timing 已收敛，但尚未完成上板 smoke。
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；当前同步的是 150 MHz timing-clean master-controller light-trace full graph，待上板 smoke |
-| 是否建议晋级标准 | 暂不建议，当前还未完成硬件 smoke |
+| 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试 |
+| 是否建议晋级标准 | 暂不建议，当前仍是 debug demo，且硬件没有内部收敛 early-exit |
 
 这条主线做普通 Jacobi iteration：
 
@@ -108,7 +110,32 @@ debug 构建。
 服务器侧复测上一版 `20260614-demo` 7 路 light-trace xclbin 后，`thermal2_n16` /
 `thermal2_n1024` 已通过，`thermal2_n65536` 仍卡在 `Finish()`。当前同步文件已经换成
 light-trace xclbin，并让 host 在 trace ABI 下默认执行 60 次 pre-Finish 周期
-BO sync；每 10 次采样会打印完整 Debug source 表。该新版还未完成上板 smoke。
+BO sync；每 10 次采样会打印完整 Debug source 表。
+
+2026-06-15 demo-only 上板日志位于
+`logs/jacobi_full_graph_hw_20260615_223100_master_controller/`。该版已通过：
+
+| 数据集 | 模式 | MAX_ITERS | CPU diff | FPGA kernel | 结果 |
+| --- | --- | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 1iter | 1 | 1.17029 | 0.157074 ms | pass |
+| `thermal2_n1024` | 1iter | 1 | 1.17326 | 0.144711 ms | pass |
+| `thermal2_n4096` | 1iter | 1 | 1.29186 | 0.147567 ms | pass |
+| `thermal2_n16384` | 1iter | 1 | 1.12363 | 0.194424 ms | pass |
+| `thermal2_n65536` | 1iter | 1 | 1.11631 | 0.374841 ms | pass |
+| `thermal2_n131072` | 1iter | 1 | 1.32690 | 0.646992 ms | pass |
+| `thermal2_n262144` | 1iter | 1 | 1.41496 | 1.112300 ms | pass |
+| `thermal2` | 1iter | 1 | 1.00000 | 4.806930 ms | pass |
+| `thermal2_n1024` | 完整固定轮数 | 451 | 9.95398e-06 | 2.664400 ms | pass |
+| `thermal2_n65536` | 完整固定轮数 | 743 | 9.95398e-06 | 182.212 ms | pass |
+| `thermal2_n131072` | 完整固定轮数 | 842 | 9.89437e-06 | 411.684 ms | pass |
+| `thermal2_n262144` | 完整固定轮数 | 900 | 9.95398e-06 | 882.205 ms | pass |
+| `thermal2` | 完整固定轮数 | 24409 | 9.98378e-06 | 113035 ms | pass |
+
+当前完整 `thermal2` 长运行不是死锁：60 次 pre-Finish 采样期间 Status/Metrics 仍保持
+sentinel，但 `Finish()` 随后返回，最终 trace source 显示 controller 到
+`done_round`，ptr/vector/coeff loader、8 路 pair compute、pack writer、X HBM writer
+均进入 stop。需要注意，当前硬件仍是固定轮数；`Status=1` 表示到达 `MAX_ITERS`，
+不是硬件内部收敛。
 
 上一版 mmap-only split-bank probe 的 2026-06-13 native XRT 上板 smoke 已通过：
 
@@ -204,8 +231,7 @@ docs/codex/testing.md
 
 ## 待补
 
-- 当前 root target 下补跑 `thermal2_n262144`。
-- 当前 timing-clean light-trace full Jacobi graph demo 已同步，下一步先做最小上板 smoke，并根据结果决定继续
-  查 `Finish()`/stop-drain 还是进入更大规模测试。
-- 完成 demo-only 上板测试后，再更新 HTML 报告和本目录测试表。
-- `source.diff` 暂不生成；当前还没有硬件 demo-only 性能确认。
+- 当前 demo 已完成 demo-only 上板，后续如果要晋级标准，需要决定固定轮数 ABI 是否可接受，
+  或补硬件内部 diff/early-exit。
+- 长运行时 Status/Metrics 仍主要在 kernel 结束后可见；若继续工程化，需要增加周期性进度写回。
+- `source.diff` 暂不生成；当前结果证明功能边界打通，但仍是 debug demo，不是性能优化晋级候选。

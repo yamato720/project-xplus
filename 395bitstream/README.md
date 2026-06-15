@@ -28,7 +28,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，已生成并同步，150 MHz timing-clean，待上板 smoke，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -38,10 +38,11 @@ DLC/Cuper-jacobi-iteration/
 
 这条主线的顶层是 `CuperJacobiIteration`，普通 Jacobi 迭代公式为
 `x_next=D^{-1}(b-Rx_old)`，不是 Jacobi 预条件子 PCG。当前代码已经接入根
-`Makefile` 的 `cuper-jacobi-*` 目标，并完成 software/TAPA simulation smoke：
-`cant.mtx` `MAX_ITERS=2`、`thermal2_n65536` `MAX_ITERS=1` 均为当前
-deadlock-debug 单 `X` ABI 通过，`thermal2_n262144` 早期 software run 通过但还需用
-当前 root target 补跑。
+`Makefile` 的 `cuper-jacobi-*` 目标，并完成 software/TAPA simulation smoke。
+2026-06-15 master-controller demo 已完成 demo-only 上板：`MAX_ITERS=1` 从
+`thermal2_n16` 到完整 `thermal2` 全部返回；完整固定轮数在 `thermal2_n1024`、
+`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2`
+分别按 `451/743/842/900/24409` 轮运行并通过校验。
 当前已有一个 demo 候选进入 Jacobi demo 槽，但还不是标准 bitstream。版本记录见
 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
 
@@ -70,7 +71,18 @@ HBM clock 为 450 MHz。构建目录为 `cuper-jacobi-iteration-build/`，构建
 `X` 在 HBM[22]，`Status` 在 HBM[24]，`Metrics` 在 HBM[25]，`Debug` 在 HBM[26]。
 VPL implementation 和 `.xclbin` 封装都已完成，`Run completed`，v++ link 总耗时
 `3h 27m 40s`。routed timing 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，
-setup failing endpoints `0`，hold worst slack `0.009 ns`。这版尚未完成上板 smoke。
+setup failing endpoints `0`，hold worst slack `0.009 ns`。
+
+2026-06-15 已按 demo-only 口径完成上板测试，日志在
+`logs/jacobi_full_graph_hw_20260615_223100_master_controller/`。单轮 Jacobi
+`MAX_ITERS=1` 覆盖 `thermal2_n16`、`thermal2_n1024`、`thermal2_n4096`、
+`thermal2_n16384`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144`
+和完整 `thermal2`，均为 `rc=0`、`Correctness Verification: Passed`、
+`Error Num=0`。完整固定轮数使用 CPU reference 到 `tau=1e-5` 的轮数设置
+`MAX_ITERS`：`thermal2_n1024` 451 轮 `2.6644 ms`，`thermal2_n65536` 743 轮
+`182.212 ms`，`thermal2_n131072` 842 轮 `411.684 ms`，`thermal2_n262144`
+900 轮 `882.205 ms`，完整 `thermal2` 24409 轮 `113035 ms`。当前硬件仍是固定轮数，
+`Status=1` 表示跑到 `MAX_ITERS`，不是硬件内部 early-exit。
 
 它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
