@@ -8,18 +8,10 @@
 
 #include "cuper_spmv_tasks.hpp"
 #include "jacobi_common.hpp"
-#ifdef JACOBI_TRACE_ENABLED
-#include "jacobi_deadlock_debug.hpp"
-#endif
 
 inline void Jacobi_ReadNegFloatV16Packets(const INDEX_TYPE packet_count,
                                           tapa::async_mmap<float_v16> &Vector_in,
-                                          tapa::ostream<float_v16> &Vector_X_Stream
-#ifdef JACOBI_TRACE_ENABLED
-                                          ,
-                                          tapa::ostream<JacobiDebugEvent> &Debug_Event_out
-#endif
-                                          ) {
+                                          tapa::ostream<float_v16> &Vector_X_Stream) {
 #pragma HLS inline
     // Jacobi 当前让 host 侧矩阵只保留 R=A-D。
     // 这里把 x_old 取负后送进 Cuper Core，后级 SpMV 自然得到 -R*x_old。
@@ -43,15 +35,6 @@ jacobi_read_neg_float_v16_packets:
             }
             Vector_X_Stream.try_write(neg_x);
             ++i_response;
-#ifdef JACOBI_TRACE_ENABLED
-            if ((i_response & 0x3ff) == 0 || i_response == packet_count) {
-                Jacobi_DebugTryWrite(Debug_Event_out,
-                                     kJacobiDebugSourceVectorLoader,
-                                     kJacobiDebugPhaseReadResp,
-                                     0,
-                                     i_response);
-            }
-#endif
         }
     }
 }
@@ -62,12 +45,7 @@ void Jacobi_Vector_Loader(const INDEX_TYPE Batch_num,
                           const INDEX_TYPE Column_num,
                           tapa::async_mmap<float_v16> &X,
                           tapa::istream<CuperSpmvServiceCommand> &Command_in,
-                          tapa::ostream<float_v16> &Vector_X_Stream
-#ifdef JACOBI_TRACE_ENABLED
-                          ,
-                          tapa::ostream<JacobiDebugEvent> &Debug_Event_out
-#endif
-                          ) {
+                          tapa::ostream<float_v16> &Vector_X_Stream) {
     // Cuper Core 链按 float_v16 消费输入向量，每包 16 个连续列元素。
     const INDEX_TYPE packet_count = spmv_service_num_float_v16_packets(Column_num);
 
@@ -75,52 +53,19 @@ void Jacobi_Vector_Loader(const INDEX_TYPE Batch_num,
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
-#ifdef JACOBI_TRACE_ENABLED
-            Jacobi_DebugTryWrite(Debug_Event_out,
-                                 kJacobiDebugSourceVectorLoader,
-                                 kJacobiDebugPhaseStop,
-                                 0,
-                                 packet_count);
-#endif
             return;
         }
-#ifdef JACOBI_TRACE_ENABLED
-        Jacobi_DebugTryWrite(Debug_Event_out,
-                             kJacobiDebugSourceVectorLoader,
-                             kJacobiDebugPhaseRecv,
-                             Batch_num,
-                             packet_count);
-#endif
 
         // 空 R 矩阵时 Batch_num=0，Core 只转发参数并让 Accumulator 输出 0。
         // 此时没有任何 Core 会消费 Vector_X_Stream；如果仍读 X，会在 core0 前留下
         // 未消费包，并让链尾 drain 等不到包。直接跳过 X 读取即可得到 -R*x=0。
         if (Batch_num == 0) {
-#ifdef JACOBI_TRACE_ENABLED
-            Jacobi_DebugTryWrite(Debug_Event_out,
-                                 kJacobiDebugSourceVectorLoader,
-                                 kJacobiDebugPhaseDoneRound,
-                                 0,
-                                 0);
-#endif
             continue;
         }
 
         // 这里只读单个 X buffer 并取负，输出 stream 格式保持 Cuper 原来的 Vector_X_Stream。
         Jacobi_ReadNegFloatV16Packets(packet_count,
                                       X,
-                                      Vector_X_Stream
-#ifdef JACOBI_TRACE_ENABLED
-                                      ,
-                                      Debug_Event_out
-#endif
-                                      );
-#ifdef JACOBI_TRACE_ENABLED
-        Jacobi_DebugTryWrite(Debug_Event_out,
-                             kJacobiDebugSourceVectorLoader,
-                             kJacobiDebugPhaseDoneRound,
-                             0,
-                             packet_count);
-#endif
+                                      Vector_X_Stream);
     }
 }

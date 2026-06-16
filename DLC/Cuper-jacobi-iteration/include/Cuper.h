@@ -13,15 +13,6 @@
 
 //#define X_TABLE
 
-#if defined(JACOBI_TRACE_ISOTOPE) || defined(JACOBI_TRACE_LIGHT) || defined(JACOBI_DEADLOCK_DEBUG)
-#define JACOBI_TRACE_ENABLED 1
-#endif
-
-#if defined(JACOBI_TRACE_ISOTOPE) || defined(JACOBI_DEADLOCK_DEBUG)
-#define JACOBI_TRACE_FULL 1
-#endif
-
-
 // Cuper TAPA SpMV 的硬件结构常量。
 // 这些常量描述 SpMV 的 slice/batch/HBM 并行度，不是 Jacobi 迭代参数。
 // CuperJacobiIteration 内部会由 controller 多次触发 service 化 SpMV，
@@ -33,7 +24,7 @@ constexpr INDEX_TYPE PE_NUM                 = 8;
 //
 // 这里没有直接用 30 路，是因为当前 Jacobi update 仍按 8 个 float_v2 pair
 // 拼回一个 float_v16。矩阵通道数必须能被 8 整除，每个 pair 才能消费相同数量
-// 的 accumulator 输出。24 路是“保留 aux/debug HBM，同时增加 Cuper 并行度”的
+// 的 accumulator 输出。24 路是“保留 aux/time HBM，同时增加 Cuper 并行度”的
 // 最小低风险版本；30 路需要重新设计可变分组/拼包。
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 24;
 #else
@@ -118,9 +109,6 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmap<float_v16> X,
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
-#ifdef JACOBI_TRACE_ENABLED
-                          tapa::mmap<INDEX_TYPE> Debug,
-#endif
                           const INDEX_TYPE Batch_num,
                           const INDEX_TYPE Matrix_len,
                           const INDEX_TYPE Row_num,
@@ -128,14 +116,5 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           const INDEX_TYPE Max_iters,
                           const float Tau
                          );
-
-// Debug-only mmap micro top。它不执行 Jacobi 数学，只写 Status/Metrics/Debug 的
-// 固定 probe 槽位后返回，用来确认 mmap 写回、HBM bank 和 runtime wait/sync 边界。
-void CuperJacobiMmapProbeOnly(tapa::mmap<INDEX_TYPE> Status,
-                              tapa::mmap<double> Metrics,
-                              tapa::mmap<INDEX_TYPE> Debug,
-                              const INDEX_TYPE Row_num,
-                              const INDEX_TYPE Max_iters,
-                              const INDEX_TYPE Column_num);
 
 #endif
