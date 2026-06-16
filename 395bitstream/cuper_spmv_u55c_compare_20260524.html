@@ -1342,6 +1342,38 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         </table>
       </div>
 
+      <h3>SpMV 对比差值</h3>
+      <p>
+        下表只计算同一行里已经有数值的点。差值口径为
+        <code>Jacobi 1iter - Cuper SpMV</code>，单位为 ms；正值表示 Jacobi 单轮比对应
+        single SpMV 多出的 update/writeback/control 时间。<code>本 demo SpMV</code>
+        是当前 one-shot <code>CuperPcgSpmv</code> single SpMV demo；<code>TAPA 标准</code>
+        是 standalone <code>Cuper</code> 标准 SpMV，旧记录 timeout 的点不计算。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th class="num">本 demo SpMV</th>
+              <th class="num">Jacobi 1iter</th>
+              <th class="num">差值 vs 本 demo</th>
+              <th class="num">Jacobi / 本 demo</th>
+              <th class="num">TAPA 标准 SpMV</th>
+              <th class="num">差值 vs TAPA 标准</th>
+              <th class="num">Jacobi / TAPA 标准</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16</code></td><td class="num">0.068825</td><td class="num">0.157074</td><td class="num">+0.088249</td><td class="num">2.28x</td><td class="num">0.0670</td><td class="num">+0.090074</td><td class="num">2.34x</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">0.149121</td><td class="num">0.374841</td><td class="num">+0.225720</td><td class="num">2.51x</td><td class="num">0.1379</td><td class="num">+0.236941</td><td class="num">2.72x</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">0.235847</td><td class="num">0.646992</td><td class="num">+0.411145</td><td class="num">2.74x</td><td class="num">0.2197</td><td class="num">+0.427292</td><td class="num">2.94x</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">0.425394</td><td class="num">1.112300</td><td class="num">+0.686906</td><td class="num">2.61x</td><td class="num">timeout</td><td class="num">-</td><td class="num">-</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">1.781541</td><td class="num">4.806930</td><td class="num">+3.025389</td><td class="num">2.70x</td><td class="num">timeout</td><td class="num">-</td><td class="num">-</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <h3>一次迭代对比</h3>
       <p>
         本组比较 <code>MAX_ITERS=1</code> 的 <code>kernel_reported</code>。它是端到端一次迭代
