@@ -4,10 +4,11 @@
 software/TAPA simulation 结果；此前完整 `CuperJacobiIteration` graph 的 entry mmap
 probe demo 会在 `Finish()` 阶段 timeout。之后的 `CuperJacobiMmapProbeOnly`
 split-bank mmap-only probe 已通过 native XRT 上板 smoke，证明 kernel launch、
-m_axi 写回、HBM bank 分配和 BO sync 边界可用。当前同步 demo 是
+m_axi 写回、HBM bank 分配和 BO sync 边界可用。当前已板测通过 demo 是
 `JACOBI_TRACE_LIGHT=1` 的完整 `CuperJacobiIteration` full graph，
 已经生成 `.xclbin` 并同步到 `395bitstream/`，routed timing 已收敛，demo-only
-上板已通过单轮和完整固定轮数测试。
+上板已通过单轮和完整固定轮数测试。2026-06-16 另同步了 `JACOBI_WIDE_HBM=1`
+的 24 路矩阵通道实验 artifact；该版 build 完成但 routed timing 未收敛，尚未上板。
 
 ## 1. 测试对象
 
@@ -115,6 +116,25 @@ WNS `-2.764 ns`，TNS `-70810.594 ns`。再上一版 7 路 demo UUID 为
 `Finish()`；该结果只对应旧 UUID。再上一版 no-debug demo UUID 为
 `b233c1af-6ba7-ebc5-8a5b-c56d348c53c7`，构建完成但未板测；mmap-only probe UUID 为
 `380f9de1-e5c1-66ab-b888-db99d2ef3523`，native XRT smoke 通过。旧测试结论只作为历史记录。
+
+2026-06-16 wide-HBM 实验 artifact：
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-wide-hbm-build/` |
+| Kernel | `CuperJacobiIteration` |
+| ABI | `JACOBI_WIDE_HBM=1`；`Matrix_data_0..23` HBM[0..23]，`SpElement_list_ptr/B/Diag_inv/X/Status` HBM[30]，`Metrics/Debug` HBM[31] |
+| UUID | `9b42ccc8-7b2f-e182-cb77-317084abdca8` |
+| SHA256 | `84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa` |
+| DATA / KERNEL / HBM clock | `139 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛：WNS `-0.501 ns`，TNS `-475.386 ns`，setup failing endpoints `2903` |
+
+该版生成前已通过 wide-HBM host/software smoke：`thermal2_n16 MAX_ITERS=1`
+在最终 build 目录下通过，输出 `HBM_Channel Num: 24`、`Slice Size: 96` 和
+`Correctness Verification: Passed`。硬件 link 已完成，v++ 总耗时 `5h 42m 5s`；
+由于 timing 未收敛，当前只作为性能方向实验 artifact 保存，不能替代 `20260615`
+已板测通过 demo 的功能结论。
 
 2026-06-13 已完成上一版 split-bank mmap-only demo 的 native XRT 上板 smoke：
 

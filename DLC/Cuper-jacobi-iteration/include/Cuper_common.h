@@ -543,7 +543,7 @@ void Reordering(vector<SpElement> &temp_SpElement_list,
 }
 
 // 输入：
-//   NUM_PE      : 物理 PE 总数；当前通常是 HBM_CHANNEL_NUM * PE_NUM = 16 * 8 = 128。
+//   NUM_PE      : 物理 PE 总数；通常是 HBM_CHANNEL_NUM * PE_NUM。
 //   NUM_ROW     : 原矩阵行数，Reordering 用它建立局部调度窗口。
 //   NUM_COLUMN  : 原矩阵列数；当前保留为接口参数，本函数内部不直接使用。
 //   Slice_SIZE  : SparseSlice 的块边长，用于计算 column batch 的起始全局列号。
@@ -559,7 +559,7 @@ void Reordering(vector<SpElement> &temp_SpElement_list,
 //     ptr[i]..ptr[i+1] 是第 i 个 column batch 在每个 PE list 中的读取区间。
 // 结果用途：
 //   SpElement_list_pes 后续会被 Create_SpElement_list_for_all_channels 打包成
-//   Matrix_data[16]；SpElement_list_ptr 会作为单独 HBM 输入传给 kernel。
+//   Matrix_data[HBM_CHANNEL_NUM]；SpElement_list_ptr 会作为单独 HBM 输入传给 kernel。
 void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                                        const INDEX_TYPE NUM_ROW,
                                        const INDEX_TYPE NUM_COLUMN,
@@ -600,14 +600,17 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                     INDEX_TYPE packet_id = row / 2;
 
                     // 关键映射变换：先映射到 8 个 update pair，再映射到
-                    // pair 内的 ping/pong 偏移，最后映射到每组 8 个 PE。
-                    INDEX_TYPE checker_id = packet_id % 8;
-                    INDEX_TYPE acc_offset = (packet_id / 8) % 2;
-                    INDEX_TYPE pe_in_acc  = (packet_id / 16) % 8;
+                    // pair 内的 accumulator 偏移，最后映射到每组 8 个 PE。
+                    // 默认 16 路 HBM 时每个 pair 有 2 路 accumulator；打开
+                    // JACOBI_WIDE_HBM 后 24 路 HBM 对应每个 pair 3 路。
+                    // 这个顺序必须和 Jacobi_UpdatePairComputeGrouped 的消费顺序一致。
+                    INDEX_TYPE checker_id = packet_id % JACOBI_UPDATE_PAIR_NUM;
+                    INDEX_TYPE acc_offset = (packet_id / JACOBI_UPDATE_PAIR_NUM) % JACOBI_ACC_GROUP_SIZE;
+                    INDEX_TYPE pe_in_acc  = (packet_id / HBM_CHANNEL_NUM) % PE_NUM;
 
-                    // 重新组合物理 PE 编号。NUM_PE 在当前配置中是
-                    // HBM_CHANNEL_NUM * PE_NUM，也就是 16 * 8 个物理槽位。
-                    INDEX_TYPE p = (checker_id * 2 + acc_offset) * 8 + pe_in_acc;
+                    // 重新组合物理 PE 编号。连续 JACOBI_ACC_GROUP_SIZE 个 HBM
+                    // channel 属于同一个 update pair，channel 内仍有 8 个 PE slot。
+                    INDEX_TYPE p = (checker_id * JACOBI_ACC_GROUP_SIZE + acc_offset) * PE_NUM + pe_in_acc;
                     temp_SpElement_list_pes[p].push_back(SpElement(sliceMatrix.sliceVal[j].ColIdx[k], sliceMatrix.sliceVal[j].RowIdx[k], sliceMatrix.sliceVal[j].Val[k]));
                 }
             }
@@ -621,8 +624,8 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
             Reordering(temp_SpElement_list_pes[p], SpElement_list_pes[p], base_col_index, i_start, NUM_ROW, NUM_PE, WINDOWS);
         }
 
-        // 同一个 batch 的 128 个 PE 列表必须补齐到相同长度，这样后面能按
-        // i 同步打包成 16 路 HBM，每路 8 个 PE slot。
+        // 同一个 batch 的所有 PE 列表必须补齐到相同长度，这样后面能按
+        // i 同步打包成 HBM_CHANNEL_NUM 路 HBM，每路 8 个 PE slot。
         INDEX_TYPE max_len = 0;
         for(INDEX_TYPE p = 0; p < NUM_PE; ++p) {
             max_len = max((INDEX_TYPE) SpElement_list_pes[p].size(), max_len);
@@ -641,7 +644,7 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
 // 输入：
 //   SpElement_list_pes : Create_SpElement_list_for_all_PEs 的输出，每个 PE 一条元素列表。
 //   SpElement_list_ptr : batch 边界表；最后一个元素就是每个 PE list 的有效长度 max_len。
-//   HBM_CHANNEL_NUM    : HBM 通道数，当前默认 16。
+//   HBM_CHANNEL_NUM    : HBM 通道数，默认 16；JACOBI_WIDE_HBM 时为 24。
 // 输出：
 //   Matrix_fpga_data   : HBM_CHANNEL_NUM 路 host buffer。
 //     Matrix_fpga_data[c] 保存第 c 路 HBM 的矩阵 payload；每 8 个 unsigned long
@@ -654,17 +657,17 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
 void Create_SpElement_list_for_all_channels(const vector<vector<SpElement> > &SpElement_list_pes,
                                             const vector<INDEX_TYPE>         &SpElement_list_ptr,
                                             vector<vector<unsigned long, tapa::aligned_allocator<unsigned long> > > &Matrix_fpga_data,
-                                            const int HBM_CHANNEL_NUM = 16
+                                            const int HBM_CHANNEL_NUM = ::HBM_CHANNEL_NUM
                                            ) {
 
-    // 把 128 个 PE 列表合并为 16 个 HBM channel 的 packed 矩阵数组。
+    // 把 HBM_CHANNEL_NUM * 8 个 PE 列表合并为多路 HBM channel 的 packed 矩阵数组。
     // 这是 SpElement 数据从“host 结构体列表”变成“kernel HBM payload”的边界：
     //   SpElement_list_pes[pe_idx][i]
     //     -> 64-bit packed slot x
     //     -> Matrix_fpga_data[c][i * 8 + j]
     //
     // 后面 host 会把 Matrix_fpga_data reinterpret 成 ap_uint<512>，传入
-    // Cuper(...) 的 Matrix_data[0..15] 端口。
+    // CuperJacobiIteration(...) 的 Matrix_data[0..HBM_CHANNEL_NUM-1] 端口。
     //
     // 具体位置：
     //   Matrix_fpga_data[c][i * 8 + j] 对应 channel c、第 i 个 512-bit beat、

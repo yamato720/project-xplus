@@ -12,8 +12,9 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 `cuper-tapa-pcg` full-PCG 候选和 `cuper-tapa-jacobi` Jacobi iteration 候选；
 新 demo 进入同一主线槽位时优先覆盖旧 demo 文件。五个标准版
 只有在用户明确确认满意后才会归档旧版并晋级替换。当前 `395bitstream/` 保留四个
-已有标准 bitstream、一个 single SpMV demo 槽、一个 full-PCG demo 槽和一个
-Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
+已有标准 bitstream、一个 single SpMV demo 槽、一个 full-PCG demo 槽、一个
+已板测通过的 Jacobi demo 槽，以及一个 Jacobi wide-HBM 实验 artifact；
+`cuper-tapa-jacobi` 还没有标准 bitstream。
 
 如果某个文件带 `legacy`，说明它不是当前五条主线的首选版本，只作为历史对照保留。
 
@@ -29,6 +30,7 @@ Jacobi demo 槽；`cuper-tapa-jacobi` 还没有标准 bitstream。
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
+| `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM 实验版，build 已完成但 routed timing 未收敛，待上板验证 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -83,6 +85,26 @@ setup failing endpoints `0`，hold worst slack `0.009 ns`。
 `182.212 ms`，`thermal2_n131072` 842 轮 `411.684 ms`，`thermal2_n262144`
 900 轮 `882.205 ms`，完整 `thermal2` 24409 轮 `113035 ms`。当前硬件仍是固定轮数，
 `Status=1` 表示跑到 `MAX_ITERS`，不是硬件内部 early-exit。
+
+TAPA Cuper / Jacobi iteration wide-HBM 实验文件：
+
+```text
+cuper-tapa-jacobi-u55c-20260616-demo.xclbin
+```
+
+这版在 `20260615` master-controller full graph 基础上，用 `JACOBI_WIDE_HBM=1`
+把 Cuper 主矩阵通道从 16 路扩到 24 路。HBM 分配为：
+`Matrix_data_0..23` 映射到 HBM[0..23]，`SpElement_list_ptr/B/Diag_inv/X/Status`
+共享 HBM[30]，`Metrics/Debug` 共享 HBM[31]。该 artifact 的 UUID 为
+`9b42ccc8-7b2f-e182-cb77-317084abdca8`，SHA256 为
+`84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa`。
+最终 xclbin info 中 DATA/KERNEL/HBM clock 为 `139/500/450 MHz`；构建时 link
+请求频率为 150 MHz。v++ link 总耗时 `5h 42m 5s`，构建目录为
+`cuper-jacobi-wide-hbm-build/`，构建日志为
+`cuper-jacobi-wide-hbm-build/logs/build_hw_tmux.log`。routed timing 未收敛：
+WNS `-0.501 ns`，TNS `-475.386 ns`，setup failing endpoints `2903`。
+当前只同步 artifact 和构建记录，尚未进行上板验证，也不替换 `20260615` 已板测通过
+demo 的结论。
 
 它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为

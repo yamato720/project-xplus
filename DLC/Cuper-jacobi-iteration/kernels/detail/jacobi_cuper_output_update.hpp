@@ -36,7 +36,7 @@ inline void Jacobi_SplitCoeffPair(const float_v16 &b,
 }
 
 void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiUpdateCommand> &Command_in,
-                              tapa::ostreams<JacobiCoeffPair, 8> &Coeff_out,
+                              tapa::ostreams<JacobiCoeffPair, JACOBI_UPDATE_PAIR_NUM> &Coeff_out,
                               tapa::async_mmap<float_v16> &B,
                               tapa::async_mmap<float_v16> &Diag_inv
 #ifdef JACOBI_TRACE_ENABLED
@@ -89,7 +89,7 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiUpdateCommand> &Command_in,
 
             bool coeff_output_ready = true;
         check_coeff_output_ready:
-            for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+            for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
                 if (Coeff_out[lane_pair].full()) {
                     coeff_output_ready = false;
@@ -106,7 +106,7 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiUpdateCommand> &Command_in,
 #endif
 
             split_coeff_lanes:
-                for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+                for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
                     JacobiCoeffPair pair;
                     Jacobi_SplitCoeffPair(b, diag_inv, lane_pair, pair);
@@ -157,17 +157,20 @@ void Jacobi_UpdateCoeffLoader(tapa::istream<JacobiUpdateCommand> &Command_in,
     }
 }
 
-void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
-                              tapa::istream<float_v2> &Neg_Rx_in_0,
-                              tapa::istream<float_v2> &Neg_Rx_in_1,
-                              tapa::istream<JacobiCoeffPair> &Coeff_in,
-                              tapa::ostream<JacobiUpdatedPair> &Updated_out
+template <typename NegRxReader>
+inline void Jacobi_UpdatePairComputeImpl(tapa::istream<JacobiUpdateCommand> &Command_in,
+                                         NegRxReader &Neg_Rx_reader,
+                                         tapa::istream<JacobiCoeffPair> &Coeff_in,
+                                         tapa::ostream<JacobiUpdatedPair> &Updated_out
 #ifdef JACOBI_TRACE_ENABLED
-                              ,
-                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
-                              const INDEX_TYPE Debug_source
+                                         ,
+                                         tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
+                                         const INDEX_TYPE Debug_lane
 #endif
-                              ) {
+                                         ) {
+#ifdef JACOBI_TRACE_ENABLED
+    const INDEX_TYPE Debug_source = kJacobiDebugSourcePairBase + Debug_lane;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         const JacobiUpdateCommand command = Command_in.read();
@@ -197,17 +200,12 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
 #pragma HLS pipeline II=1
             const bool is_valid_output = (o_idx < num_out);
             const bool can_emit_update = !Coeff_in.empty() && !Updated_out.full();
-            const bool neg_rx_ready = (c_idx == 0) ? !Neg_Rx_in_0.empty() : !Neg_Rx_in_1.empty();
+            const bool neg_rx_ready = Neg_Rx_reader.ready(c_idx);
             if (neg_rx_ready && (!is_valid_output || can_emit_update)) {
 #ifdef JACOBI_TRACE_ENABLED
                 debug_wait_tick = 0;
 #endif
-                float_v2 neg_rx;
-                if (c_idx == 0) {
-                    Neg_Rx_in_0.try_read(neg_rx);
-                } else {
-                    Neg_Rx_in_1.try_read(neg_rx);
-                }
+                float_v2 neg_rx = Neg_Rx_reader.read(c_idx);
 
                 if (is_valid_output) {
                     JacobiCoeffPair coeff;
@@ -234,7 +232,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
                 ++i;
                 ++c_idx;
                 ++o_idx;
-                if (c_idx == HBM_CHANNEL_NUM_DIV_8) {
+                if (c_idx == JACOBI_ACC_GROUP_SIZE) {
                     c_idx = 0;
                 }
                 if (o_idx == num_pe_output) {
@@ -271,8 +269,104 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
     }
 }
 
+#ifndef JACOBI_WIDE_HBM
+struct JacobiNegRxReader2 {
+    tapa::istream<float_v2> &in0;
+    tapa::istream<float_v2> &in1;
+
+    bool ready(const INDEX_TYPE index) {
+#pragma HLS inline
+        return (index == 0) ? !in0.empty() : !in1.empty();
+    }
+
+    float_v2 read(const INDEX_TYPE index) {
+#pragma HLS inline
+        float_v2 value;
+        if (index == 0) {
+            in0.try_read(value);
+        } else {
+            in1.try_read(value);
+        }
+        return value;
+    }
+};
+
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
+                              tapa::istream<float_v2> &Neg_Rx_in_0,
+                              tapa::istream<float_v2> &Neg_Rx_in_1,
+                              tapa::istream<JacobiCoeffPair> &Coeff_in,
+                              tapa::ostream<JacobiUpdatedPair> &Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                              ,
+                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
+                              const INDEX_TYPE Debug_lane
+#endif
+                              ) {
+    JacobiNegRxReader2 reader{Neg_Rx_in_0, Neg_Rx_in_1};
+    Jacobi_UpdatePairComputeImpl(Command_in,
+                                 reader,
+                                 Coeff_in,
+                                 Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                                 ,
+                                 Debug_Event_out,
+                                 Debug_lane
+#endif
+                                 );
+}
+#else
+struct JacobiNegRxReader3 {
+    tapa::istream<float_v2> &in0;
+    tapa::istream<float_v2> &in1;
+    tapa::istream<float_v2> &in2;
+
+    bool ready(const INDEX_TYPE index) {
+#pragma HLS inline
+        return (index == 0) ? !in0.empty() : ((index == 1) ? !in1.empty() : !in2.empty());
+    }
+
+    float_v2 read(const INDEX_TYPE index) {
+#pragma HLS inline
+        float_v2 value;
+        if (index == 0) {
+            in0.try_read(value);
+        } else if (index == 1) {
+            in1.try_read(value);
+        } else {
+            in2.try_read(value);
+        }
+        return value;
+    }
+};
+
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
+                              tapa::istream<float_v2> &Neg_Rx_in_0,
+                              tapa::istream<float_v2> &Neg_Rx_in_1,
+                              tapa::istream<float_v2> &Neg_Rx_in_2,
+                              tapa::istream<JacobiCoeffPair> &Coeff_in,
+                              tapa::ostream<JacobiUpdatedPair> &Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                              ,
+                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
+                              const INDEX_TYPE Debug_lane
+#endif
+                              ) {
+    JacobiNegRxReader3 reader{Neg_Rx_in_0, Neg_Rx_in_1, Neg_Rx_in_2};
+    Jacobi_UpdatePairComputeImpl(Command_in,
+                                 reader,
+                                 Coeff_in,
+                                 Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                                 ,
+                                 Debug_Event_out,
+                                 Debug_lane
+#endif
+                                 );
+}
+#endif
+
 void Jacobi_UpdatePackWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
-                             tapa::istreams<JacobiUpdatedPair, 8> &Updated_in,
+                             tapa::istreams<JacobiUpdatedPair, JACOBI_UPDATE_PAIR_NUM> &Updated_in,
                              tapa::ostream<float_v16> &X_Write_out
 #ifdef JACOBI_TRACE_ENABLED
                              ,
@@ -307,7 +401,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
 #pragma HLS pipeline II=1
             bool all_updated_ready = true;
         check_updated_ready:
-            for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+            for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
                 if (Updated_in[lane_pair].empty()) {
                     all_updated_ready = false;
@@ -321,7 +415,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
                 float_v16 x_next;
 
             pack_updated_lanes:
-                for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+                for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
                     JacobiUpdatedPair updated;
                     Updated_in[lane_pair].try_read(updated);
@@ -354,7 +448,7 @@ void Jacobi_UpdatePackWriter(tapa::istream<JacobiUpdateCommand> &Command_in,
                 INDEX_TYPE wait_code = 0;
                 if (!all_updated_ready) {
                 find_empty_updated_lane:
-                    for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+                    for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
                         if (wait_code == 0 && Updated_in[lane_pair].empty()) {
                             wait_code = 1 + lane_pair;

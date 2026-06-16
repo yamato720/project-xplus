@@ -106,6 +106,13 @@ else()
     message(STATUS "Cuper Jacobi light trace is disabled")
 endif()
 
+if(DEFINED ENV{JACOBI_WIDE_HBM} AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "" AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_WIDE_HBM=1)
+    message(STATUS "Cuper Jacobi wide HBM is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi wide HBM is disabled")
+endif()
+
 if(DEFINED ENV{JACOBI_BLOCKING_ENTRY_PROBE} AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "" AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "0")
     target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_BLOCKING_ENTRY_PROBE=1)
     message(STATUS "Cuper Jacobi blocking entry probe is ENABLED")

@@ -50,6 +50,15 @@ if [[ "${JACOBI_TRACE_LIGHT:-0}" != "0" && "${JACOBI_TRACE_LIGHT:-}" != "" ]]; t
   cmd+=(-c "-DJACOBI_TRACE_LIGHT=1")
 fi
 
+if [[ "${JACOBI_WIDE_HBM:-0}" != "0" && "${JACOBI_WIDE_HBM:-}" != "" ]]; then
+  if [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]] ||
+     [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
+    echo "JACOBI_WIDE_HBM currently supports no trace or JACOBI_TRACE_LIGHT only; full isotope/deadlock trace still enumerates 16 matrix/accumulator lanes." >&2
+    exit 1
+  fi
+  cmd+=(-c "-DJACOBI_WIDE_HBM=1")
+fi
+
 if [[ "${JACOBI_BLOCKING_ENTRY_PROBE:-0}" != "0" && "${JACOBI_BLOCKING_ENTRY_PROBE:-}" != "" ]]; then
   cmd+=(-c "-DJACOBI_BLOCKING_ENTRY_PROBE=1")
 fi

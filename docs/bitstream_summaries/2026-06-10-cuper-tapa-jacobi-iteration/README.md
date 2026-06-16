@@ -14,6 +14,8 @@ split-bank m_axi 写回和 BO sync 边界；当前同步 demo 是 `JACOBI_TRACE_
 clock 降到 150 MHz，routed timing 已收敛，并已完成 demo-only 上板：单轮
 `MAX_ITERS=1` 覆盖到完整 `thermal2`，完整固定轮数覆盖 `thermal2_n1024`、
 `thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整 `thermal2`。
+2026-06-16 另生成并同步了 `JACOBI_WIDE_HBM=1` 的 24 路 Matrix_data 实验 artifact；
+该版 build 完成但 routed timing 未收敛，尚未上板验证。
 
 ## 版本定位
 
@@ -24,7 +26,8 @@ clock 降到 150 MHz，routed timing 已收敛，并已完成 demo-only 上板�
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试 |
+| 当前实验 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` |
+| 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试；wide-HBM 24 路实验版已构建但 timing 未收敛 |
 | 是否建议晋级标准 | 暂不建议，当前仍是 debug demo，且硬件没有内部收敛 early-exit |
 
 这条主线做普通 Jacobi iteration：
@@ -52,7 +55,7 @@ $$
 
 ## 当前 HBM/ABI
 
-当前 connectivity 是 demo ABI，还没有做 HBM 压缩：
+已板测通过的 `20260615-demo` connectivity 是 demo ABI，还没有做 HBM 压缩：
 
 | 数据 | HBM |
 | --- | --- |
@@ -68,6 +71,11 @@ $$
 当前设计仍显式使用矩阵 16 个 HBM 通道之外的向量/状态/debug 通道。后续如果目标是
 压回 16 个 HBM，需要重新设计 X 转发、B/Diag_inv 供给和结果写回策略；这还没有进入
 本轮实现。
+
+`20260616-demo` 是 wide-HBM 实验 ABI：`Matrix_data_0..23` 映射到 HBM[0..23]，
+`SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics/Debug` 共享 HBM[31]。
+这版用于观察 24 路 Cuper 主矩阵通道的上限方向，但 timing 未收敛，不能作为已验证
+功能或性能结论。
 
 ## 当前 demo bitstream
 
@@ -136,6 +144,28 @@ sentinel，但 `Finish()` 随后返回，最终 trace source 显示 controller �
 `done_round`，ptr/vector/coeff loader、8 路 pair compute、pack writer、X HBM writer
 均进入 stop。需要注意，当前硬件仍是固定轮数；`Status=1` 表示到达 `MAX_ITERS`，
 不是硬件内部收敛。
+
+## 2026-06-16 wide-HBM artifact
+
+| 项目 | 内容 |
+| --- | --- |
+| 文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` |
+| `.info` | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin.info` |
+| 构建目录 | `cuper-jacobi-wide-hbm-build/` |
+| Kernel | `CuperJacobiIteration` |
+| ABI | `JACOBI_WIDE_HBM=1`；`Matrix_data_0..23` HBM[0..23]，`SpElement_list_ptr/B/Diag_inv/X/Status` HBM[30]，`Metrics/Debug` HBM[31] |
+| UUID | `9b42ccc8-7b2f-e182-cb77-317084abdca8` |
+| SHA256 | `84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa` |
+| DATA / KERNEL / HBM clock | `139 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛，WNS `-0.501 ns`，TNS `-475.386 ns`，setup failing endpoints `2903` |
+
+这版把 Cuper 主矩阵 HBM channel 从 16 扩到 24。更新路径仍沿用
+`Jacobi_MasterController` 和 8 路 update pair lane；wide 模式下每个 pair lane 消费
+3 路 accumulator 输出。生成前已做 wide-HBM host/software smoke，最终硬件 build
+目录下 `thermal2_n16 MAX_ITERS=1` 通过，显示 `HBM_Channel Num: 24`、
+`Slice Size: 96`、`Correctness Verification: Passed`。硬件 link 完成并生成
+`.xclbin`，v++ 总耗时 `5h 42m 5s`。由于 timing 未收敛，当前只保存为性能方向
+实验 artifact，尚未做上板验证，也不覆盖 `20260615` 已板测通过 demo 的结论。
 
 上一版 mmap-only split-bank probe 的 2026-06-13 native XRT 上板 smoke 已通过：
 

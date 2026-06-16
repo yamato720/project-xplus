@@ -76,8 +76,9 @@ $$
 probe，已经接入完整 Cuper SpMV service 和 Jacobi update。控制流已经从旧的
 token/frame 自传播改成 `Jacobi_MasterController` 显式 command/ack；debug 保留
 controller、ptr/vector loader、coeff loader、8 路 `pair_compute[0..7]`、pack writer
-和 X HBM writer 的关键 Debug trace。当前还没有完成上板 smoke，routed timing 已在
-150 MHz DATA clock 下收敛。上一版
+和 X HBM writer 的关键 Debug trace。该版已完成 demo-only 上板，routed timing 已在
+150 MHz DATA clock 下收敛。另有 `20260616` wide-HBM 实验 artifact，把矩阵通道扩到
+24 路并同步到 `395bitstream/`，但 routed timing 未收敛，尚未上板验证。上一版
 `CuperJacobiMmapProbeOnly` split-bank probe 已通过 native XRT smoke，证明 kernel
 launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只作为历史边界记录。
 详细测试流程见 `docs/testing.md`。
@@ -94,7 +95,8 @@ launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只作为�
 
 | 文件 | UUID | SHA256 | 时序状态 |
 | --- | --- | --- | --- |
-| `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720` | `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7` | `CuperJacobiIteration` master-controller light-trace full graph，DATA 150 MHz，WNS `0.003 ns`，待上板 smoke |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720` | `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7` | `CuperJacobiIteration` master-controller light-trace full graph，DATA 150 MHz，WNS `0.003 ns`，已通过 demo-only 上板 |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | `9b42ccc8-7b2f-e182-cb77-317084abdca8` | `84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa` | `JACOBI_WIDE_HBM=1`，24 路 Matrix_data，DATA 139 MHz，WNS `-0.501 ns`，待上板验证 |
 
 ## 常用命令
 

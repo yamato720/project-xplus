@@ -16,6 +16,35 @@
 #include "spmv_service_drains.hpp"
 #include "spmv_service_tasks.hpp"
 
+#ifdef JACOBI_TRACE_ENABLED
+#define IF_JACOBI_TRACE_PAIR_ARGS(PAIR_ID) , Debug_Pair_Stream[PAIR_ID], PAIR_ID
+#else
+#define IF_JACOBI_TRACE_PAIR_ARGS(PAIR_ID)
+#endif
+
+#ifdef JACOBI_WIDE_HBM
+#define JACOBI_INVOKE_UPDATE_PAIR(PAIR_ID) \
+        .invoke(Jacobi_UpdatePairCompute, \
+                Update_Pair_Command_Stream[PAIR_ID], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 0], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 1], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 2], \
+                Update_Coeff_Stream[PAIR_ID], \
+                Update_Pair_Stream[PAIR_ID] \
+                IF_JACOBI_TRACE_PAIR_ARGS(PAIR_ID) \
+                )
+#else
+#define JACOBI_INVOKE_UPDATE_PAIR(PAIR_ID) \
+        .invoke(Jacobi_UpdatePairCompute, \
+                Update_Pair_Command_Stream[PAIR_ID], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 0], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 1], \
+                Update_Coeff_Stream[PAIR_ID], \
+                Update_Pair_Stream[PAIR_ID] \
+                IF_JACOBI_TRACE_PAIR_ARGS(PAIR_ID) \
+                )
+#endif
+
 // TAPA Jacobi iteration 实验顶层。
 //
 // host 侧先把 A 拆成 D+R，Jacobi_Vector_Loader 读 X 时取负，因此 Cuper service
@@ -51,9 +80,9 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // ----------------------------------------  ----------------------------------------  --------------------------------------  -----------------------------------------
     // Command_Stream[0]                         启动/停止 SpElement ptr loader            Jacobi_MasterController                 SpmvService_SpElementPtrLoader
     // Command_Stream[1]                         启动/停止 X loader                        Jacobi_MasterController                 Jacobi_Vector_Loader
-    // Matrix_Command_Stream[0..15]              启动/停止 16 路矩阵 loader                Jacobi_MasterController                 SpmvService_MatrixLoader[0..15]
-    // PE_Param[0..16]                           Core 串接参数流，内嵌 stop token          SpmvService_SpElementPtrLoader/Core      SpmvService_Core[0..15]/DestroyInt
-    // Vector_Y_Param[0..15]                     Accumulator 参数流，内嵌 stop token       SpmvService_Core[0..15]                  SpmvService_Accumulator[0..15]
+    // Matrix_Command_Stream[0..N-1]             启动/停止 N 路矩阵 loader                 Jacobi_MasterController                 SpmvService_MatrixLoader[0..N-1]
+    // PE_Param[0..N]                            Core 串接参数流，内嵌 stop token          SpmvService_SpElementPtrLoader/Core      SpmvService_Core[0..N-1]/DestroyInt
+    // Vector_Y_Param[0..N-1]                    Accumulator 参数流，内嵌 stop token       SpmvService_Core[0..N-1]                 SpmvService_Accumulator[0..N-1]
     // Update_Coeff_Command_Stream               B/Diag_inv 读取命令                       Jacobi_MasterController                 Jacobi_UpdateCoeffLoader
     // Update_Pair_Command_Stream[0..7]          8 路 pair compute 命令                    Jacobi_MasterController                 Jacobi_UpdatePairCompute[0..7]
     // Update_Pack_Command_Stream                更新拼包命令                              Jacobi_MasterController                 Jacobi_UpdatePackWriter
@@ -69,7 +98,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     // ----------------------------------------  --------------------------------------------------------  ------------------------------------------------------------
     // Command_Stream[0]                         controller 开始本轮或最终收尾                            读取边界表并写 PE_Param[0]，或向 PE_Param 写 stop token
     // Command_Stream[1]                         controller 开始本轮，上一轮 X 写响应已收齐               非空 R 时读 X 并取负；空 R 时不读 X；stop 时退出
-    // Matrix_Command_Stream[0..15]              controller 开始本轮或最终收尾                            从 Matrix_data 读 R 到 Matrix_A_Stream FIFO，或退出
+    // Matrix_Command_Stream[0..N-1]             controller 开始本轮或最终收尾                            从 Matrix_data 读 R 到 Matrix_A_Stream FIFO，或退出
     // Update_*_Command_Stream                   controller 已发出本轮 SpMV command                       启动本轮系数读取、pair update、拼包和 HBM 写回；stop 时退出
     // Update_Done_Stream                        XHbmWriter 已收齐本轮所有 HBM write response             controller 结束本轮计时并进入下一轮或广播 stop
     // X_Write_Stream                            一个 x_next float_v16 包已经拼好                         按地址顺序写入单 X buffer；FIFO 只解耦反压，不改变轮次边界
@@ -79,10 +108,10 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 
     // Command_Stream[0] 给 SpElement ptr loader，Command_Stream[1] 给 X vector loader。
     tapa::streams<CuperSpmvServiceCommand, 2, 4>               Command_Stream("Command_Stream");
-    // 16 路矩阵 loader 各有一条 command stream；主控制器每轮显式发一次。
+    // HBM_CHANNEL_NUM 路矩阵 loader 各有一条 command stream；主控制器每轮显式发一次。
     tapa::streams<CuperSpmvServiceCommand, HBM_CHANNEL_NUM, 4> Matrix_Command_Stream("Matrix_Command_Stream");
 
-    // PE_Param 和 Vector_X_Stream 是 16 级 Core 串接链；第 16 项是链尾 drain。
+    // PE_Param 和 Vector_X_Stream 是 HBM_CHANNEL_NUM 级 Core 串接链；最后一项是链尾 drain。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>        PE_Param("PE_Param");
     tapa::streams<float_v16, HBM_CHANNEL_NUM + 1, 256>         Vector_X_Stream("Vector_X_Stream");
     // Matrix_A_Stream 是矩阵 FIFO。Core 只有收到 PE 参数后才消费这里的数据；
@@ -95,7 +124,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>              Vector_Y_Stream("Vector_Y_Stream");
 
     tapa::stream<JacobiUpdateCommand, 2>                       Update_Coeff_Command_Stream("Update_Coeff_Command_Stream");
-    tapa::streams<JacobiUpdateCommand, 8, 2>                   Update_Pair_Command_Stream("Update_Pair_Command_Stream");
+    tapa::streams<JacobiUpdateCommand, JACOBI_UPDATE_PAIR_NUM, 2> Update_Pair_Command_Stream("Update_Pair_Command_Stream");
     tapa::stream<JacobiUpdateCommand, 2>                       Update_Pack_Command_Stream("Update_Pack_Command_Stream");
     tapa::stream<JacobiUpdateCommand, 2>                       Update_Hbm_Command_Stream("Update_Hbm_Command_Stream");
     tapa::stream<JacobiUpdateDone, 2>                          Update_Done_Stream("Update_Done_Stream");
@@ -106,8 +135,8 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 
     // vector drain 没有内嵌 stop token，使用独立 stop stream。
     tapa::stream<INDEX_TYPE, 2>                                Vector_Destroy_Stop_Stream("Vector_Destroy_Stop_Stream");
-    tapa::streams<JacobiCoeffPair, 8, FIFO_DEPTH>              Update_Coeff_Stream("Update_Coeff_Stream");
-    tapa::streams<JacobiUpdatedPair, 8, FIFO_DEPTH>            Update_Pair_Stream("Update_Pair_Stream");
+    tapa::streams<JacobiCoeffPair, JACOBI_UPDATE_PAIR_NUM, FIFO_DEPTH> Update_Coeff_Stream("Update_Coeff_Stream");
+    tapa::streams<JacobiUpdatedPair, JACOBI_UPDATE_PAIR_NUM, FIFO_DEPTH> Update_Pair_Stream("Update_Pair_Stream");
     // 写回 FIFO 解耦 update 拼包和 AXI HBM 写响应抖动；下一轮由 controller 在
     // Update_Done_Stream 到达后启动，保证单个 X buffer 不会读到半新半旧数据。
     tapa::stream<float_v16, 128>                               X_Write_Stream("X_Write_Stream");
@@ -199,7 +228,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Debug_VectorLoader_Stream
 #endif
                 )
-        // 16 路矩阵 loader 按 controller command 从各自 HBM channel 拉取矩阵数据到 FIFO。
+        // HBM_CHANNEL_NUM 路矩阵 loader 按 controller command 从各自 HBM channel 拉取矩阵数据到 FIFO。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(SpmvService_MatrixLoader,
                                              Matrix_len,
                                              Matrix_data,
@@ -212,7 +241,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Debug_MatrixLoader_Stream
 #endif
                                              )
-        // 16 级 Core 串接：PE_Param 和 Vector_X_Stream 逐级转发，Matrix_A_Stream 每级独占。
+        // Core 串接：PE_Param 和 Vector_X_Stream 逐级转发，Matrix_A_Stream 每级独占。
         .invoke(SpmvService_Core, PE_Param[0], Matrix_A_Stream[0], Vector_X_Stream[0], PE_Param[1], Vector_X_Stream[1], Vector_Y_Param[0], Matrix_Mult_Vector_Stream[0])
         .invoke(SpmvService_Core, PE_Param[1], Matrix_A_Stream[1], Vector_X_Stream[1], PE_Param[2], Vector_X_Stream[2], Vector_Y_Param[1], Matrix_Mult_Vector_Stream[1])
         .invoke(SpmvService_Core, PE_Param[2], Matrix_A_Stream[2], Vector_X_Stream[2], PE_Param[3], Vector_X_Stream[3], Vector_Y_Param[2], Matrix_Mult_Vector_Stream[2])
@@ -229,6 +258,17 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(SpmvService_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
         .invoke(SpmvService_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
         .invoke(SpmvService_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
+#ifdef JACOBI_WIDE_HBM
+        // JACOBI_WIDE_HBM 宏下额外增加 Core16..Core23，对应 Matrix_data_16..23。
+        .invoke(SpmvService_Core, PE_Param[16], Matrix_A_Stream[16], Vector_X_Stream[16], PE_Param[17], Vector_X_Stream[17], Vector_Y_Param[16], Matrix_Mult_Vector_Stream[16])
+        .invoke(SpmvService_Core, PE_Param[17], Matrix_A_Stream[17], Vector_X_Stream[17], PE_Param[18], Vector_X_Stream[18], Vector_Y_Param[17], Matrix_Mult_Vector_Stream[17])
+        .invoke(SpmvService_Core, PE_Param[18], Matrix_A_Stream[18], Vector_X_Stream[18], PE_Param[19], Vector_X_Stream[19], Vector_Y_Param[18], Matrix_Mult_Vector_Stream[18])
+        .invoke(SpmvService_Core, PE_Param[19], Matrix_A_Stream[19], Vector_X_Stream[19], PE_Param[20], Vector_X_Stream[20], Vector_Y_Param[19], Matrix_Mult_Vector_Stream[19])
+        .invoke(SpmvService_Core, PE_Param[20], Matrix_A_Stream[20], Vector_X_Stream[20], PE_Param[21], Vector_X_Stream[21], Vector_Y_Param[20], Matrix_Mult_Vector_Stream[20])
+        .invoke(SpmvService_Core, PE_Param[21], Matrix_A_Stream[21], Vector_X_Stream[21], PE_Param[22], Vector_X_Stream[22], Vector_Y_Param[21], Matrix_Mult_Vector_Stream[21])
+        .invoke(SpmvService_Core, PE_Param[22], Matrix_A_Stream[22], Vector_X_Stream[22], PE_Param[23], Vector_X_Stream[23], Vector_Y_Param[22], Matrix_Mult_Vector_Stream[22])
+        .invoke(SpmvService_Core, PE_Param[23], Matrix_A_Stream[23], Vector_X_Stream[23], PE_Param[24], Vector_X_Stream[24], Vector_Y_Param[23], Matrix_Mult_Vector_Stream[23])
+#endif
         // 消费 PE 参数链尾残余，保证上游 Core 的参数转发不会悬空阻塞。
         .invoke(SpmvService_DestroyInt, PE_Param[HBM_CHANNEL_NUM])
         // 消费 -X 广播链尾残余。drain 完所有应到达链尾的 X 包后再接受 stop。
@@ -261,104 +301,17 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Debug_CoeffLoader_Stream
 #endif
                 )
-        // 8 个 pair compute 各自消费两路 accumulator 输出；有效位置做 Jacobi 更新，
-        // padding 位置只读掉 -Rx，不再单独经过 checker 对齐。
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[0],
-                Vector_Y_Stream[0],
-                Vector_Y_Stream[1],
-                Update_Coeff_Stream[0],
-                Update_Pair_Stream[0]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[0],
-                kJacobiDebugSourcePairBase + 0
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[1],
-                Vector_Y_Stream[2],
-                Vector_Y_Stream[3],
-                Update_Coeff_Stream[1],
-                Update_Pair_Stream[1]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[1],
-                kJacobiDebugSourcePairBase + 1
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[2],
-                Vector_Y_Stream[4],
-                Vector_Y_Stream[5],
-                Update_Coeff_Stream[2],
-                Update_Pair_Stream[2]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[2],
-                kJacobiDebugSourcePairBase + 2
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[3],
-                Vector_Y_Stream[6],
-                Vector_Y_Stream[7],
-                Update_Coeff_Stream[3],
-                Update_Pair_Stream[3]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[3],
-                kJacobiDebugSourcePairBase + 3
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[4],
-                Vector_Y_Stream[8],
-                Vector_Y_Stream[9],
-                Update_Coeff_Stream[4],
-                Update_Pair_Stream[4]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[4],
-                kJacobiDebugSourcePairBase + 4
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[5],
-                Vector_Y_Stream[10],
-                Vector_Y_Stream[11],
-                Update_Coeff_Stream[5],
-                Update_Pair_Stream[5]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[5],
-                kJacobiDebugSourcePairBase + 5
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[6],
-                Vector_Y_Stream[12],
-                Vector_Y_Stream[13],
-                Update_Coeff_Stream[6],
-                Update_Pair_Stream[6]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[6],
-                kJacobiDebugSourcePairBase + 6
-#endif
-                )
-        .invoke(Jacobi_UpdatePairCompute,
-                Update_Pair_Command_Stream[7],
-                Vector_Y_Stream[14],
-                Vector_Y_Stream[15],
-                Update_Coeff_Stream[7],
-                Update_Pair_Stream[7]
-#ifdef JACOBI_TRACE_ENABLED
-                ,
-                Debug_Pair_Stream[7],
-                kJacobiDebugSourcePairBase + 7
-#endif
-                )
+        // 8 个 pair compute 各自消费 JACOBI_ACC_GROUP_SIZE 路 accumulator 输出；
+        // 默认 16 HBM 时是 2 路，JACOBI_WIDE_HBM=1 时是 3 路。有效位置做
+        // Jacobi 更新，padding 位置只读掉 -Rx，不再单独经过 checker 对齐。
+        JACOBI_INVOKE_UPDATE_PAIR(0)
+        JACOBI_INVOKE_UPDATE_PAIR(1)
+        JACOBI_INVOKE_UPDATE_PAIR(2)
+        JACOBI_INVOKE_UPDATE_PAIR(3)
+        JACOBI_INVOKE_UPDATE_PAIR(4)
+        JACOBI_INVOKE_UPDATE_PAIR(5)
+        JACOBI_INVOKE_UPDATE_PAIR(6)
+        JACOBI_INVOKE_UPDATE_PAIR(7)
         // pack writer 收齐 8 路 float_v2 并拼成 float_v16，先写入 X_Write_Stream。
         .invoke(Jacobi_UpdatePackWriter,
                 Update_Pack_Command_Stream,

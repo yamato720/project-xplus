@@ -14,7 +14,12 @@
 
 #include "jacobi_common.hpp"
 
-static constexpr INDEX_TYPE kJacobiDebugBufferWords = 256;
+static constexpr INDEX_TYPE kJacobiDebugBufferWords =
+#ifdef JACOBI_WIDE_HBM
+    512;
+#else
+    256;
+#endif
 
 static constexpr INDEX_TYPE kJacobiDebugStreamController = 0;
 static constexpr INDEX_TYPE kJacobiDebugStreamPtrLoader = 1;
@@ -24,7 +29,7 @@ static constexpr INDEX_TYPE kJacobiDebugStreamAccumulatorBase =
     kJacobiDebugStreamMatrixLoaderBase + HBM_CHANNEL_NUM;
 static constexpr INDEX_TYPE kJacobiDebugStreamCoeffLoader =
     kJacobiDebugStreamAccumulatorBase + HBM_CHANNEL_NUM;
-static constexpr INDEX_TYPE kJacobiDebugPairStreamCount = 8;
+static constexpr INDEX_TYPE kJacobiDebugPairStreamCount = JACOBI_UPDATE_PAIR_NUM;
 static constexpr INDEX_TYPE kJacobiDebugStreamPairBase = kJacobiDebugStreamCoeffLoader + 1;
 static constexpr INDEX_TYPE kJacobiDebugStreamPackWriter =
     kJacobiDebugStreamPairBase + kJacobiDebugPairStreamCount;

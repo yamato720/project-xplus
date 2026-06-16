@@ -123,7 +123,7 @@ inline void Jacobi_SendUpdateCommand(
     tapa::ostream<JacobiUpdateCommand> &Coeff_Command_out,
     tapa::ostream<JacobiUpdateCommand> &Pack_Command_out,
     tapa::ostream<JacobiUpdateCommand> &Hbm_Command_out,
-    tapa::ostreams<JacobiUpdateCommand, 8> &Pair_Command_out) {
+    tapa::ostreams<JacobiUpdateCommand, JACOBI_UPDATE_PAIR_NUM> &Pair_Command_out) {
 #pragma HLS inline
     // 主控制器直接把同一轮 command 发给 update 后端所有 task。
     // 这里替代旧版 Jacobi_UpdateFrameFork，避免 frame 在后端自传播。
@@ -131,7 +131,7 @@ inline void Jacobi_SendUpdateCommand(
     Pack_Command_out.write(command);
     Hbm_Command_out.write(command);
 send_pair_update_command:
-    for (INDEX_TYPE lane_pair = 0; lane_pair < 8; ++lane_pair) {
+    for (INDEX_TYPE lane_pair = 0; lane_pair < JACOBI_UPDATE_PAIR_NUM; ++lane_pair) {
 #pragma HLS unroll
         Pair_Command_out[lane_pair].write(command);
     }
@@ -150,7 +150,7 @@ void Jacobi_MasterController(
     tapa::ostream<JacobiUpdateCommand> &Update_Coeff_Command_out,
     tapa::ostream<JacobiUpdateCommand> &Update_Pack_Command_out,
     tapa::ostream<JacobiUpdateCommand> &Update_Hbm_Command_out,
-    tapa::ostreams<JacobiUpdateCommand, 8> &Update_Pair_Command_out,
+    tapa::ostreams<JacobiUpdateCommand, JACOBI_UPDATE_PAIR_NUM> &Update_Pair_Command_out,
     tapa::istream<JacobiUpdateDone> &Update_Done_in,
     tapa::async_mmap<INDEX_TYPE> &Status,
     tapa::async_mmap<double> &Metrics,

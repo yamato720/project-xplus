@@ -47,10 +47,24 @@ double JacobiCyclesToMs(const double cycles, const double clock_period_ns) {
 
 static constexpr INDEX_TYPE kJacobiStatusSentinelBase = 0x51510000;
 static constexpr INDEX_TYPE kJacobiDebugSentinelBase = 0x53530000;
-static constexpr INDEX_TYPE kJacobiTraceDebugWords = 256;
+static constexpr INDEX_TYPE kJacobiTraceDebugWords =
+#ifdef JACOBI_WIDE_HBM
+    512;
+#else
+    256;
+#endif
 static constexpr INDEX_TYPE kJacobiTracePerSourceBase = 64;
 static constexpr INDEX_TYPE kJacobiTracePerSourceStride = 4;
-static constexpr INDEX_TYPE kJacobiTraceSourceMax = 46;
+static constexpr INDEX_TYPE kJacobiTraceMatrixBase = 4;
+static constexpr INDEX_TYPE kJacobiTraceAccumulatorBase =
+    kJacobiTraceMatrixBase + HBM_CHANNEL_NUM;
+static constexpr INDEX_TYPE kJacobiTraceCoeffLoader =
+    kJacobiTraceAccumulatorBase + HBM_CHANNEL_NUM;
+static constexpr INDEX_TYPE kJacobiTracePairBase = kJacobiTraceCoeffLoader + 1;
+static constexpr INDEX_TYPE kJacobiTracePackWriter =
+    kJacobiTracePairBase + JACOBI_UPDATE_PAIR_NUM;
+static constexpr INDEX_TYPE kJacobiTraceHbmWriter = kJacobiTracePackWriter + 1;
+static constexpr INDEX_TYPE kJacobiTraceSourceMax = kJacobiTraceHbmWriter;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 
 bool IsJacobiDebugSentinel(const INDEX_TYPE index, const INDEX_TYPE value) {
@@ -84,17 +98,20 @@ void PrintJacobiTraceSourceLabel(const INDEX_TYPE source) {
         cout << "ptr_loader";
     } else if (source == 3) {
         cout << "vector_loader";
-    } else if (source >= 4 && source < 20) {
-        cout << "matrix_loader[" << (source - 4) << "]";
-    } else if (source >= 20 && source < 36) {
-        cout << "accumulator[" << (source - 20) << "]";
-    } else if (source == 36) {
+    } else if (source >= kJacobiTraceMatrixBase &&
+               source < kJacobiTraceMatrixBase + HBM_CHANNEL_NUM) {
+        cout << "matrix_loader[" << (source - kJacobiTraceMatrixBase) << "]";
+    } else if (source >= kJacobiTraceAccumulatorBase &&
+               source < kJacobiTraceAccumulatorBase + HBM_CHANNEL_NUM) {
+        cout << "accumulator[" << (source - kJacobiTraceAccumulatorBase) << "]";
+    } else if (source == kJacobiTraceCoeffLoader) {
         cout << "coeff_loader";
-    } else if (source >= 37 && source < 45) {
-        cout << "pair_compute[" << (source - 37) << "]";
-    } else if (source == 45) {
+    } else if (source >= kJacobiTracePairBase &&
+               source < kJacobiTracePairBase + JACOBI_UPDATE_PAIR_NUM) {
+        cout << "pair_compute[" << (source - kJacobiTracePairBase) << "]";
+    } else if (source == kJacobiTracePackWriter) {
         cout << "pack_writer";
-    } else if (source == 46) {
+    } else if (source == kJacobiTraceHbmWriter) {
         cout << "x_hbm_writer";
     } else {
         cout << "source" << source;
@@ -749,9 +766,9 @@ int main(int argc, char* argv[]) {
     cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] " << "FLEX_REUSE \t\t\t" << "OFF" << endl;
 #endif
 
-    // 块大小由 Slice_SIZE 决定。当前 Cuper.h 中：
-    //   Slice_SIZE = HBM_CHANNEL_NUM * ROW_HBM_NUM = 16 * 4 = 64
-    // 所以后面的 SparseSlice 会把矩阵切成 64 x 64 的块。
+    // 块大小由 Slice_SIZE 决定：
+    //   Slice_SIZE = HBM_CHANNEL_NUM * ROW_HBM_NUM
+    // 默认 16 路时是 64，JACOBI_WIDE_HBM=1 时是 96。
     // 行/列方向的块数量分别是 ceil(m / Slice_SIZE)、ceil(n / Slice_SIZE)。
     cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] " << "Slice Size: \t\t\t" << Slice_SIZE << endl;
     cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] " << "Batch Size: \t\t\t" << BATCH_SIZE << endl;
@@ -792,14 +809,13 @@ int main(int argc, char* argv[]) {
     // 把 SparseSlice 中的每个非零元拆成 SpElement，并按物理 PE 分桶。
     //
     // SpElement_list_pes[p]：
-    //   第 p 个 PE 要消费的矩阵元素列表。当前 NUM_PE = HBM_CHANNEL_NUM * PE_NUM，
-    //   也就是 16 路 HBM * 每路 8 个 PE slot = 128。
+    //   第 p 个 PE 要消费的矩阵元素列表。NUM_PE = HBM_CHANNEL_NUM * PE_NUM。
     //
     // SpElement_list_ptr：
     //   batch 边界表，长度是 Batch_num + 1。kernel 通过它知道每个 column batch
     //   在各 PE list 中的起止位置。它是独立 HBM 输入，不混在 Matrix_data 里。
     //
-    // 输入：128 个 PE、矩阵尺寸 m/n、slice/batch 参数和 sliceMatrix。
+    // 输入：HBM_CHANNEL_NUM * PE_NUM 个 PE、矩阵尺寸 m/n、slice/batch 参数和 sliceMatrix。
     // 输出：SpElement_list_pes 按 PE 分桶保存 SpElement；
     //       SpElement_list_ptr 保存每个 column batch 的起止边界。
     Create_SpElement_list_for_all_PEs(HBM_CHANNEL_NUM * PE_NUM,
@@ -830,12 +846,12 @@ int main(int argc, char* argv[]) {
     // 每个 512-bit beat 内含 8 个 64-bit SpElement slot，分别给该 HBM channel
     // 下的 8 个 PE。
     // 也就是说，SpElement_list_pes 里的结构体元素会在下一步被压成 bit 字段，
-    // 最终落到 Matrix_fpga_data[c] 里；kernel 端读取的是 Matrix_data[16]，
+    // 最终落到 Matrix_fpga_data[c] 里；kernel 端读取的是 Matrix_data[HBM_CHANNEL_NUM]，
     // 不会再看到 C++ 的 SpElement 结构体。
     vector<aligned_vector<unsigned long> > Matrix_fpga_data(HBM_CHANNEL_NUM);
 
     // 输入：按 PE 分桶后的 SpElement_list_pes 和 batch 边界表。
-    // 输出：Matrix_fpga_data[0..15]，也就是 16 路 HBM 的 packed 矩阵数据。
+    // 输出：Matrix_fpga_data[0..HBM_CHANNEL_NUM-1]，也就是多路 HBM 的 packed 矩阵数据。
     // SpElement_list_ptr 不会被合进 Matrix_fpga_data，它作为 batch 边界表
     // 通过前面的 SpElement_list_ptr_fpga 单独传给 kernel。
     Create_SpElement_list_for_all_channels(SpElement_list_pes,
@@ -911,7 +927,7 @@ int main(int argc, char* argv[]) {
 
     // 参数对应 CuperJacobiIteration(...) ABI：
     //   SpElement_list_ptr_fpga -> batch 边界表
-    //   Matrix_fpga_data        -> 16 路 HBM 矩阵数据，reinterpret 为 ap_uint<512>
+    //   Matrix_fpga_data        -> HBM_CHANNEL_NUM 路 HBM 矩阵数据，reinterpret 为 ap_uint<512>
     //   B/Diag_inv/X           -> packed Jacobi 向量
     //   Status/Metrics         -> kernel 返回状态
 #ifdef JACOBI_TRACE_ENABLED

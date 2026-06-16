@@ -27,7 +27,19 @@
 // CuperJacobiIteration 内部会由 controller 多次触发 service 化 SpMV，
 // 每次触发完成一次 y = R * (-x_old)；R 是 host 侧从 A 中去掉对角项后的矩阵。
 constexpr INDEX_TYPE PE_NUM                 = 8;
+
+#ifdef JACOBI_WIDE_HBM
+// 实验性宽 HBM 版：把 Cuper 矩阵主通道从默认 16 路扩到 24 路。
+//
+// 这里没有直接用 30 路，是因为当前 Jacobi update 仍按 8 个 float_v2 pair
+// 拼回一个 float_v16。矩阵通道数必须能被 8 整除，每个 pair 才能消费相同数量
+// 的 accumulator 输出。24 路是“保留 aux/debug HBM，同时增加 Cuper 并行度”的
+// 最小低风险版本；30 路需要重新设计可变分组/拼包。
+constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 24;
+#else
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 16;
+#endif
+
 constexpr INDEX_TYPE ROW_HBM_NUM            = 4;
 // SparseSlice 的二维块边长。当前为 16 * 4 = 64，也就是 host 会先把
 // 矩阵按 64 x 64 的 slice 块归类，再继续映射到 PE/HBM。
@@ -49,6 +61,10 @@ constexpr INDEX_TYPE X_TABLE_ITERATION_NUM  = 1;
 constexpr double     THRESHOLD              = 1e-10;
 
 const     INDEX_TYPE HBM_CHANNEL_NUM_DIV_8    = HBM_CHANNEL_NUM >> 3;
+// Jacobi update 的输出宽度固定是 float_v16，所以后端一直保留 8 个 pair lane；
+// 每个 pair lane 消费 HBM_CHANNEL_NUM / 8 路 accumulator 输出。
+constexpr INDEX_TYPE JACOBI_UPDATE_PAIR_NUM   = 8;
+constexpr INDEX_TYPE JACOBI_ACC_GROUP_SIZE    = HBM_CHANNEL_NUM / JACOBI_UPDATE_PAIR_NUM;
 const     INDEX_TYPE HBM_CHANNEL_NUM_MULT_16  = HBM_CHANNEL_NUM << 4;
 const     INDEX_TYPE HBM_CHANNEL_NUM_MULT_2   = HBM_CHANNEL_NUM << 1;
 const     INDEX_TYPE Slice_WIDTH            = Slice_SIZE * BATCH_SIZE;

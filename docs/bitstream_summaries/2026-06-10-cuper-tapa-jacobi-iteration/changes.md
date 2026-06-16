@@ -161,6 +161,20 @@
   `thermal2_n65536` / `thermal2_n131072` / `thermal2_n262144` / 完整 `thermal2`
   分别跑 `451/743/842/900/24409` 轮并通过。完整 `thermal2` 的 CPU reference
   时间为 `173375 ms`，FPGA kernel 时间为 `113035 ms`。
+- 2026-06-16 新增宏控 wide-HBM 实验路径：`JACOBI_WIDE_HBM=1` 时把
+  `HBM_CHANNEL_NUM` 从 16 扩到 24，`Matrix_data_0..23` 映射到 HBM[0..23]，
+  `SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics/Debug` 共享
+  HBM[31]。host PE 参数映射、update pair compute、top graph、connectivity
+  生成脚本和 launcher 均按通道数做了泛化；默认不启用 wide 模式时仍保持 16 路。
+- 2026-06-16 已用 `JACOBI_WIDE_HBM=1 JACOBI_TRACE_LIGHT=1
+  JACOBI_KERNEL_FREQUENCY=150` 在 tmux 中生成 wide-HBM artifact：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin`。UUID 为
+  `9b42ccc8-7b2f-e182-cb77-317084abdca8`，SHA256 为
+  `84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa`。
+  最终 DATA/KERNEL/HBM clock 为 `139/500/450 MHz`，v++ link 总耗时
+  `5h 42m 5s`。routed timing 未收敛：WNS `-0.501 ns`，TNS `-475.386 ns`，
+  setup failing endpoints `2903`。该版只作为性能方向实验 artifact 保存，尚未上板，
+  不替代 `20260615` 已板测通过 demo。
 
 ## 当前没有做
 
@@ -172,6 +186,8 @@
   150 MHz timing-clean 硬件 bitstream，并已通过 demo-only 单轮和完整固定轮数上板测试。
   但它仍是 debug demo，不是标准 bitstream。
 - 没有把 HBM 使用压回 16 个通道。
+- 没有把 wide-HBM artifact 当作标准或已验证性能版本；它目前只证明 24 路构建链路
+  可以生成 xclbin。
 - 没有把 Jacobi 变成 PCG 预条件子。
 - 没有生成正式 `source.diff`；当前版本证明 Jacobi full graph 功能边界已打通，但还不是
   标准/性能优化晋级候选。
