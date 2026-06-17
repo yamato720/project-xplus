@@ -13,7 +13,17 @@
 #include "spmv_service_drains.hpp"
 #include "spmv_service_tasks.hpp"
 
-#ifdef JACOBI_WIDE_HBM
+#if defined(JACOBI_HBM_CHANNELS_GE_32)
+#define JACOBI_INVOKE_UPDATE_PAIR(PAIR_ID) \
+        .invoke(Jacobi_UpdatePairCompute, \
+                Update_Pair_Command_Stream[PAIR_ID], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 0], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 1], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 2], \
+                Vector_Y_Stream[(PAIR_ID) * JACOBI_ACC_GROUP_SIZE + 3], \
+                Update_Coeff_Stream[PAIR_ID], \
+                Update_Pair_Stream[PAIR_ID])
+#elif defined(JACOBI_HBM_CHANNELS_GE_24)
 #define JACOBI_INVOKE_UPDATE_PAIR(PAIR_ID) \
         .invoke(Jacobi_UpdatePairCompute, \
                 Update_Pair_Command_Stream[PAIR_ID], \
@@ -186,8 +196,8 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(SpmvService_Core, PE_Param[13], Matrix_A_Stream[13], Vector_X_Stream[13], PE_Param[14], Vector_X_Stream[14], Vector_Y_Param[13], Matrix_Mult_Vector_Stream[13])
         .invoke(SpmvService_Core, PE_Param[14], Matrix_A_Stream[14], Vector_X_Stream[14], PE_Param[15], Vector_X_Stream[15], Vector_Y_Param[14], Matrix_Mult_Vector_Stream[14])
         .invoke(SpmvService_Core, PE_Param[15], Matrix_A_Stream[15], Vector_X_Stream[15], PE_Param[16], Vector_X_Stream[16], Vector_Y_Param[15], Matrix_Mult_Vector_Stream[15])
-#ifdef JACOBI_WIDE_HBM
-        // JACOBI_WIDE_HBM 宏下额外增加 Core16..Core23，对应 Matrix_data_16..23。
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        // 24/32 路实验宏下额外增加 Core16..Core23，对应 Matrix_data_16..23。
         .invoke(SpmvService_Core, PE_Param[16], Matrix_A_Stream[16], Vector_X_Stream[16], PE_Param[17], Vector_X_Stream[17], Vector_Y_Param[16], Matrix_Mult_Vector_Stream[16])
         .invoke(SpmvService_Core, PE_Param[17], Matrix_A_Stream[17], Vector_X_Stream[17], PE_Param[18], Vector_X_Stream[18], Vector_Y_Param[17], Matrix_Mult_Vector_Stream[17])
         .invoke(SpmvService_Core, PE_Param[18], Matrix_A_Stream[18], Vector_X_Stream[18], PE_Param[19], Vector_X_Stream[19], Vector_Y_Param[18], Matrix_Mult_Vector_Stream[18])
@@ -196,6 +206,17 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(SpmvService_Core, PE_Param[21], Matrix_A_Stream[21], Vector_X_Stream[21], PE_Param[22], Vector_X_Stream[22], Vector_Y_Param[21], Matrix_Mult_Vector_Stream[21])
         .invoke(SpmvService_Core, PE_Param[22], Matrix_A_Stream[22], Vector_X_Stream[22], PE_Param[23], Vector_X_Stream[23], Vector_Y_Param[22], Matrix_Mult_Vector_Stream[22])
         .invoke(SpmvService_Core, PE_Param[23], Matrix_A_Stream[23], Vector_X_Stream[23], PE_Param[24], Vector_X_Stream[24], Vector_Y_Param[23], Matrix_Mult_Vector_Stream[23])
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        // 32 路实验宏下继续增加 Core24..Core31，对应 Matrix_data_24..31。
+        .invoke(SpmvService_Core, PE_Param[24], Matrix_A_Stream[24], Vector_X_Stream[24], PE_Param[25], Vector_X_Stream[25], Vector_Y_Param[24], Matrix_Mult_Vector_Stream[24])
+        .invoke(SpmvService_Core, PE_Param[25], Matrix_A_Stream[25], Vector_X_Stream[25], PE_Param[26], Vector_X_Stream[26], Vector_Y_Param[25], Matrix_Mult_Vector_Stream[25])
+        .invoke(SpmvService_Core, PE_Param[26], Matrix_A_Stream[26], Vector_X_Stream[26], PE_Param[27], Vector_X_Stream[27], Vector_Y_Param[26], Matrix_Mult_Vector_Stream[26])
+        .invoke(SpmvService_Core, PE_Param[27], Matrix_A_Stream[27], Vector_X_Stream[27], PE_Param[28], Vector_X_Stream[28], Vector_Y_Param[27], Matrix_Mult_Vector_Stream[27])
+        .invoke(SpmvService_Core, PE_Param[28], Matrix_A_Stream[28], Vector_X_Stream[28], PE_Param[29], Vector_X_Stream[29], Vector_Y_Param[28], Matrix_Mult_Vector_Stream[28])
+        .invoke(SpmvService_Core, PE_Param[29], Matrix_A_Stream[29], Vector_X_Stream[29], PE_Param[30], Vector_X_Stream[30], Vector_Y_Param[29], Matrix_Mult_Vector_Stream[29])
+        .invoke(SpmvService_Core, PE_Param[30], Matrix_A_Stream[30], Vector_X_Stream[30], PE_Param[31], Vector_X_Stream[31], Vector_Y_Param[30], Matrix_Mult_Vector_Stream[30])
+        .invoke(SpmvService_Core, PE_Param[31], Matrix_A_Stream[31], Vector_X_Stream[31], PE_Param[32], Vector_X_Stream[32], Vector_Y_Param[31], Matrix_Mult_Vector_Stream[31])
 #endif
         // 消费 PE 参数链尾残余，保证上游 Core 的参数转发不会悬空阻塞。
         .invoke(SpmvService_DestroyInt, PE_Param[HBM_CHANNEL_NUM])
@@ -218,7 +239,7 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 B,
                 Diag_inv)
         // 8 个 pair compute 各自消费 JACOBI_ACC_GROUP_SIZE 路 accumulator 输出；
-        // 默认 16 HBM 时是 2 路，JACOBI_WIDE_HBM=1 时是 3 路。有效位置做
+        // 默认 16 HBM 时是 2 路，24/32 路实验时分别是 3/4 路。有效位置做
         // Jacobi 更新，padding 位置只读掉 -Rx，不再单独经过 checker 对齐。
         JACOBI_INVOKE_UPDATE_PAIR(0)
         JACOBI_INVOKE_UPDATE_PAIR(1)

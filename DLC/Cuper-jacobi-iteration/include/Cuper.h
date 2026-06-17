@@ -19,17 +19,27 @@
 // 每次触发完成一次 y = R * (-x_old)；R 是 host 侧从 A 中去掉对角项后的矩阵。
 constexpr INDEX_TYPE PE_NUM                 = 8;
 
-#ifdef JACOBI_WIDE_HBM
+#if defined(JACOBI_HBM_CHANNELS_32)
+#define JACOBI_HBM_CHANNELS_GE_24 1
+#define JACOBI_HBM_CHANNELS_GE_32 1
+// 实验性全 HBM 版：32 路 Matrix_data 吃满 U55C 的 32 个 HBM 伪通道。
+// 注意：SpElement ptr / X / Y / Status / Metrics 只能与部分矩阵通道共享 HBM。
+constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 32;
+#elif defined(JACOBI_HBM_CHANNELS_24) || defined(JACOBI_WIDE_HBM)
+#define JACOBI_HBM_CHANNELS_GE_24 1
 // 实验性宽 HBM 版：把 Cuper 矩阵主通道从默认 16 路扩到 24 路。
-//
-// 这里没有直接用 30 路，是因为当前 Jacobi update 仍按 8 个 float_v2 pair
-// 拼回一个 float_v16。矩阵通道数必须能被 8 整除，每个 pair 才能消费相同数量
-// 的 accumulator 输出。24 路是“保留 aux/time HBM，同时增加 Cuper 并行度”的
-// 最小低风险版本；30 路需要重新设计可变分组/拼包。
+// 24 路仍能留下 HBM[24..31] 给 ptr/X/Y/计时/状态等辅助 buffer。
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 24;
 #else
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 16;
 #endif
+
+static_assert(HBM_CHANNEL_NUM == 16 ||
+              HBM_CHANNEL_NUM == 24 ||
+              HBM_CHANNEL_NUM == 32,
+              "Cuper Jacobi experiments currently support 16/24/32 HBM channels.");
+static_assert((HBM_CHANNEL_NUM % 8) == 0,
+              "HBM channel count must be divisible by 8 for checker/update grouping.");
 
 constexpr INDEX_TYPE ROW_HBM_NUM            = 4;
 // SparseSlice 的二维块边长。当前为 16 * 4 = 64，也就是 host 会先把
@@ -115,6 +125,26 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           const INDEX_TYPE Column_num,
                           const INDEX_TYPE Max_iters,
                           const float Tau
+                         );
+
+// Cuper SpMV service-only 实验顶层。
+//
+// 它只运行 Cuper 的 SpMV 数据通路：
+//   Y_out = A * X
+//
+// 不拆 A=D+R，不取负 X，不做 Jacobi update，也不包含 PCG 控制逻辑。
+// 主要用于隔离 24/32 路 Matrix_data 对 Cuper SpMV 本体的影响。
+void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
+                          tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
+                          tapa::mmap<float_v16> X,
+                          tapa::mmap<float_v16> Y_out,
+                          tapa::mmap<INDEX_TYPE> Status,
+                          tapa::mmap<double> Metrics,
+                          const INDEX_TYPE Batch_num,
+                          const INDEX_TYPE Matrix_len,
+                          const INDEX_TYPE Row_num,
+                          const INDEX_TYPE Column_num,
+                          const INDEX_TYPE Iteration_num
                          );
 
 #endif

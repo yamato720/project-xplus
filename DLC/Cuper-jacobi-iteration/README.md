@@ -52,6 +52,8 @@ $$
    `row_ptr.txt/col_idx.txt/values.txt/b.txt`。
 7. 正常主线不再保留 Debug BO、DebugMonitor、trace stream 或 mmap-only probe；
    只保留 `Status` 和 `Metrics` 写回。
+8. 新增 `CuperSpmvServiceOnly(...)` 隔离实验顶层：只运行 Cuper SpMV 数据通路，
+   不拆 `A=D+R`，不执行 Jacobi update，用于单独探索 24/32 路 Matrix_data 扩展。
 
 ## 与上层工程的关系
 
@@ -90,6 +92,8 @@ $$
 | --- | --- | --- | --- |
 | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | `c37ecdbf-92ab-5d06-11bd-e2f9edc7f720` | `78c4ffdb9268aa5c1635bf2eefeed3b828e8a26e60ab3ccb8d795c9484d975a7` | `CuperJacobiIteration` master-controller light-trace full graph，DATA 150 MHz，WNS `0.003 ns`，已通过 demo-only 上板 |
 | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | `aa594af3-f811-1b17-f507-fd504f93425e` | `232c5afeaf8e122f7b30e5b26e95553a40ea44556ea59723480cab1f77453f9c` | `JACOBI_WIDE_HBM=1` no-debug，24 路 Matrix_data，DATA 147 MHz，WNS `-0.120 ns`，待上板验证 |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` | `CuperJacobiIteration` no-debug 16 路正常 ABI，DATA 150 MHz，WNS `0.003 ns`，待服务器上板 |
+| `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` | `492f929f-4232-3a37-b7e0-3969b5052219` | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` | `CuperSpmvServiceOnly` 24 路 SpMV-only，DATA 141 MHz，WNS `-0.420 ns`，待服务器上板 |
 
 ## 常用命令
 
@@ -114,3 +118,50 @@ MAX_ITERS=1 make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2
 `cuper-jacobi-iteration-build/CuperJacobiIteration.xo`。
 
 默认软件仿真不需要 `BITFILE`。上板或 emulation 时通过 `BITFILE` 指定 xclbin。
+
+## SpMV-only 宽 HBM 实验
+
+`CuperSpmvServiceOnly` 只计算 `Y=A*X`。host 端用完整矩阵 A，默认令 `X=ones`，
+并用 CSR CPU SpMV 校验输出。它复用本目录的 Cuper 数据格式和 loader/core/
+accumulator/checker/writer，不进入 Jacobi controller 或 update。
+
+24 路软件 smoke：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 \
+  make cuper-jacobi-build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+32 路软件 smoke：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 \
+  make cuper-jacobi-build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+硬件构建时使用同样三组环境变量。24 路 connectivity 将 `Matrix_data_0..23`
+映射到 HBM[0..23]，`SpElement_list_ptr/X/Y_out/Status/Metrics` 分散到空闲 HBM；
+32 路 connectivity 将 `Matrix_data_0..31` 映射到 HBM[0..31]，辅助 buffer 暂时
+共享 HBM[28..31]，这是探索版的已知边界。
+
+2026-06-17 已同步 24 路 SpMV-only xclbin 到
+`395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin`。本机没有 Xilinx OpenCL
+platform，无法上板；服务器侧测试时必须设置：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=24
+BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin
+```
+
+32 路 SpMV-only 已通过 software simulation，但 VPL `create_bd` 失败：
+`You have run out of port connections on /hmss_0. All 33 connections are used`。
+这说明 32 个 Matrix_data m_axi 口加辅助 m_axi 口超过平台 HBM subsystem 连接数；
+后续需要合并 top-level m_axi 端口后再继续做 32 路硬件。

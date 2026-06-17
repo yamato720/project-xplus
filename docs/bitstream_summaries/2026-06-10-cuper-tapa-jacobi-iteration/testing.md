@@ -1,7 +1,73 @@
 # 测试记录
 
-当前记录覆盖 software/TAPA simulation，并记录 light-trace ABI 硬件 demo xclbin 的
-构建和同步结果。这版 routed timing 已收敛，还没有上板性能数据。
+当前记录覆盖 software/TAPA simulation、light-trace ABI 硬件 demo xclbin 的构建和同步
+结果，以及 2026-06-17 同步给服务器测试的 no-debug / SpMV-only 候选。本机没有
+Xilinx OpenCL platform，无法完成上板 smoke；服务器侧测试结果需要后续回填。
+
+## 2026-06-17 同步候选
+
+### 16 路 no-debug Jacobi
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-16lane-nodebug-build/` |
+| Kernel | `CuperJacobiIteration` |
+| UUID | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` |
+| SHA256 | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` |
+| DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
+| timing | WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
+
+服务器侧 smoke 建议：
+
+```bash
+BUILD_DIR=/path/to/cuper-jacobi-16lane-nodebug-build \
+BITFILE=395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin \
+MAX_ITERS=1 \
+bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n16
+```
+
+注意不要设置 `JACOBI_SPMV_ONLY`。若服务器只从仓库 checkout，不保留本机构建目录，
+需要先用当前源码重建 `cuper_jacobi_host`，或把 `BUILD_DIR` 指向同 ABI 的 host
+所在目录。
+
+### 24 路 SpMV-only
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-spmv-only-24hbm-build/` |
+| Kernel | `CuperSpmvServiceOnly` |
+| UUID | `492f929f-4232-3a37-b7e0-3969b5052219` |
+| SHA256 | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` |
+| DATA / KERNEL / HBM clock | `141 MHz` / `500 MHz` / `450 MHz` |
+| timing | WNS `-0.420 ns`，TNS `-359.841 ns`，setup failing endpoints `2281` |
+
+服务器侧 smoke 建议：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=24 \
+BUILD_DIR=/path/to/cuper-jacobi-spmv-only-24hbm-build \
+BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin \
+SPMV_REPEATS=1 \
+bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n16
+```
+
+24 路 timing 未收敛，若上板出现规模相关 timeout 或结果异常，不能直接归因于算法。
+
+### 32 路 SpMV-only
+
+32 路 software simulation 已通过 `thermal2_n16`、`thermal2_n1024`、`thermal2_n65536`
+和 `thermal2_n131072`。硬件 link 失败于 VPL `create_bd`：
+
+```text
+ERROR: [VPL-1] You have run out of port connections on /hmss_0. All 33 connections are used (0 ports prohibited)...
+```
+
+因此没有 32 路 `.xclbin`。当前结论是顶层 `m_axi` 端口数超过 U55C HBM subsystem
+连接上限，继续做 32 路前需要合并辅助端口或改变数据组织。
 
 ## 2026-06-14 isotope trace debug
 

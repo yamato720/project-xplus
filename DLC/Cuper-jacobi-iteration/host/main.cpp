@@ -32,6 +32,16 @@ int EnvInt(const char* name, const int default_value) {
     return value == nullptr ? default_value : std::atoi(value);
 }
 
+bool EnvFlag(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return false;
+    }
+    const std::string text(value);
+    return text == "1" || text == "true" || text == "TRUE" ||
+           text == "on" || text == "ON" || std::atoi(value) != 0;
+}
+
 float EnvFloat(const char* name, const float default_value) {
     // Tau 等浮点配置走同一套环境变量读取，避免为了 demo 再扩命令行参数。
     const char* value = std::getenv(name);
@@ -48,6 +58,13 @@ static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 template <typename... Args>
 int64_t InvokeCuperJacobiIteration(const std::string& bitstream, Args&&... args) {
     return tapa::invoke(CuperJacobiIteration,
+                        bitstream,
+                        std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+int64_t InvokeCuperSpmvServiceOnly(const std::string& bitstream, Args&&... args) {
+    return tapa::invoke(CuperSpmvServiceOnly,
                         bitstream,
                         std::forward<Args>(args)...);
 }
@@ -267,6 +284,229 @@ INDEX_TYPE RunJacobiCpu(const INDEX_TYPE n,
     return max_iters;
 }
 
+int RunSpmvServiceOnly(const std::string& bitstream,
+                       const INDEX_TYPE m,
+                       const INDEX_TYPE n,
+                       const INDEX_TYPE nnzR,
+                       const vector<INDEX_TYPE>& RowPtr,
+                       const vector<INDEX_TYPE>& ColIdx,
+                       const vector<VALUE_TYPE>& Val) {
+    // Cuper 服务隔离实验：完整 A 直接进入 SpMV，不拆 D/R，不做 Jacobi update。
+    const INDEX_TYPE spmv_repeats = EnvInt("SPMV_REPEATS", 1);
+    const double diff_tol = static_cast<double>(EnvFloat("DIFF_TOL", 1.0e-4f));
+
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Only" << "] "
+         << "Run Cuper SpMV service only" << endl;
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Only" << "] "
+         << "Repeats: \t\t\t" << spmv_repeats << endl;
+
+    vector<VALUE_TYPE> X_vec(n, 1.0f);
+    vector<VALUE_TYPE> Y_zero(m, 0.0f);
+    vector<VALUE_TYPE> Y_ref(m, 0.0f);
+    vector<VALUE_TYPE> Y_Device(m, 0.0f);
+
+    cout << "[" << setw(18) << setfill(' ') << "SpMV On CPU" << "] "
+         << "Run CPU reference...";
+    auto start_cpu = std::chrono::steady_clock::now();
+    SpMV_CPU_CSR(m,
+                 n,
+                 nnzR,
+                 RowPtr,
+                 ColIdx,
+                 Val,
+                 X_vec,
+                 Y_zero,
+                 Y_ref);
+    auto end_cpu = std::chrono::steady_clock::now();
+    double time_cpu = std::chrono::duration_cast<std::chrono::nanoseconds>(end_cpu - start_cpu).count();
+    time_cpu *= 1e-9;
+    cout << "  \tDone" << endl;
+    cout << "[" << setw(18) << "SpMV On CPU" << "] Execution Time: \t\t"
+         << time_cpu * 1000 << " ms" << endl;
+
+    vector<INDEX_TYPE> RowIdx_COO(nnzR);
+    vector<INDEX_TYPE> ColIdx_COO(nnzR);
+    vector<VALUE_TYPE> Val_COO(nnzR);
+
+    CSR_2_COO(m,
+              n,
+              nnzR,
+              RowPtr,
+              ColIdx,
+              Val,
+              RowIdx_COO,
+              ColIdx_COO,
+              Val_COO);
+
+#ifdef PINGPONG
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "PING-PONG Buffer \t\t\tON" << endl;
+#else
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "PING-PONG Buffer \t\t\tOFF" << endl;
+#endif
+
+#ifdef X_TABLE
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "X_TABLE \t\t\t\tON" << endl;
+#else
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "X_TABLE \t\t\t\tOFF" << endl;
+#endif
+
+#ifdef FLEX_REUSE
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "FLEX_REUSE \t\t\tON" << endl;
+#else
+    cout << "[" << setw(18) << setfill(' ') << "Optimisation" << "] "
+         << "FLEX_REUSE \t\t\tOFF" << endl;
+#endif
+
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] "
+         << "Slice Size: \t\t\t" << Slice_SIZE << endl;
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] "
+         << "Batch Size: \t\t\t" << BATCH_SIZE << endl;
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] "
+         << "Iteration Num: \t\t\t" << spmv_repeats << endl;
+    cout << "[" << setw(18) << setfill(' ') << "SpMV Configuration" << "] "
+         << "HBM_Channel Num: \t\t\t" << HBM_CHANNEL_NUM << endl;
+
+    cout << "[" << setw(18) << setfill(' ') << "Format Conversion" << "] "
+         << "Create Slice Format...";
+    SparseSlice sliceMatrix;
+    Create_SparseSlice(m,
+                       n,
+                       nnzR,
+                       Slice_SIZE,
+                       RowIdx_COO,
+                       ColIdx_COO,
+                       Val_COO,
+                       sliceMatrix);
+    cout << "  \t\tDone" << endl;
+    cout << "[" << setw(18) << setfill(' ') << "Format Conversion" << "] "
+         << "Slice Size: \t\t\t" << sliceMatrix.sliceSize << endl;
+    cout << "[" << setw(18) << setfill(' ') << "Format Conversion" << "] "
+         << "Slice Num:  \t\t\t" << sliceMatrix.numSlices << endl;
+
+    cout << "[" << setw(18) << setfill(' ') << "Prepare Matrix" << "] "
+         << "Preparing matrix A for FPGA...";
+    vector<vector<SpElement> > SpElement_list_pes;
+    vector<INDEX_TYPE> SpElement_list_ptr;
+    Create_SpElement_list_for_all_PEs(HBM_CHANNEL_NUM * PE_NUM,
+                                      m,
+                                      n,
+                                      Slice_SIZE,
+                                      BATCH_SIZE,
+                                      sliceMatrix,
+                                      SpElement_list_pes,
+                                      SpElement_list_ptr,
+                                      WINDOWS);
+
+    aligned_vector<INDEX_TYPE> SpElement_list_ptr_fpga;
+    INDEX_TYPE SpElement_list_ptr_fpga_size =
+        ((static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) + 15) / 16) * 16;
+    INDEX_TYPE SpElement_list_ptr_fpga_channel_size =
+        ((SpElement_list_ptr_fpga_size + 1023) / 1024) * 1024;
+    SpElement_list_ptr_fpga.resize(SpElement_list_ptr_fpga_channel_size, 0);
+    for (INDEX_TYPE i = 0; i < static_cast<INDEX_TYPE>(SpElement_list_ptr.size()); ++i) {
+        SpElement_list_ptr_fpga[i] = SpElement_list_ptr[i];
+    }
+
+    vector<aligned_vector<unsigned long> > Matrix_fpga_data(HBM_CHANNEL_NUM);
+    Create_SpElement_list_for_all_channels(SpElement_list_pes,
+                                           SpElement_list_ptr,
+                                           Matrix_fpga_data,
+                                           HBM_CHANNEL_NUM);
+    cout << "  \tDone" << endl;
+
+    cout << "[" << setw(18) << setfill(' ') << "Prepare Vector" << "] "
+         << "Packing SpMV X/Y buffers for FPGA...";
+    const INDEX_TYPE x_column_size = ((n + 16 - 1) / 16) * 16;
+    const INDEX_TYPE x_channel_size = ((x_column_size + 1023) / 1024) * 1024;
+    aligned_vector<VALUE_TYPE> X_fpga_data(x_channel_size, 0.0f);
+    for (INDEX_TYPE i = 0; i < n; ++i) {
+        X_fpga_data[i] = X_vec[i];
+    }
+
+    const INDEX_TYPE y_column_size = ((m + 16 - 1) / 16) * 16;
+    const INDEX_TYPE y_channel_size = ((y_column_size + 1023) / 1024) * 1024;
+    aligned_vector<VALUE_TYPE> Y_fpga_data(y_channel_size, 0.0f);
+
+    aligned_vector<INDEX_TYPE> Status_fpga_data(16, 0);
+    aligned_vector<double> Metrics_fpga_data(16, 0.0);
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Status_fpga_data.size()); ++index) {
+        Status_fpga_data[index] = kJacobiStatusSentinelBase + index;
+    }
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Metrics_fpga_data.size()); ++index) {
+        Metrics_fpga_data[index] = kJacobiMetricsSentinelBase - static_cast<double>(index);
+    }
+    cout << "  \tDone" << endl;
+
+    const INDEX_TYPE SpElement_list_ptr_size =
+        static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) - 1;
+    const INDEX_TYPE SpElement_list_ptr_max_len =
+        SpElement_list_ptr[SpElement_list_ptr_size];
+
+    cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] "
+         << "Run Cuper SpMV service only on FPGA/TAPA...";
+    double kernel_time = InvokeCuperSpmvServiceOnly(
+                                      bitstream,
+                                      tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
+                                      tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
+                                      tapa::read_only_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
+                                      tapa::read_write_mmap<float>(Y_fpga_data).reinterpret<float_v16>(),
+                                      tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
+                                      tapa::read_write_mmap<double>(Metrics_fpga_data),
+                                      SpElement_list_ptr_size,
+                                      SpElement_list_ptr_max_len,
+                                      m,
+                                      n,
+                                      spmv_repeats);
+    cout << " \t\tDone" << endl;
+    kernel_time *= 1e-9;
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] Execution Time: \t"
+         << kernel_time * 1000 << " ms" << endl;
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] Status: \t\t"
+         << Status_fpga_data[0] << endl;
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] HBM channels: \t"
+         << Status_fpga_data[1] << endl;
+    cout << "[" << setw(18) << "SpMV On FPGA" << "] Repeats done: \t"
+         << Status_fpga_data[2] << endl;
+    cout << "[spmv-only-metrics] repeats=" << Metrics_fpga_data[0]
+         << " row_num=" << Metrics_fpga_data[1]
+         << " column_num=" << Metrics_fpga_data[2]
+         << " y_packets=" << Metrics_fpga_data[3]
+         << " batch_num=" << Metrics_fpga_data[4]
+         << " matrix_len=" << Metrics_fpga_data[5]
+         << " hbm_channels=" << Metrics_fpga_data[6]
+         << " slice_width=" << Metrics_fpga_data[7] << endl;
+
+    cout << "[" << setw(18) << "Verification" << "] Extracting Device Data...";
+    for (INDEX_TYPE i = 0; i < m; ++i) {
+        Y_Device[i] = Y_fpga_data[i];
+    }
+    cout << " Done" << endl;
+
+    cout << "--- First 16 elements comparison ---" << endl;
+    const INDEX_TYPE compare_count = std::min<INDEX_TYPE>(m, 16);
+    for (INDEX_TYPE i = 0; i < compare_count; ++i) {
+        printf("Index [%d]: CPU=%f, Device=%f\n", i, Y_ref[i], Y_Device[i]);
+    }
+
+    INDEX_TYPE error_num = Verify_correctness(m, Y_ref, Y_Device, diff_tol);
+    if (error_num == 0) {
+        cout << "[" << setw(18) << "Verification" << "] Correctness Verification: \tPassed" << endl;
+    } else {
+        cout << "[" << setw(18) << "Verification" << "] Correctness Verification: \tFailed" << endl;
+    }
+    printf("[%18s] Error Num: %d, Error Percent: %.2f%%\n",
+           "Verification",
+           error_num,
+           100.0 * error_num / m);
+
+    return error_num == 0 ? 0 : 1;
+}
+
 int main(int argc, char* argv[]) {
 
     // 这个 host 是 Cuper-jacobi-iteration 子项目的 Jacobi demo 入口。
@@ -360,6 +600,16 @@ int main(int argc, char* argv[]) {
     }
 
     cout << "  \t\tDone" << endl;
+
+    if (EnvFlag("JACOBI_SPMV_ONLY")) {
+        return RunSpmvServiceOnly(bitstream,
+                                  m,
+                                  n,
+                                  nnzR,
+                                  RowPtr,
+                                  ColIdx,
+                                  Val);
+    }
 
     if (m != n) {
         cerr << "[Jacobi] matrix must be square, got " << m << " x " << n << endl;

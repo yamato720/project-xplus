@@ -81,6 +81,77 @@ BITFILE=/path/to/CuperJacobiMmapProbeOnly.xclbin \
   ROW_NUM=16 MAX_ITERS=1 make cuper-jacobi-run-mmap-probe-xrt
 ```
 
+### SpMV-only 24/32 路探索
+
+`CuperSpmvServiceOnly` 只跑 `Y=A*X`，host 默认令 `X=ones` 并用 CSR CPU SpMV 校验。
+它不拆 `A=D+R`，不取负 X，也不执行 Jacobi update。该模式用于隔离验证 Cuper
+SpMV 服务本体扩到 24/32 路 Matrix_data 后的数据格式、checker 分组和 host ABI。
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 \
+  CUPER_JACOBI_BUILD_DIR=cuper-jacobi-spmv-only-24hbm-build \
+  make cuper-jacobi-build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 \
+  CUPER_JACOBI_BUILD_DIR=cuper-jacobi-spmv-only-24hbm-build \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 \
+  CUPER_JACOBI_BUILD_DIR=cuper-jacobi-spmv-only-32hbm-build \
+  make cuper-jacobi-build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 \
+  CUPER_JACOBI_BUILD_DIR=cuper-jacobi-spmv-only-32hbm-build \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+2026-06-16 software simulation smoke：
+
+| Top | HBM 路数 | 数据集 | 结果 | 关键指标 |
+| --- | ---: | --- | --- | --- |
+| `CuperSpmvServiceOnly` | 24 | `thermal2_n16` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=96`, `Matrix_len=11` |
+| `CuperSpmvServiceOnly` | 24 | `thermal2_n1024` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=96`, `Matrix_len=163` |
+| `CuperSpmvServiceOnly` | 24 | `thermal2_n65536` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=96`, `Batch_num=9`, `Matrix_len=3289` |
+| `CuperSpmvServiceOnly` | 24 | `thermal2_n131072` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=96`, `Batch_num=17`, `Matrix_len=6458` |
+| `CuperSpmvServiceOnly` | 32 | `thermal2_n16` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=128`, `Matrix_len=11` |
+| `CuperSpmvServiceOnly` | 32 | `thermal2_n1024` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=128`, `Matrix_len=162` |
+| `CuperSpmvServiceOnly` | 32 | `thermal2_n65536` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=128`, `Batch_num=8`, `Matrix_len=2515` |
+| `CuperSpmvServiceOnly` | 32 | `thermal2_n131072` | 通过 | `Status=1`, `Error Num=0`, `Slice_SIZE=128`, `Batch_num=16`, `Matrix_len=5090` |
+
+2026-06-17 已生成并同步 24 路 SpMV-only xclbin：
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-spmv-only-24hbm-build/` |
+| Kernel | `CuperSpmvServiceOnly` |
+| UUID | `492f929f-4232-3a37-b7e0-3969b5052219` |
+| SHA256 | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` |
+| DATA / KERNEL / HBM clock | `141 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 未收敛：WNS `-0.420 ns`，TNS `-359.841 ns`，setup failing endpoints `2281` |
+
+服务器侧测试 24 路 SpMV-only 时必须使用：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 \
+  BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin \
+  BUILD_DIR=cuper-jacobi-spmv-only-24hbm-build \
+  bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n16
+```
+
+本机没有 Xilinx OpenCL platform，无法完成上板 smoke。此前本机测试只证明运行环境缺少
+Xilinx ICD，不能作为 bitstream 失败结论。
+
+32 路 SpMV-only 已通过 software simulation，但硬件 link 在 VPL `create_bd` 阶段失败：
+
+```text
+ERROR: [VPL-1] You have run out of port connections on /hmss_0. All 33 connections are used (0 ports prohibited)...
+```
+
+32 路 connectivity 会让 `Matrix_data_0..31` 占满 HBM[0..31]，再叠加
+`SpElement_list_ptr/X/Y_out/Status/Metrics` 的 top-level m_axi 口，超过 U55C HBM
+subsystem 可连接端口数。因此当前没有 32 路 `.xclbin` 可同步。
+
 ## 3. 当前记录数据
 
 | 数据集 | 矩阵规模 | 迭代 | 当前记录 | 关键输出 |
@@ -135,6 +206,25 @@ WNS `-2.764 ns`，TNS `-70810.594 ns`。再上一版 7 路 demo UUID 为
 `Correctness Verification: Passed`。硬件 link 已完成，v++ 总耗时 `5h 42m 5s`；
 由于 timing 未收敛，当前只作为性能方向实验 artifact 保存，不能替代 `20260615`
 已板测通过 demo 的功能结论。
+
+2026-06-17 no-debug 16 路正常 ABI 候选：
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-16lane-nodebug-build/` |
+| Kernel | `CuperJacobiIteration` |
+| ABI | no-debug 正常 Jacobi ABI；`Matrix_data_0..15` HBM[0..15]，`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics` HBM[24] |
+| UUID | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` |
+| SHA256 | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` |
+| DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
+| 时序状态 | 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
+
+这版用于服务器侧验证“删除 Debug BO/DebugMonitor/trace stream 后的 16 路
+master-controller full graph”是否仍保持 `20260615-demo` 的功能边界。本机没有
+Xilinx OpenCL platform，未做上板；服务器测试时不要设置 `JACOBI_SPMV_ONLY`。
+16 路构建日志最后曾暴露过 `link_xclbin_u55c.sh` 尾部引号问题，但 `.xclbin` 和
+`.xclbin.info` 已成功写出，当前脚本已通过 `bash -n`。
 
 2026-06-13 已完成上一版 split-bank mmap-only demo 的 native XRT 上板 smoke：
 

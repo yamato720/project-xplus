@@ -28,9 +28,11 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
+| `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，build 已完成但 routed timing 仍有轻微 setup violation，待上板验证 |
+| `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 no-debug 正常 ABI，150 MHz timing-clean，待服务器上板验证 |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -52,9 +54,21 @@ TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
 
 ```text
 cuper-tapa-jacobi-u55c-20260615-demo.xclbin
+cuper-tapa-jacobi-u55c-20260617-demo.xclbin
 ```
 
-这版是 `CuperJacobiIteration` master-controller full graph light-trace 硬件 debug demo，
+`cuper-tapa-jacobi-u55c-20260617-demo.xclbin` 是 16 路 no-debug 正常 ABI
+`CuperJacobiIteration`，用于观察删除 light-trace Debug BO/DebugMonitor 后，当前
+master-controller full graph 在服务器 U55C 上的表现。该版 UUID 为
+`f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a`，SHA256 为
+`61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977`。最终
+xclbin info 中 DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing 已收敛：
+WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`。构建目录为
+`cuper-jacobi-16lane-nodebug-build/`。本机无 Xilinx OpenCL platform，未做上板测试；
+服务器侧测试应使用 kernel `CuperJacobiIteration`，host 不设置
+`JACOBI_SPMV_ONLY`。
+
+`20260615-demo` 是 `CuperJacobiIteration` master-controller full graph light-trace 硬件 debug demo，
 接入完整 Jacobi dataflow、Cuper SpMV service 和 Jacobi update。当前控制流取消旧的
 `RoundToken`/`FeedbackToken` 自循环和 `UpdateFrameFork`，改由
 `Jacobi_MasterController` 每轮显式发矩阵/compute/update command，并等待
@@ -106,6 +120,28 @@ HBM 分配为：`Matrix_data_0..23` 映射到 HBM[0..23]，
 收敛：WNS `-0.120 ns`，TNS `-2.169 ns`，setup failing endpoints `64`。
 当前只同步 artifact 和构建记录，尚未进行上板验证，也不替换 `20260615` 已板测通过
 demo 的结论。
+
+TAPA Cuper / SpMV-only 24 路服务实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260617-demo.xclbin
+```
+
+这版来自 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly` 顶层，只计算
+`Y=A*X`，不拆 `A=D+R`，不取负 `X`，也不执行 Jacobi update。它用于隔离验证 Cuper
+SpMV service 扩到 24 路 Matrix_data 的硬件边界。UUID 为
+`492f929f-4232-3a37-b7e0-3969b5052219`，SHA256 为
+`c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705`。
+DATA/KERNEL/HBM clock 为 `141/500/450 MHz`；routed timing 未收敛：
+WNS `-0.420 ns`，TNS `-359.841 ns`，setup failing endpoints `2281`。构建目录为
+`cuper-jacobi-spmv-only-24hbm-build/`。服务器侧测试必须设置
+`JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24`，并使用
+`cuper_jacobi_host` 的 SpMV-only 分支。
+
+同一源码下的 32 路 SpMV-only 构建在 VPL `create_bd` 阶段失败，原因是 U55C HBM
+subsystem port connection 用满：`You have run out of port connections on /hmss_0.
+All 33 connections are used`。因此 32 路没有 `.xclbin` 可同步，后续若要继续探索，
+需要先减少 top-level `m_axi` 端口数，而不是只调整 HBM bank 映射。
 
 它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为

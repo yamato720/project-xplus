@@ -16,7 +16,9 @@ demo-only 上板：单轮 `MAX_ITERS=1` 覆盖到完整 `thermal2`，完整固�
 `thermal2_n1024`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
 `thermal2`。2026-06-16 另生成并同步了 `JACOBI_WIDE_HBM=1` 的 24 路 Matrix_data
 no-debug 实验 artifact；该版 build 完成但 routed timing 仍有轻微 setup violation，
-尚未上板验证。
+尚未上板验证。2026-06-17 又同步了 16 路 no-debug 正常 ABI 候选，以及
+`CuperSpmvServiceOnly` 24 路 SpMV-only 候选；本机无 Xilinx OpenCL platform，
+上板测试留给服务器侧执行。
 
 ## 版本定位
 
@@ -27,8 +29,8 @@ no-debug 实验 artifact；该版 build 完成但 routed timing 仍有轻微 set
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
-| 当前实验 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` |
-| 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试；wide-HBM 24 路 no-debug 实验版已构建但仍有轻微 setup violation |
+| 当前实验 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin`, `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin`, `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` |
+| 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试；wide-HBM 24 路 no-debug 实验版已构建但仍有轻微 setup violation；20260617 no-debug 16 路和 24 路 SpMV-only 已同步待服务器上板 |
 | 是否建议晋级标准 | 暂不建议，当前仍是 debug demo，且硬件没有内部收敛 early-exit |
 
 这条主线做普通 Jacobi iteration：
@@ -77,6 +79,17 @@ $$
 HBM[0..23]，`SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics` 映射到
 HBM[31]，正常 Jacobi ABI 不再带 Debug BO。该版用于观察 24 路 Cuper 主矩阵通道的
 上限方向，但仍有轻微 setup violation，不能作为已验证功能或性能结论。
+
+`20260617-demo` Jacobi 候选回到 16 路 no-debug 正常 ABI：`Matrix_data_0..15`
+映射到 HBM[0..15]，`B`/`Diag_inv`/`X` 分别映射到 HBM[20]/HBM[21]/HBM[22]，
+`Status` 和 `Metrics` 共享 HBM[24]。该版用于验证删除 Debug BO 和 trace 后，
+master-controller full graph 是否仍保持已板测通过基线的行为。
+
+`cuper-tapa-spmv-u55c-20260617-demo.xclbin` 是 `CuperSpmvServiceOnly`，属于
+SpMV-only 服务隔离实验：`Matrix_data_0..23` 映射到 HBM[0..23]，
+`SpElement_list_ptr`/`X`/`Y_out` 分别映射到 HBM[24]/HBM[25]/HBM[26]，
+`Status` 和 `Metrics` 映射到 HBM[30]/HBM[31]。服务器运行时必须设置
+`JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24`。
 
 ## 当前 demo bitstream
 
@@ -168,6 +181,28 @@ host/software smoke，`thermal2_n1024 MAX_ITERS=1` 均 `Error Num=0`。硬件 li
 生成 `.xclbin`，v++ 总耗时 `6h 12m 56s`。由于 routed timing 仍有轻微 setup
 violation，当前只保存为性能方向实验 artifact，尚未做上板验证，也不覆盖
 `20260615` 已板测通过 demo 的结论。
+
+## 2026-06-17 no-debug / SpMV-only 同步候选
+
+| 文件 | Kernel | UUID | SHA256 | DATA/KERNEL/HBM | timing |
+| --- | --- | --- | --- | --- | --- |
+| `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | `CuperJacobiIteration` | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns` |
+| `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` | `CuperSpmvServiceOnly` | `492f929f-4232-3a37-b7e0-3969b5052219` | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` | `141/500/450 MHz` | WNS `-0.420 ns`, TNS `-359.841 ns` |
+
+本机没有 Xilinx OpenCL platform，`/etc/OpenCL/vendors` 只有 AMD ICD，因此上板 smoke
+没有运行成功；这不是 bitstream 功能失败。两个候选已同步到 `395bitstream/`，等待
+服务器侧按对应 ABI 测试。
+
+32 路 `CuperSpmvServiceOnly` 已通过 software simulation，但硬件 link 在 VPL
+`create_bd` 阶段失败：
+
+```text
+ERROR: [VPL-1] You have run out of port connections on /hmss_0. All 33 connections are used (0 ports prohibited)...
+```
+
+当前判断是 32 个 `Matrix_data` top-level m_axi 口已经耗尽 HBM subsystem port
+connection，再加 `SpElement_list_ptr/X/Y_out/Status/Metrics` 辅助端口会超过平台上限。
+后续若继续做 32 路，需要先减少顶层 m_axi 端口数。
 
 上一版 mmap-only split-bank probe 的 2026-06-13 native XRT 上板 smoke 已通过：
 

@@ -7,7 +7,8 @@ BUILD_DIR="${BUILD_DIR:-$(cd "$ROOT_DIR/../.." && pwd)/cuper-jacobi-iteration-bu
 # shellcheck source=env_u55c.sh
 source "$ROOT_DIR/scripts/env_u55c.sh"
 
-BITFILE="${BITFILE:-$BUILD_DIR/CuperJacobiIteration.xclbin}"
+TOP="${JACOBI_TOP:-CuperJacobiIteration}"
+BITFILE="${BITFILE:-$BUILD_DIR/$TOP.xclbin}"
 MATRIX_FILE="${1:-$ROOT_DIR/data/matrices/cant.mtx}"
 
 if [[ ! -x "$BUILD_DIR/cuper_jacobi_host" ]]; then
@@ -18,7 +19,7 @@ fi
 
 if [[ ! -f "$BITFILE" ]]; then
   echo "Missing bitstream: $BITFILE" >&2
-  echo "Set BITFILE=/path/to/CuperJacobiIteration.xclbin or copy it into this directory." >&2
+  echo "Set BITFILE=/path/to/$TOP.xclbin or copy it into this directory." >&2
   exit 1
 fi
 

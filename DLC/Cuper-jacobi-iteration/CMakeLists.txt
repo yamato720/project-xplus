@@ -85,11 +85,24 @@ add_executable(cuper_jacobi_host
     kernels/Cuper.cpp       # 移动到了 kernels/ 目录
 )
 
-if(DEFINED ENV{JACOBI_WIDE_HBM} AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "" AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "0")
-    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_WIDE_HBM=1)
-    message(STATUS "Cuper Jacobi wide HBM is ENABLED")
+set(JACOBI_HBM_CHANNELS_VALUE "$ENV{JACOBI_HBM_CHANNELS}")
+if(JACOBI_HBM_CHANNELS_VALUE STREQUAL "" AND DEFINED ENV{JACOBI_WIDE_HBM} AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "" AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "0")
+    set(JACOBI_HBM_CHANNELS_VALUE "24")
+endif()
+if(JACOBI_HBM_CHANNELS_VALUE STREQUAL "")
+    set(JACOBI_HBM_CHANNELS_VALUE "16")
+endif()
+
+if(JACOBI_HBM_CHANNELS_VALUE STREQUAL "24")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_HBM_CHANNELS_24=1)
+    message(STATUS "Cuper Jacobi HBM channels: 24")
+elseif(JACOBI_HBM_CHANNELS_VALUE STREQUAL "32")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_HBM_CHANNELS_32=1)
+    message(STATUS "Cuper Jacobi HBM channels: 32")
+elseif(JACOBI_HBM_CHANNELS_VALUE STREQUAL "16")
+    message(STATUS "Cuper Jacobi HBM channels: 16")
 else()
-    message(STATUS "Cuper Jacobi wide HBM is disabled")
+    message(FATAL_ERROR "Unsupported JACOBI_HBM_CHANNELS=${JACOBI_HBM_CHANNELS_VALUE}; use 16, 24, or 32")
 endif()
 
 # -----------------------------------------------------------------------------

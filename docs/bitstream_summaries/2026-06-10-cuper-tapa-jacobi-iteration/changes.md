@@ -178,6 +178,24 @@
   `6h 12m 56s`。routed timing 仍未完全收敛：WNS `-0.120 ns`，TNS `-2.169 ns`，
   setup failing endpoints `64`。该版只作为性能方向实验 artifact 保存，尚未上板，
   不替代 `20260615` 已板测通过 demo。
+- 2026-06-17 已生成并同步 16 路 no-debug 正常 ABI 候选：
+  `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin`。UUID 为
+  `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a`，SHA256 为
+  `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977`。
+  DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing 已收敛：WNS
+  `0.003 ns`，TNS `0.000 ns`。它用于服务器侧验证删除 Debug BO/DebugMonitor/trace
+  stream 后的 master-controller full graph。
+- 2026-06-17 已生成并同步 24 路 SpMV-only 服务候选：
+  `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin`。Kernel 为
+  `CuperSpmvServiceOnly`，UUID 为 `492f929f-4232-3a37-b7e0-3969b5052219`，SHA256 为
+  `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705`。
+  DATA/KERNEL/HBM clock 为 `141/500/450 MHz`，routed timing 未收敛：WNS
+  `-0.420 ns`，TNS `-359.841 ns`，setup failing endpoints `2281`。服务器侧测试
+  必须设置 `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24`。
+- 2026-06-17 的 32 路 `CuperSpmvServiceOnly` 已通过 software simulation，但硬件
+  link 在 VPL `create_bd` 阶段失败，错误为 HBM subsystem port connection 用满：
+  `You have run out of port connections on /hmss_0. All 33 connections are used`。
+  当前没有 32 路 `.xclbin` 可同步；后续要继续做 32 路需先减少顶层 `m_axi` 端口数。
 
 ## 当前没有做
 
@@ -196,6 +214,8 @@
   标准/性能优化晋级候选。
 - 没有把 isotope trace 版当作性能优化或标准候选；它是定位 `Finish()` 卡住点的
   debug build 边界。
+- 没有更新正式 `source.diff`；2026-06-17 两个新文件仍待服务器上板验证，其中
+  24 路 SpMV-only 还存在 routed timing violation。
 
 ## 当前风险
 

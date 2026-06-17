@@ -19,7 +19,7 @@ KERNEL_DIR := $(ROOT_DIR)/kernels
 CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 DATA_DIR := $(ROOT_DIR)/data
-JACOBI_DEBUG_ENV := $(if $(JACOBI_WIDE_HBM),JACOBI_WIDE_HBM="$(JACOBI_WIDE_HBM)") $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(JACOBI_KERNEL_FREQUENCY),JACOBI_KERNEL_FREQUENCY="$(JACOBI_KERNEL_FREQUENCY)")
+JACOBI_DEBUG_ENV := $(if $(JACOBI_WIDE_HBM),JACOBI_WIDE_HBM="$(JACOBI_WIDE_HBM)") $(if $(JACOBI_HBM_CHANNELS),JACOBI_HBM_CHANNELS="$(JACOBI_HBM_CHANNELS)") $(if $(JACOBI_TOP),JACOBI_TOP="$(JACOBI_TOP)") $(if $(JACOBI_SPMV_ONLY),JACOBI_SPMV_ONLY="$(JACOBI_SPMV_ONLY)") $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(JACOBI_KERNEL_FREQUENCY),JACOBI_KERNEL_FREQUENCY="$(JACOBI_KERNEL_FREQUENCY)")
 
 .PHONY: all help tree clean launch launcher build-host run-sw regression-sw build-xo link-xclbin hw-tmux run-hw
 
@@ -52,6 +52,10 @@ help:
 	@echo "  make link-xclbin  Link CuperJacobiIteration.xclbin"
 	@echo "  make hw-tmux      Build host/XO/xclbin in tmux"
 	@echo "  make run-hw       Run hardware xclbin, MATRIX=<path>"
+	@echo ""
+	@echo "SpMV-only wide-HBM example:"
+	@echo "  JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=24 make run-sw MATRIX=<csr-or-mtx>"
+	@echo "  JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 make build-xo"
 
 tree:
 	@find "$(ROOT_DIR)" -maxdepth 2 | sort

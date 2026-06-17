@@ -133,14 +133,18 @@ inline void Jacobi_UpdatePairComputeImpl(tapa::istream<JacobiUpdateCommand> &Com
     }
 }
 
-#ifndef JACOBI_WIDE_HBM
-struct JacobiNegRxReader2 {
+#if defined(JACOBI_HBM_CHANNELS_GE_32)
+struct JacobiNegRxReader4 {
     tapa::istream<float_v2> &in0;
     tapa::istream<float_v2> &in1;
+    tapa::istream<float_v2> &in2;
+    tapa::istream<float_v2> &in3;
 
     bool ready(const INDEX_TYPE index) {
 #pragma HLS inline
-        return (index == 0) ? !in0.empty() : !in1.empty();
+        return (index == 0) ? !in0.empty()
+             : ((index == 1) ? !in1.empty()
+             : ((index == 2) ? !in2.empty() : !in3.empty()));
     }
 
     float_v2 read(const INDEX_TYPE index) {
@@ -148,8 +152,12 @@ struct JacobiNegRxReader2 {
         float_v2 value;
         if (index == 0) {
             in0.try_read(value);
-        } else {
+        } else if (index == 1) {
             in1.try_read(value);
+        } else if (index == 2) {
+            in2.try_read(value);
+        } else {
+            in3.try_read(value);
         }
         return value;
     }
@@ -158,15 +166,17 @@ struct JacobiNegRxReader2 {
 void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
                               tapa::istream<float_v2> &Neg_Rx_in_0,
                               tapa::istream<float_v2> &Neg_Rx_in_1,
+                              tapa::istream<float_v2> &Neg_Rx_in_2,
+                              tapa::istream<float_v2> &Neg_Rx_in_3,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
                               tapa::ostream<JacobiUpdatedPair> &Updated_out) {
-    JacobiNegRxReader2 reader{Neg_Rx_in_0, Neg_Rx_in_1};
+    JacobiNegRxReader4 reader{Neg_Rx_in_0, Neg_Rx_in_1, Neg_Rx_in_2, Neg_Rx_in_3};
     Jacobi_UpdatePairComputeImpl(Command_in,
                                  reader,
                                  Coeff_in,
                                  Updated_out);
 }
-#else
+#elif defined(JACOBI_HBM_CHANNELS_GE_24)
 struct JacobiNegRxReader3 {
     tapa::istream<float_v2> &in0;
     tapa::istream<float_v2> &in1;
@@ -198,6 +208,39 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
                               tapa::istream<JacobiCoeffPair> &Coeff_in,
                               tapa::ostream<JacobiUpdatedPair> &Updated_out) {
     JacobiNegRxReader3 reader{Neg_Rx_in_0, Neg_Rx_in_1, Neg_Rx_in_2};
+    Jacobi_UpdatePairComputeImpl(Command_in,
+                                 reader,
+                                 Coeff_in,
+                                 Updated_out);
+}
+#else
+struct JacobiNegRxReader2 {
+    tapa::istream<float_v2> &in0;
+    tapa::istream<float_v2> &in1;
+
+    bool ready(const INDEX_TYPE index) {
+#pragma HLS inline
+        return (index == 0) ? !in0.empty() : !in1.empty();
+    }
+
+    float_v2 read(const INDEX_TYPE index) {
+#pragma HLS inline
+        float_v2 value;
+        if (index == 0) {
+            in0.try_read(value);
+        } else {
+            in1.try_read(value);
+        }
+        return value;
+    }
+};
+
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
+                              tapa::istream<float_v2> &Neg_Rx_in_0,
+                              tapa::istream<float_v2> &Neg_Rx_in_1,
+                              tapa::istream<JacobiCoeffPair> &Coeff_in,
+                              tapa::ostream<JacobiUpdatedPair> &Updated_out) {
+    JacobiNegRxReader2 reader{Neg_Rx_in_0, Neg_Rx_in_1};
     Jacobi_UpdatePairComputeImpl(Command_in,
                                  reader,
                                  Coeff_in,
