@@ -19,6 +19,7 @@
       --tapa-pcg-demo: #7d2148;
       --tapa-init: #2f7d4f;
       --jacobi: #526d1f;
+      --spmv24: #2b6bb0;
       --ok: #1f7a4d;
       --warn: #9a4c18;
       --bad: #9b2c2c;
@@ -29,6 +30,7 @@
       --soft-tapa-pcg-demo: #f1d4df;
       --soft-tapa-init: #e1f2e8;
       --soft-jacobi: #edf3d9;
+      --soft-spmv24: #e2ecf7;
       --soft-current-demo: #dff5ee;
       --soft-warn: #fbecd8;
       --shadow: 0 10px 28px rgba(24, 32, 38, 0.08);
@@ -217,6 +219,7 @@
     .tag.tapa-pcg { color: var(--tapa-pcg); background: var(--soft-tapa-pcg); }
     .tag.tapa-pcg-demo { color: var(--tapa-pcg-demo); background: var(--soft-tapa-pcg-demo); }
     .tag.jacobi { color: var(--jacobi); background: var(--soft-jacobi); }
+    .tag.spmv24 { color: var(--spmv24); background: var(--soft-spmv24); }
     .tag.current-demo { color: var(--ok); background: var(--soft-current-demo); border: 1px solid #b9e6d5; }
     .tag.oktag { color: var(--ok); background: #e2f2ea; }
     .tag.warntag { color: var(--warn); background: var(--soft-warn); }
@@ -242,6 +245,7 @@
     .bar .tapa-pcg { background: var(--tapa-pcg); }
     .bar .tapa-pcg-demo { background: var(--tapa-pcg-demo); }
     .bar .jacobi { background: var(--jacobi); }
+    .bar .spmv24 { background: var(--spmv24); }
     .two-col {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -284,6 +288,7 @@
     svg .line-tapa-pcg-demo { fill: none; stroke: var(--tapa-pcg-demo); stroke-width: 3; }
     svg .line-tapa-init { fill: none; stroke: var(--tapa-init); stroke-width: 3; stroke-dasharray: 2 4; }
     svg .line-jacobi { fill: none; stroke: var(--jacobi); stroke-width: 3; stroke-dasharray: 10 3 2 3; }
+    svg .line-spmv24 { fill: none; stroke: var(--spmv24); stroke-width: 3; }
     svg .line-standard { fill: none; stroke: var(--tapa-pcg); stroke-width: 3; stroke-dasharray: 5 4; }
     svg .line-prev-demo { fill: none; stroke: var(--tapa-pcg-demo); stroke-width: 3; stroke-dasharray: 7 4; }
     svg .line-current-demo { fill: none; stroke: var(--ok); stroke-width: 3; }
@@ -294,6 +299,7 @@
     svg .dot-tapa-pcg-demo { fill: var(--tapa-pcg-demo); }
     svg .dot-tapa-init { fill: var(--tapa-init); }
     svg .dot-jacobi { fill: var(--jacobi); }
+    svg .dot-spmv24 { fill: var(--spmv24); }
     svg .dot-standard { fill: var(--tapa-pcg); }
     svg .dot-prev-demo { fill: var(--tapa-pcg-demo); }
     svg .dot-current-demo { fill: var(--ok); }
@@ -661,6 +667,16 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <td class="num">418 MHz</td>
               <td><code>19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2</code></td>
             </tr>
+            <tr class="current-demo-row">
+              <td>single SpMV demo 对比 C：<span class="tag current-demo">24 路 SpMV-only</span></td>
+              <td><span class="tag current-demo">24 路 demo</span> Cuper SpMV service-only</td>
+              <td><code>cuper-tapa-spmv-u55c-20260617-demo.xclbin</code></td>
+              <td><code>CuperSpmvServiceOnly</code></td>
+              <td><code>492f929f-4232-3a37-b7e0-3969b5052219</code></td>
+              <td class="num">141 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705</code></td>
+            </tr>
             <tr>
               <td>Jacobi 标准</td>
               <td><span class="tag jacobi">TAPA Jacobi</span></td>
@@ -983,6 +999,100 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         </table>
       </div>
 
+      <h3>Single SpMV demo：16 路 one-shot vs 24 路 service-only</h3>
+      <p>
+        24 路数据来自 2026-06-17 <code>CuperSpmvServiceOnly</code> 上板测试，日志位于
+        <code>logs/jacobi_16nodebug_and_spmv24_hw_20260617_120048/</code>，
+        bitstream 为 <code>395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin</code>，
+        UUID 为 <code>492f929f-4232-3a37-b7e0-3969b5052219</code>，SHA256 为
+        <code>c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705</code>。
+        它只计算 <code>Y=A*X</code>，不进入 Jacobi controller/update；DATA/KERNEL/HBM 为
+        <code>141/500/450 MHz</code>，routed timing 未完全收敛：WNS <code>-0.420 ns</code>。
+      </p>
+      <p>
+        16 路对照按用户要求直接取本 HTML 已有的 2026-05-29 one-shot
+        <code>CuperPcgSpmv</code> single SpMV demo 数据。两者都属于 single SpMV 量级观察，
+        但 top 和时钟不同，因此这里记录实测趋势，不把它解释成 24 路架构的纯粹加速比。
+      </p>
+      <div class="legend">
+        <span><i style="background: var(--ok);"></i>16 路 one-shot SpMV demo</span>
+        <span><i style="background: var(--spmv24);"></i>24 路 Cuper SpMV service-only</span>
+      </div>
+      <div class="svg-wrap">
+        <svg width="980" height="370" viewBox="0 0 980 370" role="img" aria-label="16-lane and 24-lane SpMV bar comparison">
+          <line class="gridline" x1="80" y1="20" x2="930" y2="20"></line>
+          <line class="gridline" x1="80" y1="72" x2="930" y2="72"></line>
+          <line class="gridline" x1="80" y1="125" x2="930" y2="125"></line>
+          <line class="gridline" x1="80" y1="177" x2="930" y2="177"></line>
+          <line class="gridline" x1="80" y1="230" x2="930" y2="230"></line>
+          <line class="gridline" x1="80" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="80" y1="300" x2="930" y2="300"></line>
+          <line class="axis" x1="80" y1="20" x2="80" y2="300"></line>
+          <text x="24" y="24">2.0 ms</text>
+          <text x="24" y="76">1.0 ms</text>
+          <text x="24" y="129">0.5 ms</text>
+          <text x="24" y="181">0.25 ms</text>
+          <text x="24" y="234">0.1 ms</text>
+          <text x="24" y="304">0.05 ms</text>
+
+          <rect x="130" y="275.7" width="28" height="24.3" fill="var(--ok)"></rect>
+          <rect x="162" y="245.5" width="28" height="54.5" fill="var(--spmv24)"></rect>
+          <text x="118" y="323">n16</text>
+          <text x="124" y="271">0.069</text>
+          <text x="158" y="241">0.103</text>
+
+          <rect x="300" y="217.1" width="28" height="82.9" fill="var(--ok)"></rect>
+          <rect x="332" y="206.4" width="28" height="93.6" fill="var(--spmv24)"></rect>
+          <text x="282" y="323">n65k</text>
+          <text x="292" y="213">0.149</text>
+          <text x="329" y="202">0.172</text>
+
+          <rect x="470" y="182.3" width="28" height="117.7" fill="var(--ok)"></rect>
+          <rect x="502" y="177.0" width="28" height="123.0" fill="var(--spmv24)"></rect>
+          <text x="446" y="323">n131k</text>
+          <text x="462" y="178">0.236</text>
+          <text x="499" y="173">0.253</text>
+
+          <rect x="640" y="137.5" width="28" height="162.5" fill="var(--ok)"></rect>
+          <rect x="672" y="140.6" width="28" height="159.4" fill="var(--spmv24)"></rect>
+          <text x="616" y="323">n262k</text>
+          <text x="632" y="133">0.425</text>
+          <text x="669" y="136">0.408</text>
+
+          <rect x="810" y="28.8" width="28" height="271.2" fill="var(--ok)"></rect>
+          <rect x="842" y="33.7" width="28" height="266.3" fill="var(--spmv24)"></rect>
+          <text x="800" y="323">thermal2</text>
+          <text x="800" y="24">1.782</text>
+          <text x="839" y="29">1.671</text>
+        </svg>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th class="num">16 路 one-shot ms</th>
+              <th class="num">24 路 SpMV-only ms</th>
+              <th class="num">24 路 rc</th>
+              <th class="num">24 路 Status</th>
+              <th class="num">24 路 matrix_len</th>
+              <th class="num">16/24 比值</th>
+              <th>状态/说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16</code></td><td class="num">0.068825</td><td class="num">0.102523</td><td class="num">0</td><td class="num">1</td><td class="num">11</td><td class="num">0.67x</td><td><span class="tag oktag">ok</span> 24 路小规模固定开销更高</td></tr>
+            <tr><td><code>thermal2_n1024</code></td><td class="num">-</td><td class="num">0.083146</td><td class="num">0</td><td class="num">1</td><td class="num">163</td><td class="num">-</td><td><span class="tag oktag">ok</span> 16 路 one-shot demo 本 HTML 无同点记录</td></tr>
+            <tr><td><code>thermal2_n4096</code></td><td class="num">-</td><td class="num">0.098175</td><td class="num">0</td><td class="num">1</td><td class="num">253</td><td class="num">-</td><td><span class="tag oktag">ok</span> 16 路 one-shot demo 本 HTML 无同点记录</td></tr>
+            <tr><td><code>thermal2_n16384</code></td><td class="num">-</td><td class="num">0.113324</td><td class="num">0</td><td class="num">1</td><td class="num">865</td><td class="num">-</td><td><span class="tag oktag">ok</span> 16 路 one-shot demo 本 HTML 无同点记录</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">0.149121</td><td class="num">0.171614</td><td class="num">0</td><td class="num">1</td><td class="num">3289</td><td class="num">0.87x</td><td><span class="tag oktag">ok</span> 24 路略慢</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">0.235847</td><td class="num">0.252646</td><td class="num">0</td><td class="num">1</td><td class="num">6458</td><td class="num">0.93x</td><td><span class="tag oktag">ok</span> 24 路略慢</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">0.425394</td><td class="num">0.408279</td><td class="num">0</td><td class="num">1</td><td class="num">13143</td><td class="num">1.04x</td><td><span class="tag oktag">ok</span> 24 路略快</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">1.781541</td><td class="num">1.670610</td><td class="num">0</td><td class="num">1</td><td class="num">63348</td><td class="num">1.07x</td><td><span class="tag oktag">ok</span> 24 路完整规模略快，且通过 Error Num 0</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <h3>Full-PCG demo：CuperPcg packed timing 实验</h3>
       <p>
         测试对象为 2026-05-31 当前 full-PCG demo，kernel 为 <code>CuperPcg</code>，UUID 为
@@ -1242,6 +1352,8 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         和完整 <code>thermal2</code> 为 timeout，本 demo 两点均返回。
         Jacobi 的单轮计算同样是以 Cuper SpMV service 为主体再写回 <code>X</code>，因此
         这里把 <code>MAX_ITERS=1</code> 的 Jacobi kernel 时间也画在 SpMV 对比图上。
+        2026-06-17 的 24 路 <code>CuperSpmvServiceOnly</code> 结果另在上方柱状图与下表列出；
+        由于它的共同点已经和 16 路 one-shot demo 做成柱状比较，本折线图保持原五条曲线不再挤入新线。
       </p>
       <p>
         注意：这一组 single SpMV 只测矩阵乘本体，不包含 PCG 的 FP64 dot、alpha/beta、
@@ -1325,19 +1437,21 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <th class="num">上一 demo iter SpMV</th>
               <th class="num">上一 demo AP path</th>
               <th class="num">本 demo SpMV</th>
+              <th class="num">24 路 SpMV-only</th>
               <th class="num">Jacobi 1iter</th>
               <th class="num">本 demo / TAPA 标准</th>
+              <th class="num">16 路 / 24 路</th>
               <th class="num">Jacobi / TAPA 标准</th>
               <th class="num">no-TAPA / 本 demo</th>
               <th>备注</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>thermal2_n16</code></td><td class="num">0.0670</td><td class="num">0.2566</td><td class="num">0.0028</td><td class="num">0.0013</td><td class="num">0.0024</td><td class="num">0.068825</td><td class="num">0.157074</td><td class="num">1.03x</td><td class="num">2.34x</td><td class="num">3.7x</td><td>Jacobi 多了 update/writeback 控制；小数据固定开销明显</td></tr>
-            <tr><td><code>thermal2_n65536</code></td><td class="num">0.1379</td><td class="num">10.8403</td><td class="num">8.7853</td><td class="num">6.7794</td><td class="num">6.9935</td><td class="num">0.149121</td><td class="num">0.374841</td><td class="num">1.08x</td><td class="num">2.72x</td><td class="num">72.7x</td><td>Jacobi 1iter 正常返回，但不是纯 SpMV 时间</td></tr>
-            <tr><td><code>thermal2_n131072</code></td><td class="num">0.2197</td><td class="num">21.4812</td><td class="num">17.5670</td><td class="num">13.5638</td><td class="num">13.9875</td><td class="num">0.235847</td><td class="num">0.646992</td><td class="num">1.07x</td><td class="num">2.94x</td><td class="num">91.1x</td><td>single SpMV 上 no-TAPA 4ch 约慢两个数量级</td></tr>
-            <tr><td><code>thermal2_n262144</code></td><td class="num">timeout</td><td class="num">42.8973</td><td class="num">35.1312</td><td class="num">27.1297</td><td class="num">27.9754</td><td class="num">0.425394</td><td class="num">1.112300</td><td class="num">-</td><td class="num">-</td><td class="num">100.8x</td><td>TAPA Cuper SpMV 标准旧记录 180s 未返回；Jacobi 和 one-shot SpMV 均返回</td></tr>
-            <tr><td><code>thermal2</code></td><td class="num">timeout</td><td class="num">200.6181</td><td class="num">failed</td><td class="num">failed</td><td class="num">135.5032</td><td class="num">1.781541</td><td class="num">4.806930</td><td class="num">-</td><td class="num">-</td><td class="num">112.6x</td><td>TAPA Cuper SpMV 标准旧记录 180s 未返回；Jacobi 1iter 和 one-shot SpMV 都能跑完整规模</td></tr>
+            <tr><td><code>thermal2_n16</code></td><td class="num">0.0670</td><td class="num">0.2566</td><td class="num">0.0028</td><td class="num">0.0013</td><td class="num">0.0024</td><td class="num">0.068825</td><td class="num">0.102523</td><td class="num">0.157074</td><td class="num">1.03x</td><td class="num">0.67x</td><td class="num">2.34x</td><td class="num">3.7x</td><td>24 路 SpMV-only 小数据固定开销更高</td></tr>
+            <tr><td><code>thermal2_n65536</code></td><td class="num">0.1379</td><td class="num">10.8403</td><td class="num">8.7853</td><td class="num">6.7794</td><td class="num">6.9935</td><td class="num">0.149121</td><td class="num">0.171614</td><td class="num">0.374841</td><td class="num">1.08x</td><td class="num">0.87x</td><td class="num">2.72x</td><td class="num">72.7x</td><td>24 路 SpMV-only 返回并通过校验，但略慢于 16 路 one-shot demo</td></tr>
+            <tr><td><code>thermal2_n131072</code></td><td class="num">0.2197</td><td class="num">21.4812</td><td class="num">17.5670</td><td class="num">13.5638</td><td class="num">13.9875</td><td class="num">0.235847</td><td class="num">0.252646</td><td class="num">0.646992</td><td class="num">1.07x</td><td class="num">0.93x</td><td class="num">2.94x</td><td class="num">91.1x</td><td>24 路 SpMV-only 返回并通过校验，接近 16 路 one-shot demo</td></tr>
+            <tr><td><code>thermal2_n262144</code></td><td class="num">timeout</td><td class="num">42.8973</td><td class="num">35.1312</td><td class="num">27.1297</td><td class="num">27.9754</td><td class="num">0.425394</td><td class="num">0.408279</td><td class="num">1.112300</td><td class="num">-</td><td class="num">1.04x</td><td class="num">-</td><td class="num">100.8x</td><td>24 路 SpMV-only 和 16 路 one-shot demo 都返回；24 路略快</td></tr>
+            <tr><td><code>thermal2</code></td><td class="num">timeout</td><td class="num">200.6181</td><td class="num">failed</td><td class="num">failed</td><td class="num">135.5032</td><td class="num">1.781541</td><td class="num">1.670610</td><td class="num">4.806930</td><td class="num">-</td><td class="num">1.07x</td><td class="num">-</td><td class="num">112.6x</td><td>24 路 SpMV-only 完整规模返回并通过 Error Num 0；24 路略快</td></tr>
           </tbody>
         </table>
       </div>
@@ -1915,6 +2029,9 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     2026-06-15 Jacobi demo-only 上板测试日志位于
     <code>logs/jacobi_full_graph_hw_20260615_223100_master_controller/</code>，
     bitstream 为 <code>395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin</code>。
+    2026-06-17 24 路 <code>CuperSpmvServiceOnly</code> 上板测试日志位于
+    <code>logs/jacobi_16nodebug_and_spmv24_hw_20260617_120048/</code>，
+    bitstream 为 <code>395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin</code>。
     本 HTML 自包含核心结果，便于随 <code>395bitstream/</code> 一起同步查看。
   </footer>
 </body>
