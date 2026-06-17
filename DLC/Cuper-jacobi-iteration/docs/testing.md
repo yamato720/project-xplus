@@ -209,24 +209,24 @@ WNS `-2.764 ns`，TNS `-70810.594 ns`。再上一版 7 路 demo UUID 为
 由于 timing 未收敛，当前只作为性能方向实验 artifact 保存，不能替代 `20260615`
 已板测通过 demo 的功能结论。
 
-2026-06-17 no-debug 16 路正常 ABI 候选：
+2026-06-17 light-trace restore 候选：
 
 | 项目 | 内容 |
 | --- | --- |
 | 同步文件 | `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` |
-| 构建目录 | `cuper-jacobi-16lane-nodebug-build/` |
+| 构建目录 | `cuper-jacobi-lighttrace-restore-build/` |
 | Kernel | `CuperJacobiIteration` |
-| ABI | no-debug 正常 Jacobi ABI；`Matrix_data_0..15` HBM[0..15]，`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status/Metrics` HBM[24] |
-| UUID | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` |
-| SHA256 | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` |
-| DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
-| 时序状态 | 已收敛：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
+| ABI | `JACOBI_TRACE_LIGHT=1`；`Matrix_data_0..15` HBM[0..15]，`B` HBM[20]，`Diag_inv` HBM[21]，`X` HBM[22]，`Status` HBM[24]，`Metrics` HBM[25]，`Debug` HBM[26] |
+| UUID | `e24b74ad-ec70-f13f-98a9-e6f1cf7676ed` |
+| SHA256 | `59956a30907259784712e66fa06ff44a8166e5afb8ebffb97018634851000b15` |
+| DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `449 MHz` |
+| 时序状态 | 轻微未收敛：WNS `-0.005 ns`，TNS `-0.010 ns`，setup failing endpoints `2` |
 
-这版用于服务器侧验证“删除 Debug BO/DebugMonitor/trace stream 后的 16 路
-master-controller full graph”是否仍保持 `20260615-demo` 的功能边界。本机没有
-Xilinx OpenCL platform，未做上板；服务器测试时不要设置 `JACOBI_SPMV_ONLY`。
-16 路构建日志最后曾暴露过 `link_xclbin_u55c.sh` 尾部引号问题，但 `.xclbin` 和
-`.xclbin.info` 已成功写出，当前脚本已通过 `bash -n`。
+这版把 `20260617-demo` 槽位从此前失败的 no-debug 正常 ABI 覆盖回
+light-trace Debug BO/DebugMonitor ABI，用于服务器侧复测 16 路
+master-controller full graph。硬件 link 已完成，v++ 总耗时 `3h 58m 39s`；
+本机没有 Xilinx OpenCL platform，未做上板。服务器测试时不要设置
+`JACOBI_SPMV_ONLY`。
 
 2026-06-13 已完成上一版 split-bank mmap-only demo 的 native XRT 上板 smoke：
 

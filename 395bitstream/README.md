@@ -32,7 +32,7 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
-| `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 no-debug 正常 ABI，服务器侧 `thermal2_n16 MAX_ITERS=1` 已失败；当前回退到 `20260615-demo` light-trace |
+| `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -56,16 +56,15 @@ TAPA Cuper / Jacobi iteration 当前已验证 demo 文件：
 cuper-tapa-jacobi-u55c-20260615-demo.xclbin
 ```
 
-`cuper-tapa-jacobi-u55c-20260617-demo.xclbin` 是 16 路 no-debug 正常 ABI
-`CuperJacobiIteration`，用于观察删除 light-trace Debug BO/DebugMonitor 后，当前
-master-controller full graph 在服务器 U55C 上的表现。该版 UUID 为
-`f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a`，SHA256 为
-`61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977`。最终
-xclbin info 中 DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing 已收敛：
-WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`。构建目录为
-`cuper-jacobi-16lane-nodebug-build/`。服务器侧 `thermal2_n16 MAX_ITERS=1` 已经
-timeout 失败，因此该文件只保留为 no-debug 失败边界记录；当前 Jacobi 回退到
-`20260615-demo` light-trace ABI。
+`cuper-tapa-jacobi-u55c-20260617-demo.xclbin` 是 16 路 `JACOBI_TRACE_LIGHT=1`
+restore 候选，覆盖了此前同名 no-debug 失败 artifact。该版 UUID 为
+`e24b74ad-ec70-f13f-98a9-e6f1cf7676ed`，SHA256 为
+`59956a30907259784712e66fa06ff44a8166e5afb8ebffb97018634851000b15`。最终
+xclbin info 中 DATA/KERNEL/HBM clock 为 `150/500/449 MHz`；routed timing 有轻微
+setup violation：WNS `-0.005 ns`，TNS `-0.010 ns`，setup failing endpoints `2`，
+违例在 `hbm_aclk`。构建目录为 `cuper-jacobi-lighttrace-restore-build/`，构建日志为
+`cuper-jacobi-lighttrace-restore-build/logs/build_hw_tmux.log`。该版已同步到
+Jacobi demo 槽，等待服务器上板；当前已验证 demo 仍是 `20260615-demo`。
 
 `20260615-demo` 是 `CuperJacobiIteration` master-controller full graph light-trace 硬件 debug demo，
 接入完整 Jacobi dataflow、Cuper SpMV service 和 Jacobi update。当前控制流取消旧的

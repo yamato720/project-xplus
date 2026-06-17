@@ -2,6 +2,8 @@ SHELL := /bin/bash
 
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2
+CC ?= gcc
+CFLAGS ?= -std=c11 -O2
 PYTHON ?= python3
 
 TARGET ?= sw_emu
@@ -19,9 +21,11 @@ KERNEL_DIR := $(ROOT_DIR)/kernels
 CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 DATA_DIR := $(ROOT_DIR)/data
+TOOL_DIR := $(ROOT_DIR)/tools
 JACOBI_DEBUG_ENV := $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") $(if $(JACOBI_TRACE_ISOTOPE),JACOBI_TRACE_ISOTOPE="$(JACOBI_TRACE_ISOTOPE)") $(if $(JACOBI_TRACE_LIGHT),JACOBI_TRACE_LIGHT="$(JACOBI_TRACE_LIGHT)") $(if $(JACOBI_WIDE_HBM),JACOBI_WIDE_HBM="$(JACOBI_WIDE_HBM)") $(if $(JACOBI_HBM_CHANNELS),JACOBI_HBM_CHANNELS="$(JACOBI_HBM_CHANNELS)") $(if $(JACOBI_TOP),JACOBI_TOP="$(JACOBI_TOP)") $(if $(JACOBI_SPMV_ONLY),JACOBI_SPMV_ONLY="$(JACOBI_SPMV_ONLY)") $(if $(JACOBI_BLOCKING_ENTRY_PROBE),JACOBI_BLOCKING_ENTRY_PROBE="$(JACOBI_BLOCKING_ENTRY_PROBE)") $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(JACOBI_KERNEL_FREQUENCY),JACOBI_KERNEL_FREQUENCY="$(JACOBI_KERNEL_FREQUENCY)")
+PACK_PROFILE := $(BUILD_DIR)/pack_profile
 
-.PHONY: all help tree clean launch launcher build-host build-mmap-probe-xrt-host run-sw regression-sw build-xo link-xclbin build-mmap-probe-xo link-mmap-probe-xclbin link-mmap-probe-xclbin-split hw-tmux run-hw run-mmap-probe-xrt
+.PHONY: all help tree clean launch launcher build-host build-mmap-probe-xrt-host pack-profile run-pack-profile run-sw regression-sw build-xo link-xclbin build-mmap-probe-xo link-mmap-probe-xclbin link-mmap-probe-xclbin-split hw-tmux run-hw run-mmap-probe-xrt
 
 all: help
 
@@ -47,6 +51,8 @@ help:
 	@echo "  make launcher     Alias of make launch"
 	@echo "  make build-host   Build $(BUILD_DIR)/cuper_jacobi_host"
 	@echo "  make build-mmap-probe-xrt-host Build native XRT mmap probe runner"
+	@echo "  make pack-profile Build pure-C CSR packing profiler"
+	@echo "  make run-pack-profile MATRIX=<csr-dir> Profile 16/24/32 HBM packing"
 	@echo "  make run-sw       Run software simulation, MATRIX=<path>"
 	@echo "  make regression-sw Run compact software regression, MODE=quick|full"
 	@echo "  make build-xo     Build CuperJacobiIteration.xo"
@@ -75,6 +81,15 @@ build-host:
 	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/build_host.sh"
 
 build-mmap-probe-xrt-host: build-host
+
+pack-profile: $(PACK_PROFILE)
+
+$(PACK_PROFILE): $(TOOL_DIR)/pack_profile.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) -Wall -Wextra "$<" -o "$@"
+
+run-pack-profile: pack-profile
+	"$(PACK_PROFILE)" "$(or $(MATRIX),$(abspath $(ROOT_DIR)/../../data/suitesparse/Schmid/csr/thermal2_n1024))" --drop-diag $(if $(HBM),--hbm "$(HBM)") $(if $(TOP_BATCHES),--top-batches "$(TOP_BATCHES)") $(if $(DUMP_BATCH),--dump-batch "$(DUMP_BATCH)") $(if $(DUMP_BEATS),--dump-beats "$(DUMP_BEATS)") $(if $(CSV),--csv)
 
 run-sw:
 	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(PYTHON)" "$(SCRIPT_DIR)/launcher.py" run-sw "$(or $(MATRIX),$(DATA_DIR)/matrices/cant.mtx)"

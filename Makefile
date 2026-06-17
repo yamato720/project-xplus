@@ -233,7 +233,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-build-mmap-probe-xrt-host cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-build-mmap-probe-xo cuper-jacobi-link-mmap-probe-xclbin cuper-jacobi-link-mmap-probe-xclbin-split cuper-jacobi-run-mmap-probe-xrt cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-build-mmap-probe-xrt-host cuper-jacobi-pack-profile cuper-jacobi-run-pack-profile cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-link-xclbin cuper-jacobi-build-mmap-probe-xo cuper-jacobi-link-mmap-probe-xclbin cuper-jacobi-link-mmap-probe-xclbin-split cuper-jacobi-run-mmap-probe-xrt cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
 
 all: run-local
 
@@ -301,6 +301,7 @@ help:
 	@echo "DLC/Cuper-jacobi-iteration Jacobi tool:"
 	@echo "  make cuper-jacobi-launch"
 	@echo "  make cuper-jacobi-build-host"
+	@echo "  make cuper-jacobi-run-pack-profile MATRIX=data/suitesparse/Schmid/csr/thermal2_n65536"
 	@echo "  make cuper-jacobi-run-sw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx"
 	@echo "  make cuper-jacobi-regression-sw MODE=quick"
 	@echo "  make cuper-jacobi-build-xo"
@@ -395,6 +396,12 @@ cuper-jacobi-build-host:
 
 cuper-jacobi-build-mmap-probe-xrt-host:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" build-mmap-probe-xrt-host BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-pack-profile:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" pack-profile BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)"
+
+cuper-jacobi-run-pack-profile:
+	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-pack-profile BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),data/suitesparse/Schmid/csr/thermal2_n1024))" $(if $(HBM),HBM="$(HBM)") $(if $(TOP_BATCHES),TOP_BATCHES="$(TOP_BATCHES)") $(if $(DUMP_BATCH),DUMP_BATCH="$(DUMP_BATCH)") $(if $(DUMP_BEATS),DUMP_BEATS="$(DUMP_BEATS)") $(if $(CSV),CSV="$(CSV)")
 
 cuper-jacobi-run-sw:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-sw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))" $(JACOBI_DEBUG_ENV)
