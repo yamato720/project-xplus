@@ -8,7 +8,9 @@ m_axi 写回、HBM bank 分配和 BO sync 边界可用。当前已板测通过 d
 `JACOBI_TRACE_LIGHT=1` 的完整 `CuperJacobiIteration` full graph，
 已经生成 `.xclbin` 并同步到 `395bitstream/`，routed timing 已收敛，demo-only
 上板已通过单轮和完整固定轮数测试。2026-06-16 另同步了 `JACOBI_WIDE_HBM=1`
-的 24 路矩阵通道实验 artifact；该版 build 完成但 routed timing 未收敛，尚未上板。
+的 24 路矩阵通道实验 artifact；该版 build 完成但 routed timing 未收敛。2026-06-17
+的 16 路 no-debug Jacobi 在服务器侧 `thermal2_n16 MAX_ITERS=1` 已失败，当前 Jacobi
+主线回退到 `20260615-demo` light-trace ABI。
 
 ## 1. 测试对象
 

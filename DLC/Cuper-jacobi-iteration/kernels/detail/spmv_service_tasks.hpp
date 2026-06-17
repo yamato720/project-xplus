@@ -10,6 +10,9 @@
 
 #include "cuper_spmv_tasks.hpp"
 #include "spmv_service_common.hpp"
+#ifdef JACOBI_TRACE_ENABLED
+#include "jacobi_deadlock_debug.hpp"
+#endif
 
 // 本文件把原始一次性 Cuper SpMV task 改造成可反复调用的常驻服务。
 // 它不包含 PCG 语义；Jacobi controller 只把它当作可重复触发的 SpMV 计算服务。
@@ -21,17 +24,43 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
                                     const INDEX_TYPE Column_num,
                                     tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
                                     tapa::istream<CuperSpmvServiceCommand> &Command_in,
-                                    tapa::ostream<INDEX_TYPE> &PE_Param) {
+                                    tapa::ostream<INDEX_TYPE> &PE_Param
+#ifdef JACOBI_TRACE_ENABLED
+                                    ,
+                                    tapa::ostream<JacobiDebugEvent> &Debug_Event_out
+#endif
+                                    ) {
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef JACOBI_TRACE_ENABLED
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 kJacobiDebugSourcePtrLoader,
+                                 kJacobiDebugPhaseStop,
+                                 0,
+                                 Batch_num);
+#endif
             PE_Param.write(kSpmvServiceStopToken);
             return;
         }
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourcePtrLoader,
+                             kJacobiDebugPhaseRecv,
+                             Batch_num,
+                             Row_num);
+#endif
         PE_Param.write(Batch_num);
         PE_Param.write(Row_num);
         PE_Param.write(Column_num);
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourcePtrLoader,
+                             kJacobiDebugPhaseSend,
+                             0,
+                             Column_num);
+#endif
 
         // SpElement_list_ptr 长度是 Batch_num + 1，Core 用相邻两个边界确定
         // 每个 column batch 需要消费的 Matrix_data beat 范围。
@@ -39,6 +68,13 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
         Cuper_ReadSpElementPtrPackets(batch_num_plus_1,
                                       SpElement_list_ptr,
                                       PE_Param);
+#ifdef JACOBI_TRACE_ENABLED
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             kJacobiDebugSourcePtrLoader,
+                             kJacobiDebugPhaseDoneRound,
+                             0,
+                             batch_num_plus_1);
+#endif
     }
 }
 
@@ -48,18 +84,49 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
 void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
                               tapa::async_mmap<ap_uint<512>> &Matrix_data,
                               tapa::istream<CuperSpmvServiceCommand> &Command_in,
-                              tapa::ostream<ap_uint<512>> &Matrix_A_Stream) {
+                              tapa::ostream<ap_uint<512>> &Matrix_A_Stream
+                              ,
+                              const INDEX_TYPE Debug_channel
+#ifdef JACOBI_TRACE_FULL
+                              ,
+                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out
+#endif
+                              ) {
+#ifdef JACOBI_TRACE_FULL
+    const INDEX_TYPE Debug_source = kJacobiDebugSourceMatrixLoaderBase + Debug_channel;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef JACOBI_TRACE_FULL
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 Debug_source,
+                                 kJacobiDebugPhaseStop,
+                                 0,
+                                 Matrix_len);
+#endif
             return;
         }
 
+#ifdef JACOBI_TRACE_FULL
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             Debug_source,
+                             kJacobiDebugPhaseRecv,
+                             0,
+                             Matrix_len);
+#endif
         // Matrix_data 的布局仍沿用 Cuper：一个 512-bit beat 内含 8 个 64-bit SpElement slot。
         Cuper_ReadMatrixPackets(Matrix_len,
                                 Matrix_data,
                                 Matrix_A_Stream);
+#ifdef JACOBI_TRACE_FULL
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             Debug_source,
+                             kJacobiDebugPhaseDoneRound,
+                             0,
+                             Matrix_len);
+#endif
     }
 }
 
@@ -113,7 +180,17 @@ void SpmvService_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
 // 并在做 x_next 更新时顺手丢弃 padding。
 void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                              tapa::istream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
-                             tapa::ostream<float_v2>      &Vector_Y_Stream) {
+                             tapa::ostream<float_v2>      &Vector_Y_Stream
+                             ,
+                             const INDEX_TYPE Debug_channel
+#ifdef JACOBI_TRACE_FULL
+                             ,
+                             tapa::ostream<JacobiDebugEvent> &Debug_Event_out
+#endif
+                             ) {
+#ifdef JACOBI_TRACE_FULL
+    const INDEX_TYPE Debug_source = kJacobiDebugSourceAccumulatorBase + Debug_channel;
+#endif
 #ifdef PINGPONG
     // ping/pong 分别保存偶数行和奇数行的部分和。row 编码来自 host 侧
     // Reordering：bit0 表示奇偶，bit[17:1] 是局部累加地址，bit17=1
@@ -137,9 +214,23 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
         // 后续 batch 边界由 Core 写入同一条 stream。
         const INDEX_TYPE Batch_num = Vector_Y_Param.read();
         if (Batch_num == kSpmvServiceStopToken) {
+#ifdef JACOBI_TRACE_FULL
+            Jacobi_DebugTryWrite(Debug_Event_out,
+                                 Debug_source,
+                                 kJacobiDebugPhaseStop,
+                                 0,
+                                 0);
+#endif
             return;
         }
         const INDEX_TYPE Row_num = Vector_Y_Param.read();
+#ifdef JACOBI_TRACE_FULL
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             Debug_source,
+                             kJacobiDebugPhaseRecv,
+                             Batch_num,
+                             Row_num);
+#endif
 #ifdef PINGPONG
         Cuper_Accumulator_Compute_Round(Batch_num,
                                         Row_num,
@@ -155,6 +246,13 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                                         Matrix_Mult_Vector_Stream,
                                         Vector_Y_Stream,
                                         local_part_Y_ping);
+#endif
+#ifdef JACOBI_TRACE_FULL
+        Jacobi_DebugTryWrite(Debug_Event_out,
+                             Debug_source,
+                             kJacobiDebugPhaseDoneRound,
+                             Batch_num,
+                             spmv_service_num_accumulator_outputs(Row_num));
 #endif
     }
 }

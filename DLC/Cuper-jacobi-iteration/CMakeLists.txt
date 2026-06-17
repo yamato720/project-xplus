@@ -105,6 +105,41 @@ else()
     message(FATAL_ERROR "Unsupported JACOBI_HBM_CHANNELS=${JACOBI_HBM_CHANNELS_VALUE}; use 16, 24, or 32")
 endif()
 
+if(DEFINED ENV{JACOBI_DEADLOCK_DEBUG} AND NOT "$ENV{JACOBI_DEADLOCK_DEBUG}" STREQUAL "" AND NOT "$ENV{JACOBI_DEADLOCK_DEBUG}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_DEADLOCK_DEBUG=1)
+    message(STATUS "Cuper Jacobi deadlock debug is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi deadlock debug is disabled")
+endif()
+
+if(DEFINED ENV{JACOBI_TRACE_ISOTOPE} AND NOT "$ENV{JACOBI_TRACE_ISOTOPE}" STREQUAL "" AND NOT "$ENV{JACOBI_TRACE_ISOTOPE}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_TRACE_ISOTOPE=1)
+    message(STATUS "Cuper Jacobi isotope trace is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi isotope trace is disabled")
+endif()
+
+if(DEFINED ENV{JACOBI_TRACE_LIGHT} AND NOT "$ENV{JACOBI_TRACE_LIGHT}" STREQUAL "" AND NOT "$ENV{JACOBI_TRACE_LIGHT}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_TRACE_LIGHT=1)
+    message(STATUS "Cuper Jacobi light trace is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi light trace is disabled")
+endif()
+
+if(DEFINED ENV{JACOBI_WIDE_HBM} AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "" AND NOT "$ENV{JACOBI_WIDE_HBM}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_WIDE_HBM=1)
+    message(STATUS "Cuper Jacobi wide HBM is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi wide HBM is disabled")
+endif()
+
+if(DEFINED ENV{JACOBI_BLOCKING_ENTRY_PROBE} AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "" AND NOT "$ENV{JACOBI_BLOCKING_ENTRY_PROBE}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_BLOCKING_ENTRY_PROBE=1)
+    message(STATUS "Cuper Jacobi blocking entry probe is ENABLED")
+else()
+    message(STATUS "Cuper Jacobi blocking entry probe is disabled")
+endif()
+
 # -----------------------------------------------------------------------------
 # 4. 链接库 (保持你的手动链接逻辑，但改为变量管理)
 # -----------------------------------------------------------------------------
@@ -129,4 +164,20 @@ target_link_libraries(cuper_jacobi_host
 
 set_target_properties(cuper_jacobi_host PROPERTIES
     BUILD_RPATH "${TAPA_LIB_DIR};${XILINX_XRT_PATH}/lib"
+)
+
+add_executable(cuper_jacobi_mmap_probe_xrt
+    host/mmap_probe_xrt.cpp
+)
+
+target_link_libraries(cuper_jacobi_mmap_probe_xrt
+    PUBLIC
+    ${XILINX_XRT_PATH}/lib/libxrt_coreutil.so
+    uuid
+    pthread
+    rt
+)
+
+set_target_properties(cuper_jacobi_mmap_probe_xrt PROPERTIES
+    BUILD_RPATH "${XILINX_XRT_PATH}/lib"
 )

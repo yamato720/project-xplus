@@ -1,6 +1,6 @@
 #pragma once
 
-// Jacobi timing task。
+// Jacobi timing debug task。
 // controller 只发送 begin/end/stop 事件；这个常驻 task 独立累加 cycle，
 // 避免 controller 阻塞等待 update result 时漏计 SpMV/update 流水时间。
 

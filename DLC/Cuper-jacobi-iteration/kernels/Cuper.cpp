@@ -12,5 +12,7 @@
 //   - jacobi_cuper_output_update.hpp：Cuper 输出拼包、Jacobi 更新和写回。
 //   - cuper_jacobi_top_graphs.hpp ：当前实验顶层 task graph。
 //   - cuper_spmv_service_only_top_graphs.hpp：只跑 Cuper SpMV 的 24/32 路隔离实验顶层。
+//   - jacobi_mmap_probe_only.hpp  ：debug-only mmap micro top。
 #include "detail/cuper_jacobi_top_graphs.hpp"
 #include "detail/cuper_spmv_service_only_top_graphs.hpp"
+#include "detail/jacobi_mmap_probe_only.hpp"

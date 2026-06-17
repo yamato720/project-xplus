@@ -31,8 +31,8 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
-| `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，build 已完成但 routed timing 仍有轻微 setup violation，待上板验证 |
-| `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 no-debug 正常 ABI，150 MHz timing-clean，待服务器上板验证 |
+| `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
+| `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 no-debug 正常 ABI，服务器侧 `thermal2_n16 MAX_ITERS=1` 已失败；当前回退到 `20260615-demo` light-trace |
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 
@@ -50,11 +50,10 @@ DLC/Cuper-jacobi-iteration/
 当前已有一个 demo 候选进入 Jacobi demo 槽，但还不是标准 bitstream。版本记录见
 `docs/bitstream_summaries/2026-06-10-cuper-tapa-jacobi-iteration/`。
 
-TAPA Cuper / Jacobi iteration 当前 demo 候选文件：
+TAPA Cuper / Jacobi iteration 当前已验证 demo 文件：
 
 ```text
 cuper-tapa-jacobi-u55c-20260615-demo.xclbin
-cuper-tapa-jacobi-u55c-20260617-demo.xclbin
 ```
 
 `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` 是 16 路 no-debug 正常 ABI
@@ -64,9 +63,9 @@ master-controller full graph 在服务器 U55C 上的表现。该版 UUID 为
 `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977`。最终
 xclbin info 中 DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing 已收敛：
 WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`。构建目录为
-`cuper-jacobi-16lane-nodebug-build/`。本机无 Xilinx OpenCL platform，未做上板测试；
-服务器侧测试应使用 kernel `CuperJacobiIteration`，host 不设置
-`JACOBI_SPMV_ONLY`。
+`cuper-jacobi-16lane-nodebug-build/`。服务器侧 `thermal2_n16 MAX_ITERS=1` 已经
+timeout 失败，因此该文件只保留为 no-debug 失败边界记录；当前 Jacobi 回退到
+`20260615-demo` light-trace ABI。
 
 `20260615-demo` 是 `CuperJacobiIteration` master-controller full graph light-trace 硬件 debug demo，
 接入完整 Jacobi dataflow、Cuper SpMV service 和 Jacobi update。当前控制流取消旧的
@@ -107,19 +106,16 @@ cuper-tapa-jacobi-u55c-20260616-demo.xclbin
 ```
 
 这版在 `20260615` master-controller full graph 基础上，用 `JACOBI_WIDE_HBM=1`
-把 Cuper 主矩阵通道从 16 路扩到 24 路，并删除正常 Jacobi ABI 里的 Debug BO、
-DebugMonitor、trace stream 和 mmap-only probe，只保留 `Status` 与 `Metrics`。
-HBM 分配为：`Matrix_data_0..23` 映射到 HBM[0..23]，
-`SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics` 映射到 HBM[31]。
-该 artifact 的 UUID 为 `aa594af3-f811-1b17-f507-fd504f93425e`，SHA256 为
+把 Cuper 主矩阵通道从 16 路扩到 24 路。HBM 分配为：
+`Matrix_data_0..23` 映射到 HBM[0..23]，`SpElement_list_ptr/B/Diag_inv/X/Status`
+共享 HBM[30]，`Metrics` 使用 HBM[31]。该 no-debug artifact 的 UUID 为
+`aa594af3-f811-1b17-f507-fd504f93425e`，SHA256 为
 `232c5afeaf8e122f7b30e5b26e95553a40ea44556ea59723480cab1f77453f9c`。
 最终 xclbin info 中 DATA/KERNEL/HBM clock 为 `147/500/450 MHz`；构建时 link
-请求频率为 150 MHz。v++ link 总耗时 `6h 12m 56s`，构建目录为
-`cuper-jacobi-wide-hbm-nodebug-build/`，构建日志为
-`cuper-jacobi-wide-hbm-nodebug-build/logs/build_hw_tmux.log`。routed timing 仍未完全
-收敛：WNS `-0.120 ns`，TNS `-2.169 ns`，setup failing endpoints `64`。
-当前只同步 artifact 和构建记录，尚未进行上板验证，也不替换 `20260615` 已板测通过
-demo 的结论。
+请求频率为 150 MHz。构建目录为 `cuper-jacobi-wide-hbm-build/`。routed timing
+仍有 setup violation：WNS `-0.120 ns`，TNS `-2.169 ns`，setup failing endpoints
+`64`。服务器侧最小 smoke 已失败，当前只保留为失败边界 artifact，不替换
+`20260615` 已板测通过 demo 的结论。
 
 TAPA Cuper / SpMV-only 24 路服务实验文件：
 

@@ -163,20 +163,17 @@
   时间为 `173375 ms`，FPGA kernel 时间为 `113035 ms`。
 - 2026-06-16 新增宏控 wide-HBM 实验路径：`JACOBI_WIDE_HBM=1` 时把
   `HBM_CHANNEL_NUM` 从 16 扩到 24，`Matrix_data_0..23` 映射到 HBM[0..23]，
-  `SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics` 映射到 HBM[31]。
-  host PE 参数映射、update pair compute、top graph、connectivity 生成脚本和
-  launcher 均按通道数做了泛化；默认不启用 wide 模式时仍保持 16 路。
-- 2026-06-16 清理正常 Jacobi ABI 的 Debug 路径：删除 Debug BO、DebugMonitor、
-  trace stream、mmap-only probe top 和 native probe runner，保留 `Metrics[4..7]`
-  的 stage timing。历史 debug/probe 记录仍保留在文档里，作为排障过程记录。
-- 2026-06-16 已用 `JACOBI_WIDE_HBM=1 JACOBI_KERNEL_FREQUENCY=150` 在 tmux 中生成
-  no-debug wide-HBM artifact：
+  `SpElement_list_ptr/B/Diag_inv/X/Status` 共享 HBM[30]，`Metrics/Debug` 共享
+  HBM[31]。host PE 参数映射、update pair compute、top graph、connectivity
+  生成脚本和 launcher 均按通道数做了泛化；默认不启用 wide 模式时仍保持 16 路。
+- 2026-06-16 已用 `JACOBI_WIDE_HBM=1 JACOBI_TRACE_LIGHT=1
+  JACOBI_KERNEL_FREQUENCY=150` 在 tmux 中生成 wide-HBM artifact：
   `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin`。UUID 为
-  `aa594af3-f811-1b17-f507-fd504f93425e`，SHA256 为
-  `232c5afeaf8e122f7b30e5b26e95553a40ea44556ea59723480cab1f77453f9c`。
-  最终 DATA/KERNEL/HBM clock 为 `147/500/450 MHz`，v++ link 总耗时
-  `6h 12m 56s`。routed timing 仍未完全收敛：WNS `-0.120 ns`，TNS `-2.169 ns`，
-  setup failing endpoints `64`。该版只作为性能方向实验 artifact 保存，尚未上板，
+  `9b42ccc8-7b2f-e182-cb77-317084abdca8`，SHA256 为
+  `84f3926deca697975525ddff84800e1140cd83535a8e3fdf5d0ea19efff35afa`。
+  最终 DATA/KERNEL/HBM clock 为 `139/500/450 MHz`，v++ link 总耗时
+  `5h 42m 5s`。routed timing 未收敛：WNS `-0.501 ns`，TNS `-475.386 ns`，
+  setup failing endpoints `2903`。该版只作为性能方向实验 artifact 保存，尚未上板，
   不替代 `20260615` 已板测通过 demo。
 - 2026-06-17 已生成并同步 16 路 no-debug 正常 ABI 候选：
   `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin`。UUID 为
@@ -184,7 +181,8 @@
   `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977`。
   DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing 已收敛：WNS
   `0.003 ns`，TNS `0.000 ns`。它用于服务器侧验证删除 Debug BO/DebugMonitor/trace
-  stream 后的 master-controller full graph。
+  stream 后的 master-controller full graph；服务器侧最小
+  `thermal2_n16 MAX_ITERS=1` 已 timeout 失败。
 - 2026-06-17 已生成并同步 24 路 SpMV-only 服务候选：
   `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin`。Kernel 为
   `CuperSpmvServiceOnly`，UUID 为 `492f929f-4232-3a37-b7e0-3969b5052219`，SHA256 为
@@ -196,6 +194,10 @@
   link 在 VPL `create_bd` 阶段失败，错误为 HBM subsystem port connection 用满：
   `You have run out of port connections on /hmss_0. All 33 connections are used`。
   当前没有 32 路 `.xclbin` 可同步；后续要继续做 32 路需先减少顶层 `m_axi` 端口数。
+- 2026-06-17 根据服务器反馈恢复 Jacobi 主线的 light-trace/debug ABI：重新接回
+  `Debug` BO、`Jacobi_DebugMonitor`、`CuperJacobiMmapProbeOnly` 和 trace 宏传递，
+  但保留 `CuperSpmvServiceOnly` 以及 `JACOBI_HBM_CHANNELS=24/32` 的探索路径。
+  当前功能回退目标仍是已板测通过的 `20260615-demo`。
 
 ## 当前没有做
 
@@ -214,15 +216,15 @@
   标准/性能优化晋级候选。
 - 没有把 isotope trace 版当作性能优化或标准候选；它是定位 `Finish()` 卡住点的
   debug build 边界。
-- 没有更新正式 `source.diff`；2026-06-17 两个新文件仍待服务器上板验证，其中
-  24 路 SpMV-only 还存在 routed timing violation。
+- 没有更新正式 `source.diff`；2026-06-17 no-debug Jacobi 已失败，24 路 SpMV-only
+  仍待服务器上板验证且存在 routed timing violation。
 
 ## 当前风险
 
 - Jacobi 收敛性取决于矩阵性质；software smoke 只证明当前 kernel 数据通路和 CPU
   reference 对齐，不代表所有矩阵都适合 Jacobi。
-- 当前 no-debug Jacobi ABI 仍使用矩阵通道之外的 `B/Diag_inv/X/Status/Metrics`
-  通道；如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
+- 当前 HBM ABI 使用矩阵 0..15 之外的 `B/Diag_inv/X/Status/Metrics/Debug` 通道；
+  如果后续要追求只用 16 个 HBM，需要重做数据供给策略。
 - `thermal2_n262144` 的当前记录来自早期 software run，已经证明功能方向，但还没有用
   当前 root target 补跑。
 - 当前同步的 2026-06-15 demo 是完整 Jacobi graph master-controller light-trace debug

@@ -2,7 +2,8 @@
 
 当前记录覆盖 software/TAPA simulation、light-trace ABI 硬件 demo xclbin 的构建和同步
 结果，以及 2026-06-17 同步给服务器测试的 no-debug / SpMV-only 候选。本机没有
-Xilinx OpenCL platform，无法完成上板 smoke；服务器侧测试结果需要后续回填。
+Xilinx OpenCL platform，无法完成上板 smoke；16 路 no-debug Jacobi 的服务器侧
+最小 smoke 已失败，当前 Jacobi 回退到 `20260615-demo` light-trace ABI。
 
 ## 2026-06-17 同步候选
 
@@ -18,7 +19,16 @@ Xilinx OpenCL platform，无法完成上板 smoke；服务器侧测试结果需�
 | DATA / KERNEL / HBM clock | `150 MHz` / `500 MHz` / `450 MHz` |
 | timing | WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0` |
 
-服务器侧 smoke 建议：
+服务器侧结果：
+
+```text
+thermal2_n16 MAX_ITERS=1: timeout，未通过
+```
+
+该文件只保留为删除 Debug BO 后的失败边界记录。当前不要把它作为 Jacobi 候选继续
+扩大测试；回退使用 `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin`。
+
+历史 smoke 命令：
 
 ```bash
 BUILD_DIR=/path/to/cuper-jacobi-16lane-nodebug-build \
@@ -27,9 +37,7 @@ MAX_ITERS=1 \
 bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n16
 ```
 
-注意不要设置 `JACOBI_SPMV_ONLY`。若服务器只从仓库 checkout，不保留本机构建目录，
-需要先用当前源码重建 `cuper_jacobi_host`，或把 `BUILD_DIR` 指向同 ABI 的 host
-所在目录。
+注意不要设置 `JACOBI_SPMV_ONLY`。若复查失败边界，host 必须与 no-debug ABI 匹配。
 
 ### 24 路 SpMV-only
 
@@ -965,44 +973,3 @@ sentinel，随后 `Finish()` 返回，最终 trace 显示 controller 到 `done_r
 ptr/vector/coeff loader、8 路 `pair_compute`、pack writer、X HBM writer 均进入 stop。
 这说明当前 debug 可见性仍偏后置：长运行过程中不一定能通过 Status/Metrics 看到进度，
 但 kernel 最终完成并写回结果。
-
-### 2026-06-16 wide-HBM no-debug artifact
-
-测试对象：
-
-```text
-bitstream: 395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin
-Kernel: CuperJacobiIteration
-UUID: aa594af3-f811-1b17-f507-fd504f93425e
-SHA256: 232c5afeaf8e122f7b30e5b26e95553a40ea44556ea59723480cab1f77453f9c
-build dir: cuper-jacobi-wide-hbm-nodebug-build/
-build log: cuper-jacobi-wide-hbm-nodebug-build/logs/build_hw_tmux.log
-```
-
-本版是 `JACOBI_WIDE_HBM=1` 的 24 路 Matrix_data no-debug 实验 artifact。正常
-Jacobi ABI 不再包含 Debug BO、DebugMonitor、trace stream 或 mmap-only probe；只保留
-`Status` 与 `Metrics`，其中 `Metrics[4..7]` 继续用于 stage timing。
-
-已完成本地验证：
-
-| 命令/模式 | 结果 |
-| --- | --- |
-| 16 路 no-debug host/software smoke，`thermal2_n1024 MAX_ITERS=1` | `Error Num=0` |
-| 24 路 no-debug host/software smoke，`thermal2_n1024 MAX_ITERS=1` | `Error Num=0` |
-| `make cuper-jacobi-build-host` | 通过 |
-| `git diff --check` | 通过 |
-
-硬件构建参数和结果：
-
-| 项目 | 值 |
-| --- | --- |
-| 构建宏 | `JACOBI_WIDE_HBM=1` |
-| link 请求 DATA clock | `150 MHz` |
-| xclbin DATA/KERNEL/HBM clock | `147/500/450 MHz` |
-| HBM 分配 | `Matrix_data_0..23` HBM[0..23]；`SpElement_list_ptr/B/Diag_inv/X/Status` HBM[30]；`Metrics` HBM[31] |
-| v++ link 总耗时 | `6h 12m 56s` |
-| routed timing | WNS `-0.120 ns`，TNS `-2.169 ns`，setup failing endpoints `64` |
-
-当前只同步 artifact 和构建记录，尚未进行 demo-only 上板验证。由于 routed timing 仍有
-轻微 setup violation，它不能替代 `20260615` 已板测通过的 master-controller
-light-trace demo 结论。
