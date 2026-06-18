@@ -95,20 +95,61 @@ JACOBI_SPMV_COMPACT_PE=1 \
 | `thermal2_n65536` | `Correctness Verification: Passed`, `Error Num=0` | 68,464 | 60,824 | 11.16% |
 | `thermal2` | `Correctness Verification: Passed`, `Error Num=0` | 1,373,424 | 1,187,402 | 13.54% |
 
-服务器侧上板测试命令：
+服务器侧上板测试命令口径：
 
 ```bash
-JACOBI_TOP=CuperSpmvServiceOnly \
-JACOBI_SPMV_ONLY=1 \
-JACOBI_HBM_CHANNELS=16 \
-JACOBI_SPMV_COMPACT_PE=1 \
-BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin \
-BUILD_DIR=cuper-jacobi-spmv-compact16-build \
-  bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n1024
+make cuper-jacobi-build-host \
+  CUPER_JACOBI_BUILD_DIR=$PWD/cuper-jacobi-spmv-compact16-build \
+  JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=16 \
+  JACOBI_SPMV_COMPACT_PE=1
+
+timeout 240s env \
+  XILINX_XRT=/opt/xilinx/xrt \
+  BITFILE=$PWD/395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin \
+  JACOBI_SPMV_ONLY=1 \
+  DIFF_TOL=1e-1 \
+  SPMV_REPEATS=1 \
+  LD_LIBRARY_PATH=/home/pyx/.tapa/usr/lib:/opt/xilinx/xrt/lib:$LD_LIBRARY_PATH \
+  ./cuper-jacobi-spmv-compact16-build/cuper_jacobi_host \
+  $PWD/data/suitesparse/Schmid/csr/<dataset>
 ```
 
-当前状态：bitstream 已同步，待服务器上板；因此不写入正式 `source.diff`，也不把它
-作为标准版性能提升结论。
+第一次直接运行时缺少 `XILINX_XRT`，host 在加载 XRT 前 abort：
+
+```text
+what():  XILINX_XRT not set
+```
+
+补上 `XILINX_XRT=/opt/xilinx/xrt` 后，`thermal2_n16` smoke 通过。完整 sweep 日志：
+
+```text
+logs/spmv_compact16_hw_sweep_20260618_174007/
+```
+
+上板结果：
+
+| 数据集 | rc | spmv ms | GFLOP/s | original beats | compact beats | 节省 | 状态 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 0 | 0.088892 | 0.000360 | 176 | 16 | 90.91% | `Status=1`, `Error Num=0` |
+| `thermal2_n1024` | 0 | 0.129026 | 0.0986 | 2,624 | 2,208 | 15.85% | `Status=1`, `Error Num=0` |
+| `thermal2_n4096` | 0 | 0.193093 | 0.2714 | 4,704 | 4,266 | 9.31% | `Status=1`, `Error Num=0` |
+| `thermal2_n16384` | 0 | 0.457307 | 0.4719 | 16,960 | 15,060 | 11.20% | `Status=1`, `Error Num=0` |
+| `thermal2_n65536` | 0 | 1.639790 | 0.5330 | 68,464 | 60,824 | 11.16% | `Status=1`, `Error Num=0` |
+| `thermal2_n131072` | 0 | 3.176400 | 0.5453 | 137,152 | 120,824 | 11.91% | `Status=1`, `Error Num=0` |
+| `thermal2_n262144` | 0 | 6.322140 | 0.5533 | 280,848 | 243,145 | 13.42% | `Status=1`, `Error Num=0` |
+| `thermal2` | 0 | 30.280400 | 0.5667 | 1,373,424 | 1,187,402 | 13.54% | `Status=1`, `Error Num=0` |
+
+结论：
+
+- 功能边界：compact16 上板可跑通完整 `thermal2`，校验全通过。
+- 性能：不建议晋级。完整 `thermal2` 上 compact16 为 `30.2804 ms`，只有 strip16
+  `1.29158 ms` 的 `0.043x`，也只有 one-shot `1.781541 ms` 的 `0.059x`。
+- 原因判断：读 beat 节省没有转化为加速，当前 compact accumulator 的 512-bit
+  slot 串行解码/分发和 lane tag 回填开销大概率压过了 HBM 节省；该协议也还没有消除
+  PE 内部 `reorder_holes`。
+- 本轮只更新 HTML 和 Markdown 测试结论，不写入正式 `source.diff`。
 
 说明：旧 2026-05-28 service 抽出版的 timeout 结论只对应旧 UUID
 `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不再对应当前同名 demo 文件。

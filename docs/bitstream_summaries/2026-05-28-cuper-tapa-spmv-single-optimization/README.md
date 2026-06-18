@@ -78,10 +78,21 @@ Timing: HBM WNS -0.006 ns, TNS -0.007 ns, setup failing endpoints 2
 ```
 
 本机 software simulation 已通过 `thermal2_n1024`、`thermal2_n65536` 和完整
-`thermal2`。full `thermal2` 的矩阵读取 beat 从 `1,373,424` 降到 `1,187,402`，
-理论读取节省约 `13.54%`。这版还没有服务器上板性能数据，不建议晋级标准，也不更新
-正式 `source.diff`。当前 compact accumulator 为功能优先的串行 slot 分发结构，
-后续若要把读 beat 节省转化为稳定性能提升，还需要继续重写动态/均衡 SpMV 协议。
+`thermal2`。服务器侧上板 sweep 也已通过全部 8 个 `thermal2` 数据集，日志为：
+
+```text
+logs/spmv_compact16_hw_sweep_20260618_174007/
+```
+
+功能结论：compact16 可跑通完整 `thermal2`，全部 `rc=0`、`Status=1`、
+`Error Num=0`。full `thermal2` 的矩阵读取 beat 从 `1,373,424` 降到
+`1,187,402`，节省约 `13.54%`。
+
+性能结论：不建议晋级标准，也不更新正式 `source.diff`。full `thermal2` 上
+compact16 为 `30.2804 ms` / `0.5667 GFLOP/s`，只有 strip16 `1.29158 ms` 的
+`0.043x`。当前 compact accumulator 为功能优先的串行 slot 分发结构，读 beat
+节省被 lane tag 解码、slot 分发和回写累加路径吞掉；后续若要把读 beat 节省转化为
+稳定性能提升，需要继续重写动态/均衡 SpMV 协议。
 
 ## 目标
 

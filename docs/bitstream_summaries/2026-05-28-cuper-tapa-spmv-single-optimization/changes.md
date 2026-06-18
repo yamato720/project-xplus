@@ -49,13 +49,24 @@ SpMV 协议的可行边界。
 395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin
 ```
 
+上板结果：
+
+- 日志：`logs/spmv_compact16_hw_sweep_20260618_174007/`；
+- `thermal2_n16` 到完整 `thermal2` 共 8 点全部 `rc=0`、`Status=1`、
+  `Error Num=0`；
+- 完整 `thermal2` 时间为 `30.2804 ms`，GFLOP/s 为 `0.5667`；
+- 完整 `thermal2` matrix read beats 从 `1,373,424` 降到 `1,187,402`，节省
+  `13.54%`；
+- 相比 strip16 完整 `thermal2` 的 `1.29158 ms`，compact16 只有 `0.043x` 速度比。
+
 当前代价和限制：
 
 - 它只覆盖 `CuperSpmvServiceOnly`，不覆盖普通 Jacobi iteration full graph；
 - 它减少 HBM 读取 beat，但还没有消除 PE 内部 reorder holes；
 - compact accumulator 当前按 512-bit beat 内 slot 串行分发，功能正确但未必比原
   16 路并行 accumulator 更快；
-- 还没有服务器上板结果，因此本轮不更新正式 `source.diff`。
+- 服务器上板已确认性能显著退步，因此本轮不更新正式 `source.diff`，也不建议晋级
+  标准 bitstream。
 
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
