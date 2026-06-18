@@ -98,6 +98,10 @@ if [[ "${JACOBI_SPMV_COMPACT_PE:-0}" != "0" && "${JACOBI_SPMV_COMPACT_PE:-}" != 
   cmd+=(-c "-DJACOBI_SPMV_COMPACT_PE=1")
 fi
 
+if [[ "${JACOBI_SPMV_LANE_STATIC_REAL:-0}" != "0" && "${JACOBI_SPMV_LANE_STATIC_REAL:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_SPMV_LANE_STATIC_REAL=1")
+fi
+
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
 printf '\n'

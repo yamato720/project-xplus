@@ -478,6 +478,40 @@ bool compare(SpElement sp1, SpElement sp2) {
 	return sp1.colIdx < sp2.colIdx;
 }
 
+bool compare_col_row(SpElement sp1, SpElement sp2) {
+    if (sp1.colIdx != sp2.colIdx) {
+        return sp1.colIdx < sp2.colIdx;
+    }
+    return sp1.rowIdx < sp2.rowIdx;
+}
+
+inline INDEX_TYPE CuperHostMapRowToPe(const INDEX_TYPE row,
+                                      const INDEX_TYPE hbm_channels) {
+    // 这里必须和 Create_SpElement_list_for_all_PEs 的物理 PE 分配保持一致。
+    // row 先按 float_v2 输出 pair 分到 8 个 checker/update pair，再按每个
+    // pair 内的 accumulator 组数映射到具体 HBM channel，最后映射到该
+    // channel 内的 8 条 lane。
+    const INDEX_TYPE packet_id = row / 2;
+    const INDEX_TYPE acc_group_size = hbm_channels / JACOBI_UPDATE_PAIR_NUM;
+    const INDEX_TYPE checker_id = packet_id % JACOBI_UPDATE_PAIR_NUM;
+    const INDEX_TYPE acc_offset =
+        (packet_id / JACOBI_UPDATE_PAIR_NUM) % acc_group_size;
+    const INDEX_TYPE pe_in_acc = (packet_id / hbm_channels) % PE_NUM;
+    return (checker_id * acc_group_size + acc_offset) * PE_NUM + pe_in_acc;
+}
+
+inline SpElement CuperHostEncodeDenseSpElement(const SpElement &sp,
+                                               const INDEX_TYPE base_col_index,
+                                               const INDEX_TYPE num_pe) {
+    // lane-static real/batch 协议只去掉 Reordering 产生的空洞，不改变
+    // kernel 看到的 64-bit slot 格式。这里仍把全局列号改成 batch 内局部列号，
+    // 并把全局 row 改成 Cuper accumulator 的内部 row 编码。
+    const INDEX_TYPE org_row_idx = sp.rowIdx / (2 * num_pe);
+    return SpElement(sp.colIdx - base_col_index,
+                     org_row_idx * 2 + (sp.rowIdx % 2),
+                     sp.val);
+}
+
 // 对单个 PE 的 SpElement 做局部调度。
 // 输入 temp_SpElement_list 使用全局列号/全局行号；输出 SpEelment_list 使用：
 //   colIdx = 全局列号 - 当前 column batch 的起始列号
@@ -965,6 +999,187 @@ void Create_SpElement_list_for_all_channels_compact_pe_batch(
                         SpElement_list_pes[pe_idx][global_start + offset];
                     Matrix_fpga_data[channel][write_slot++] =
                         PackSpElementForCuperCompactPe(sp, lane);
+                }
+            }
+        }
+    }
+}
+
+// SpMV-only 实验用的 lane-static reorder-free 打包。
+//
+// 目标：
+//   - 保持 512-bit beat 的 8 个 slot 仍固定对应同一个 HBM channel 内的
+//     lane 0..7，因此 kernel 端仍可复用普通 Core + Accumulator；
+//   - 不调用 Reordering，不再为了 Accumulator RAW 依赖主动插入 WINDOWS 间隔空洞；
+//   - 每个 batch 内，某个 HBM channel 的读取长度等于该 channel 8 条 lane
+//     中真实元素数的最大值，短 lane 只补 lane 内尾部 padding。
+//
+// 这版仍保留 column batch 边界，因为现有 Core 按 batch 加载 X 的局部窗口。
+// 它对应 pack_profile 里的 lane-static real/batch，而不是跨 batch 的
+// lane-static real/stream。
+void Create_SpElement_list_for_all_channels_lane_static_real_batch(
+    const INDEX_TYPE NUM_ROW,
+    const INDEX_TYPE Slice_SIZE,
+    const INDEX_TYPE BATCH_SIZE,
+    SparseSlice &sliceMatrix,
+    vector<vector<unsigned long, tapa::aligned_allocator<unsigned long> > > &Matrix_fpga_data,
+    vector<INDEX_TYPE>               &SpElement_list_ptr_per_hbm,
+    vector<INDEX_TYPE>               &Matrix_len_per_hbm,
+    const int HBM_CHANNEL_NUM = ::HBM_CHANNEL_NUM
+) {
+    (void)NUM_ROW;
+    const INDEX_TYPE num_pe = HBM_CHANNEL_NUM * PE_NUM;
+    const INDEX_TYPE num_col_slices = sliceMatrix.numColSlices;
+    const INDEX_TYPE batch_num =
+        (num_col_slices + BATCH_SIZE - 1) / BATCH_SIZE;
+
+    vector<INDEX_TYPE> ptr_by_channel(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+    Matrix_len_per_hbm.assign(HBM_CHANNEL_NUM, 0);
+
+    // 每个 batch 临时收集 HBM channel 内 8 条固定 lane 的真实元素。
+    // vector 尺寸只有 HBM_CHANNEL_NUM * 8，避免复用旧 scheduled PE list
+    // 时把 Reordering 空洞也带进来。
+    vector<vector<SpElement> > lane_lists(
+        static_cast<size_t>(HBM_CHANNEL_NUM) * PE_NUM);
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        for (auto &lane_list : lane_lists) {
+            lane_list.clear();
+        }
+
+        const INDEX_TYPE base_col_index = batch * BATCH_SIZE * Slice_SIZE;
+        const INDEX_TYPE slice_begin = BATCH_SIZE * batch;
+        const INDEX_TYPE slice_end =
+            min(BATCH_SIZE * (batch + 1), num_col_slices);
+
+        for (INDEX_TYPE slicecolidx = slice_begin;
+             slicecolidx < slice_end;
+             ++slicecolidx) {
+            for (INDEX_TYPE j = sliceMatrix.sliceColPtr[slicecolidx];
+                 j < sliceMatrix.sliceColPtr[slicecolidx + 1];
+                 ++j) {
+                const INDEX_TYPE slicennzR = sliceMatrix.sliceVal[j].nnzR;
+                Sort_Slice_Row(sliceMatrix.sliceVal[j]);
+
+                for (INDEX_TYPE k = 0; k < slicennzR; ++k) {
+                    const INDEX_TYPE row = sliceMatrix.sliceVal[j].RowIdx[k];
+                    const INDEX_TYPE pe_idx =
+                        CuperHostMapRowToPe(row, HBM_CHANNEL_NUM);
+                    lane_lists[pe_idx].push_back(
+                        SpElement(sliceMatrix.sliceVal[j].ColIdx[k],
+                                  row,
+                                  sliceMatrix.sliceVal[j].Val[k]));
+                }
+            }
+        }
+
+        for (auto &lane_list : lane_lists) {
+            sort(lane_list.begin(), lane_list.end(), compare_col_row);
+            for (SpElement &sp : lane_list) {
+                sp = CuperHostEncodeDenseSpElement(sp, base_col_index, num_pe);
+                if (sp.colIdx < 0 || sp.colIdx >= (1 << 14)) {
+                    throw std::runtime_error(
+                        "lane-static SpElement local column exceeds 14 bits");
+                }
+                if (sp.rowIdx < 0 || sp.rowIdx >= (1 << 17)) {
+                    throw std::runtime_error(
+                        "lane-static SpElement row encoding exceeds valid range");
+                }
+            }
+        }
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            INDEX_TYPE channel_batch_len = 0;
+            for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                channel_batch_len = max(
+                    channel_batch_len,
+                    static_cast<INDEX_TYPE>(lane_lists[pe_idx].size()));
+            }
+
+            Matrix_len_per_hbm[channel] += channel_batch_len;
+            ptr_by_channel[channel * (batch_num + 1) + batch + 1] =
+                Matrix_len_per_hbm[channel];
+        }
+    }
+
+    SpElement_list_ptr_per_hbm.assign(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+    for (INDEX_TYPE boundary = 0; boundary <= batch_num; ++boundary) {
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            SpElement_list_ptr_per_hbm[boundary * HBM_CHANNEL_NUM + channel] =
+                ptr_by_channel[channel * (batch_num + 1) + boundary];
+        }
+    }
+
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        INDEX_TYPE channel_words = Matrix_len_per_hbm[channel] * PE_NUM;
+        INDEX_TYPE channel_size = ((channel_words + 511) / 512) * 512;
+        if (channel_size == 0) {
+            channel_size = PE_NUM;
+        }
+        Matrix_fpga_data[channel].assign(channel_size, 0);
+    }
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        for (auto &lane_list : lane_lists) {
+            lane_list.clear();
+        }
+
+        const INDEX_TYPE base_col_index = batch * BATCH_SIZE * Slice_SIZE;
+        const INDEX_TYPE slice_begin = BATCH_SIZE * batch;
+        const INDEX_TYPE slice_end =
+            min(BATCH_SIZE * (batch + 1), num_col_slices);
+
+        for (INDEX_TYPE slicecolidx = slice_begin;
+             slicecolidx < slice_end;
+             ++slicecolidx) {
+            for (INDEX_TYPE j = sliceMatrix.sliceColPtr[slicecolidx];
+                 j < sliceMatrix.sliceColPtr[slicecolidx + 1];
+                 ++j) {
+                const INDEX_TYPE slicennzR = sliceMatrix.sliceVal[j].nnzR;
+                Sort_Slice_Row(sliceMatrix.sliceVal[j]);
+
+                for (INDEX_TYPE k = 0; k < slicennzR; ++k) {
+                    const INDEX_TYPE row = sliceMatrix.sliceVal[j].RowIdx[k];
+                    const INDEX_TYPE pe_idx =
+                        CuperHostMapRowToPe(row, HBM_CHANNEL_NUM);
+                    lane_lists[pe_idx].push_back(
+                        SpElement(sliceMatrix.sliceVal[j].ColIdx[k],
+                                  row,
+                                  sliceMatrix.sliceVal[j].Val[k]));
+                }
+            }
+        }
+
+        for (auto &lane_list : lane_lists) {
+            sort(lane_list.begin(), lane_list.end(), compare_col_row);
+            for (SpElement &sp : lane_list) {
+                sp = CuperHostEncodeDenseSpElement(sp, base_col_index, num_pe);
+            }
+        }
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            const INDEX_TYPE local_start =
+                ptr_by_channel[channel * (batch_num + 1) + batch];
+            const INDEX_TYPE local_end =
+                ptr_by_channel[channel * (batch_num + 1) + batch + 1];
+
+            for (INDEX_TYPE offset = 0; offset < local_end - local_start; ++offset) {
+                for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                    const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                    const vector<SpElement> &lane_list = lane_lists[pe_idx];
+                    const SpElement sp =
+                        (offset < static_cast<INDEX_TYPE>(lane_list.size()))
+                            ? lane_list[offset]
+                            : SpElement(-1, -1, 0.0);
+                    Matrix_fpga_data[channel][(local_start + offset) * PE_NUM + lane] =
+                        PackSpElementForCuper(sp);
                 }
             }
         }

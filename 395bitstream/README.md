@@ -29,8 +29,9 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，服务器侧性能提升不足，保留为宽 HBM 边界 |
-| `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，待服务器上板 |
-| `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，服务器侧完整 `thermal2` 已通过并为当前 SpMV 实验最佳 |
+| `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
+| `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，已同步待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -197,6 +198,45 @@ HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]�
 `11.16%` 和 `13.54%`。服务器侧测试必须设置
 `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_COMPACT_PE=1`。
+
+TAPA Cuper / SpMV-only 16 路 lane-static real/batch 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin
+```
+
+这版仍是 `CuperSpmvServiceOnly`，只计算 `Y=A*X`，不进入 Jacobi update。它打开
+`JACOBI_SPMV_LANE_STATIC_REAL=1`，host 在每个 HBM channel、每个 batch 内按固定
+lane 保留真实元素，并保持 `slot p -> lane p` 的映射。它的目标是去掉 PE 内部
+`Reordering` 补出来的空洞，同时避免 compact16 的动态 lane tag 回填后端。
+
+注意：当前实现是 `lane-static real/batch`，不是最终形态的
+`lane-static real/stream`。原因是现有 `CoreStrip` 仍按 column batch 装载 X，
+所以这一版先保持 batch 边界。kernel 端复用 strip-style ptr/loader/core 和普通
+`Accumulator`，没有采用 compact16 的动态 lane accumulator。
+
+UUID 为 `98358acf-f40e-4f2f-b77f-4a25c24f4473`，SHA256 为
+`c8ef2426248a1acd4d02a75da39d72439c1cabdd12450428cfa83ce0baf1b49d`。
+DATA/KERNEL/HBM clock 为 `197/500/450 MHz`；routed timing 未完全收敛：
+WNS `-0.073 ns`，TNS `-4.957 ns`，setup failing endpoints `215`，违例在
+`clk_kernel_00_unbuffered_net`。构建目录为
+`cuper-jacobi-spmv-lanereal16-build/`，构建日志为
+`cuper-jacobi-spmv-lanereal16-build/logs/build_hw_tmux.log`，v++ link 总耗时
+`4h 13m 41s`。
+
+HBM 映射为：`Matrix_data_0..15` 使用 HBM[0..15]，`SpElement_list_ptr` 使用
+HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]，
+`Metrics` 使用 HBM[31]。本机 software simulation 已通过 `thermal2_n1024` 和
+`thermal2_n65536`：`thermal2_n1024` matrix read beats 从 `2624` 降到 `883`，
+`thermal2_n65536` 从 `68464` 降到 `57472`，节省 `16.0552%`。HLS 同时显示
+`Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 为 II=`2`；
+因此这版先作为协议/功能探索，不建议在上板前假设会快于 strip16。服务器侧测试必须
+设置：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_LANE_STATIC_REAL=1
+```
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

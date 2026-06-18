@@ -154,6 +154,13 @@ else()
     message(STATUS "Cuper SpMV-only per-PE compact packing is disabled")
 endif()
 
+if(DEFINED ENV{JACOBI_SPMV_LANE_STATIC_REAL} AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_SPMV_LANE_STATIC_REAL=1)
+    message(STATUS "Cuper SpMV-only lane-static real packing is ENABLED")
+else()
+    message(STATUS "Cuper SpMV-only lane-static real packing is disabled")
+endif()
+
 # -----------------------------------------------------------------------------
 # 4. 链接库 (保持你的手动链接逻辑，但改为变量管理)
 # -----------------------------------------------------------------------------

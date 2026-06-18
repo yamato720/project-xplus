@@ -94,6 +94,68 @@ compact16 为 `30.2804 ms` / `0.5667 GFLOP/s`，只有 strip16 `1.29158 ms` 的
 节省被 lane tag 解码、slot 分发和回写累加路径吞掉；后续若要把读 beat 节省转化为
 稳定性能提升，需要继续重写动态/均衡 SpMV 协议。
 
+后续 C 侧 `pack_profile` 已补 reorder-free 上限评估。完整 A 口径下，`thermal2`
+16 路当前格式密度为 `78.09%`，strip16 为 `83.00%`，compact-scheduled 为
+`90.40%`；如果改成 lane-static reorder-free stream，密度可达 `99.83%`，几乎等于
+real-compact 下限。因此下一步硬件 v2 应优先保持固定 lane accumulator，同时重写
+host packer 和每 lane/每 HBM 的长度协议，而不是继续修 compact16 的动态 lane 写回。
+
+## 2026-06-18 补充：Jacobi 目录 SpMV-only lanereal16 demo
+
+本轮又新增一个 `CuperSpmvServiceOnly` demo artifact，用于验证固定 lane 后端下
+“只传真实元素、去掉 PE 内部 reorder holes”的第一步硬件边界。它属于
+`cuper-tapa-spmv` demo 候选，源码入口仍在：
+
+```text
+DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp
+```
+
+顶层为：
+
+```text
+CuperSpmvServiceOnly
+```
+
+这版只计算 `Y=A*X`，不拆 `A=D+R`，不取负 `X`，也不执行 Jacobi update。它打开
+`JACOBI_SPMV_LANE_STATIC_REAL=1`，host 在每个 HBM channel、每个 batch 内按固定
+lane 保留真实元素，仍保持 `slot p -> lane p`。kernel 端复用 strip-style
+ptr/loader/core 和普通 `Accumulator`，避免 compact16 的动态 lane tag 累加路径。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin.info
+```
+
+构建目录和日志：
+
+```text
+cuper-jacobi-spmv-lanereal16-build/
+cuper-jacobi-spmv-lanereal16-build/logs/build_hw_tmux.log
+```
+
+版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: 98358acf-f40e-4f2f-b77f-4a25c24f4473
+SHA256: c8ef2426248a1acd4d02a75da39d72439c1cabdd12450428cfa83ce0baf1b49d
+DATA/KERNEL/HBM clock: 197 / 500 / 450 MHz
+Timing: WNS -0.073 ns, TNS -4.957 ns, setup failing endpoints 215
+```
+
+本机 software simulation 已通过 `thermal2_n1024` 和 `thermal2_n65536`，均为
+`Correctness Verification: Passed`、`Error Num=0`。读包侧收益明显：
+`thermal2_n1024` matrix read beats 从 `2624` 降到 `883`；
+`thermal2_n65536` 从 `68464` 降到 `57472`，节省 `16.0552%`。
+
+当前限制：这版还是 `lane-static real/batch`，不是最终的
+`lane-static real/stream`，因为现有 core 仍按 column batch 装载 X。HLS 报告同时
+显示 `Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 对应路径
+为 II=`2`。因此这版先作为协议/功能探索件，同步到 `395bitstream/` 等服务器上板；
+在上板数据出来前不建议晋级，也不更新正式 `source.diff`。
+
 ## 目标
 
 本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**，

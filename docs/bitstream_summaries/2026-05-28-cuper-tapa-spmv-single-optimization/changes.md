@@ -68,6 +68,91 @@ SpMV 协议的可行边界。
 - 服务器上板已确认性能显著退步，因此本轮不更新正式 `source.diff`，也不建议晋级
   标准 bitstream。
 
+## 2026-06-18：C 侧 reorder-free 打包上限评估
+
+compact16 上板后确认“动态 lane tag 回填”会严重拖慢 accumulator。本次继续只改
+纯 C 打包分析工具，评估如果未来重写 SpMV v2 协议，直接去掉 reorder holes 后的
+读取上限。
+
+新增/调整内容：
+
+- `pack_profile.c` 追加 reorder-free 指标，不改变已有列含义；
+- `lane-static real/batch`：每个 HBM、每个 batch 内只保留真实元素，但仍保持
+  `slot p -> lane p`，适合固定 lane accumulator；
+- `lane-static real/stream`：跨 batch 进一步按 lane 合并真实元素，估算固定 lane
+  后端的最终读取量；
+- `real compact512/batch` 和 `real compact512/stream`：只按真实 nonzero 打满
+  512-bit beat，是需要动态 demux/lane 元数据的理论下限；
+- `balanced compact512/stream`：假设真实任务能在 HBM 间完全均衡后的下限；
+- `run-pack-profile` 新增 `DROP_DIAG=0`，用于完整 SpMV-only 的 `A` 口径；默认仍
+  `--drop-diag`，服务 Jacobi 的 `R=A-D` 口径。
+
+初步结论：对 `thermal2` 完整 A，16 路旧格式密度为 `78.09%`，strip16 为
+`83.00%`，compact-scheduled 为 `90.40%`；如果改成 lane-static reorder-free stream，
+密度可达 `99.83%`，与 real-compact 下限 `100.00%` 基本相同。也就是说后续硬件 v2
+不一定要走 compact16 那种动态 lane 写回，优先保持固定 lane accumulator，同时重写
+host packer 和长度协议，就已经接近理论下限。
+
+## 2026-06-18：CuperSpmvServiceOnly lanereal16 固定 lane 硬件实验
+
+本次把 C 侧 `lane-static real` 思路做成第一版硬件 demo。它仍然属于
+`DLC/Cuper-jacobi-iteration` 下的 SpMV-only 实验，不改变原版 `DLC/Cuper` 标准
+`Cuper(...)`。
+
+源码和构建开关：
+
+- `JACOBI_SPMV_LANE_STATIC_REAL=1`：打开 lane-static real/batch host 打包和 kernel
+  strip-style 路径；
+- `DLC/Cuper-jacobi-iteration/include/Cuper_common.h`：新增 host 侧行到 PE 的映射、
+  dense SpElement 编码和 lane-static real/batch 打包函数；
+- `DLC/Cuper-jacobi-iteration/host/main.cpp`：SpMV-only 模式下增加
+  `[spmv-only-lane-static-real]` 读包统计；
+- `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`：
+  让 ptr/loader/core 复用 strip-style per-HBM 边界；
+- `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_tasks.hpp`：在
+  `JACOBI_SPMV_LANE_STATIC_REAL` 下关闭旧 reorder window 依赖 pragma，避免去掉空洞后
+  继续套用旧调度距离；
+- 根 `Makefile`、子目录 `Makefile`、`CMakeLists.txt`、`scripts/build_xo_u55c.sh`
+  和 `scripts/launcher.py`：向 host、TAPA/HLS 和 hw build 传播
+  `JACOBI_SPMV_LANE_STATIC_REAL`。
+
+当前协议：
+
+- 每个 HBM、每个 batch 内只保留真实元素；
+- 仍保持 `slot p -> lane p`，因此 accumulator 继续走固定 lane 后端；
+- 这版是 `lane-static real/batch`，不是跨 batch 合并的
+  `lane-static real/stream`，因为现有 core 仍按 column batch 装载 X；
+- 不使用 compact16 的动态 lane tag accumulator。
+
+已生成 demo bitstream：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin
+```
+
+构建结果：
+
+- UUID：`98358acf-f40e-4f2f-b77f-4a25c24f4473`；
+- SHA256：`c8ef2426248a1acd4d02a75da39d72439c1cabdd12450428cfa83ce0baf1b49d`；
+- DATA/KERNEL/HBM clock：`197/500/450 MHz`；
+- routed timing 未完全收敛：WNS `-0.073 ns`、TNS `-4.957 ns`、setup failing
+  endpoints `215`；
+- HBM 映射：`Matrix_data_0..15 -> HBM[0..15]`，`SpElement_list_ptr -> HBM[16]`，
+  `X -> HBM[17]`，`Y_out -> HBM[18]`，`Status -> HBM[30]`，
+  `Metrics -> HBM[31]`。
+
+本机 software simulation 已通过 `thermal2_n1024` 和 `thermal2_n65536`：
+
+- `thermal2_n1024` matrix read beats 从 `2624` 降到 `883`；
+- `thermal2_n65536` matrix read beats 从 `68464` 降到 `57472`，节省 `16.0552%`。
+
+当前风险：
+
+- HLS 报告显示 lanereal16 的 `Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`；
+- strip16 同一路径是 II=`2`；
+- 因此这版虽然前端读包减少，但后端可能成为瓶颈。服务器上板前只按协议探索件记录，
+  不建议晋级，也不更新正式 `source.diff`。
+
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
 本轮新增内容：

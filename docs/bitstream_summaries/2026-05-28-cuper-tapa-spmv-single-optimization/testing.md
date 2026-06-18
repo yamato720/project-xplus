@@ -151,6 +151,148 @@ logs/spmv_compact16_hw_sweep_20260618_174007/
   PE 内部 `reorder_holes`。
 - 本轮只更新 HTML 和 Markdown 测试结论，不写入正式 `source.diff`。
 
+## 2026-06-18 reorder-free pack profile
+
+compact16 的硬件后端已经证明动态 lane tag 写回代价过高，因此本轮继续用纯 C
+`pack_profile` 评估下一版 SpMV v2 协议。如果未来直接去掉 reorder holes，关键是看
+固定 lane accumulator 能否在读取量上接近真实 nonzero 下限。
+
+构建命令：
+
+```bash
+make cuper-jacobi-pack-profile
+```
+
+完整 A 的 SpMV-only 口径使用 `DROP_DIAG=0`：
+
+```bash
+make cuper-jacobi-run-pack-profile \
+  MATRIX=data/suitesparse/Schmid/csr/thermal2 \
+  HBM=16 \
+  DROP_DIAG=0 \
+  TOP_BATCHES=3
+```
+
+Jacobi R 口径仍默认 drop diagonal：
+
+```bash
+make cuper-jacobi-run-pack-profile \
+  MATRIX=data/suitesparse/Schmid/csr/thermal2 \
+  HBM=16 \
+  TOP_BATCHES=3
+```
+
+完整 A 口径关键结果：
+
+| 数据集 | HBM | 当前密度 | strip密度 | compact-sched密度 | lane-static最终密度 | real-compact下限密度 | strip节省 | compact-sched节省 | lane-static节省 | real-compact节省 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `thermal2_n1024` | 16 | 30.31% | 32.98% | 36.02% | 90.06% | 99.28% | 8.12% | 15.85% | 66.35% | 69.47% |
+| `thermal2_n1024` | 24 | 20.33% | 22.47% | 24.84% | 80.25% | 98.79% | 9.53% | 18.15% | 74.67% | 79.42% |
+| `thermal2_n1024` | 32 | 15.34% | 17.01% | 19.08% | 86.35% | 98.67% | 9.80% | 19.60% | 82.23% | 84.45% |
+| `thermal2_n65536` | 16 | 79.79% | 83.71% | 89.88% | 98.92% | 99.99% | 4.69% | 11.23% | 19.34% | 20.20% |
+| `thermal2_n65536` | 24 | 69.20% | 75.39% | 84.50% | 98.82% | 99.98% | 8.21% | 18.10% | 29.97% | 30.79% |
+| `thermal2_n65536` | 32 | 67.87% | 74.02% | 80.42% | 98.68% | 99.97% | 8.31% | 15.61% | 31.22% | 32.11% |
+| `thermal2_n262144` | 16 | 77.83% | 82.54% | 89.99% | 99.43% | 100.00% | 5.70% | 13.51% | 21.72% | 22.16% |
+| `thermal2_n262144` | 24 | 69.31% | 75.94% | 85.09% | 99.29% | 99.99% | 8.74% | 18.54% | 30.20% | 30.69% |
+| `thermal2_n262144` | 32 | 65.06% | 71.90% | 81.26% | 99.26% | 100.00% | 9.51% | 19.93% | 34.45% | 34.94% |
+| `thermal2` | 16 | 78.09% | 83.00% | 90.40% | 99.83% | 100.00% | 5.91% | 13.62% | 21.78% | 21.91% |
+| `thermal2` | 24 | 70.55% | 77.04% | 85.95% | 99.79% | 100.00% | 8.43% | 17.92% | 29.30% | 29.45% |
+| `thermal2` | 32 | 65.30% | 72.60% | 82.30% | 99.77% | 100.00% | 10.05% | 20.66% | 34.55% | 34.70% |
+
+结论：
+
+- `lane-static real/stream` 已经非常接近 `real compact512/stream` 理论下限；
+- 后续硬件 v2 应优先保持固定 lane accumulator，避免 compact16 的动态 lane 写回；
+- 真正需要重写的是 host packer、每 lane/每 HBM 的长度协议和 matrix loader/core
+  的消费边界，而不是继续修 compact16 accumulator。
+
+## 2026-06-18 lanereal16 SpMV-only demo
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin
+kernel: CuperSpmvServiceOnly
+UUID: 98358acf-f40e-4f2f-b77f-4a25c24f4473
+SHA256: c8ef2426248a1acd4d02a75da39d72439c1cabdd12450428cfa83ce0baf1b49d
+DATA/KERNEL/HBM clock: 197 / 500 / 450 MHz
+HBM mapping: Matrix_data_0..15 -> HBM[0..15], SpElement_list_ptr -> HBM[16],
+             X -> HBM[17], Y_out -> HBM[18], Status -> HBM[30], Metrics -> HBM[31]
+Timing: WNS -0.073 ns, TNS -4.957 ns, setup failing endpoints 215
+```
+
+构建：
+
+```text
+session: cuper_jacobi_iteration_hw_build
+build_dir: cuper-jacobi-spmv-lanereal16-build/
+log: cuper-jacobi-spmv-lanereal16-build/logs/build_hw_tmux.log
+xclbin: cuper-jacobi-spmv-lanereal16-build/CuperSpmvServiceOnly.xclbin
+```
+
+关键构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-jacobi-spmv-lanereal16-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 4h 13m 41s
+```
+
+软件仿真命令口径：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_LANE_STATIC_REAL=1 \
+SPMV_REPEATS=1 \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/<dataset>
+```
+
+本机 software simulation 已通过：
+
+| 数据集 | 结果 | 原读 beats | lanereal 后 beats | 节省 |
+| --- | --- | ---: | ---: | ---: |
+| `thermal2_n1024` | `Correctness Verification: Passed`, `Error Num=0` | 2,624 | 883 | 66.35% |
+| `thermal2_n65536` | `Correctness Verification: Passed`, `Error Num=0` | 68,464 | 57,472 | 16.0552% |
+
+HLS 关键对比：
+
+| 路径 | build | `Accumulator_Pipeline_cuper_acc_accumulate` II |
+| --- | --- | ---: |
+| strip16 | `cuper-jacobi-spmv-strip16-build/` | 2 |
+| lanereal16 | `cuper-jacobi-spmv-lanereal16-build/` | 5 |
+
+结论：
+
+- 功能边界：software simulation 已通过 `thermal2_n1024` 和 `thermal2_n65536`。
+- 硬件状态：xclbin 已生成并同步到 `395bitstream/`，等待服务器上板。
+- 性能风险：读包减少明显，但 accumulator II 从 strip16 的 `2` 退到 `5`，如果后端
+  成为瓶颈，性能可能不会提升。
+- 本轮只同步 demo 和 Markdown 记录，不更新正式 `source.diff`；上板结果出来后再决定
+  是否写入 HTML 性能表。
+
+服务器侧建议命令口径：
+
+```bash
+make cuper-jacobi-build-host \
+  CUPER_JACOBI_BUILD_DIR=$PWD/cuper-jacobi-spmv-lanereal16-build \
+  JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=16 \
+  JACOBI_SPMV_LANE_STATIC_REAL=1
+
+timeout 240s env \
+  XILINX_XRT=/opt/xilinx/xrt \
+  BITFILE=$PWD/395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin \
+  JACOBI_SPMV_ONLY=1 \
+  DIFF_TOL=1e-1 \
+  SPMV_REPEATS=1 \
+  LD_LIBRARY_PATH=/home/pyx/.tapa/usr/lib:/opt/xilinx/xrt/lib:$LD_LIBRARY_PATH \
+  ./cuper-jacobi-spmv-lanereal16-build/cuper_jacobi_host \
+  $PWD/data/suitesparse/Schmid/csr/<dataset>
+```
+
 说明：旧 2026-05-28 service 抽出版的 timeout 结论只对应旧 UUID
 `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不再对应当前同名 demo 文件。
 

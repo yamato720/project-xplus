@@ -526,9 +526,11 @@ cuper_acc_main:
         for (INDEX_TYPE j = start_32; j < end_32;) {
 #pragma HLS loop_tripcount min=1 max=200
 #pragma HLS pipeline II=1
+#ifndef JACOBI_SPMV_LANE_STATIC_REAL
 #pragma HLS dependence true variable=local_part_Y_ping distance=WINDOWS
 #ifdef PINGPONG
 #pragma HLS dependence true variable=local_part_Y_pong distance=WINDOWS
+#endif
 #endif
             if (!Matrix_Mult_Vector_Stream.empty()) {
                 Matrix_Mult_X matmultx;

@@ -174,3 +174,32 @@ JACOBI_SPMV_ONLY=1
 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_COMPACT_PE=1
 ```
+
+## 8. 2026-06-18 lanereal16 阅读入口
+
+lanereal16 相关路径按这个顺序读：
+
+1. `DLC/Cuper-jacobi-iteration/host/main.cpp`
+   - 搜 `JACOBI_SPMV_LANE_STATIC_REAL`；
+   - host 在 SpMV-only 分支调用 lane-static real/batch 打包，并打印
+     `[spmv-only-lane-static-real] original_read_beats=... lane_static_read_beats=...`。
+2. `DLC/Cuper-jacobi-iteration/include/Cuper_common.h`
+   - `Create_SpElement_list_for_all_channels_lane_static_real_batch` 是 host 打包入口；
+   - 它在每个 HBM、每个 batch 内只保留真实元素，但保持 `slot p -> lane p`；
+   - 这版不写 compact16 的动态 lane tag。
+3. `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`
+   - lanereal16 复用 strip-style `CuperSpmvOnly_StripPtrLoader`、
+     `CuperSpmvOnly_MatrixLoaderStrip` 和 `CuperSpmvOnly_CoreStrip`；
+   - 后端继续走普通 `SpmvService_Accumulator`，不是 compact accumulator。
+4. `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_tasks.hpp`
+   - `JACOBI_SPMV_LANE_STATIC_REAL` 下关闭旧 reorder window dependence pragma；
+   - HLS 报告显示当前 accumulator II=5，这是该版最需要关注的性能风险。
+
+构建和运行必须同时设置：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_LANE_STATIC_REAL=1
+```

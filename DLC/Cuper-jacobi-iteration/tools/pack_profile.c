@@ -62,9 +62,13 @@ typedef struct {
   size_t read_slots;
   size_t channel_read_slots;
   size_t pe_compact_read_slots;
+  size_t lane_static_real_slots;
+  size_t real_compact_read_slots;
   double density;
   double channel_density;
   double pe_compact_density;
+  double lane_static_real_density;
+  double real_compact_density;
 } BatchStat;
 
 static void die(const char* msg) {
@@ -368,7 +372,27 @@ static void print_csv_header(void) {
          "pe_compact_stream_align_pad,pe_compact_stream_total_savings_slots,"
          "pe_compact_stream_total_savings_pct,pe_sched_len_min,"
          "pe_sched_len_max,pe_compact_stream_channel_beats_min,"
-         "pe_compact_stream_channel_beats_max\n");
+         "pe_compact_stream_channel_beats_max,lane_static_real_batch_read_beats,"
+         "lane_static_real_batch_read_slots,lane_static_real_batch_density,"
+         "lane_static_real_batch_total_savings_slots,"
+         "lane_static_real_batch_total_savings_pct,"
+         "lane_static_real_stream_read_beats,lane_static_real_stream_read_slots,"
+         "lane_static_real_stream_density,"
+         "lane_static_real_stream_total_savings_slots,"
+         "lane_static_real_stream_total_savings_pct,"
+         "real_compact_batch_read_beats,real_compact_batch_read_slots,"
+         "real_compact_batch_density,real_compact_batch_align_pad,"
+         "real_compact_batch_total_savings_slots,"
+         "real_compact_batch_total_savings_pct,"
+         "real_compact_stream_read_beats,real_compact_stream_read_slots,"
+         "real_compact_stream_density,real_compact_stream_align_pad,"
+         "real_compact_stream_total_savings_slots,"
+         "real_compact_stream_total_savings_pct,"
+         "balanced_compact_stream_read_beats,"
+         "balanced_compact_stream_read_slots,balanced_compact_stream_density,"
+         "balanced_compact_stream_total_savings_slots,"
+         "balanced_compact_stream_total_savings_pct,"
+         "balanced_compact_stream_channel_beats\n");
 }
 
 static void profile_one_hbm(const Meta* meta,
@@ -447,6 +471,16 @@ static void profile_one_hbm(const Meta* meta,
   // row-low-bit reconstruction in hardware; the current fixed-lane packet format
   // cannot consume these packets directly.
   size_t pe_compact_batch_read_beats = 0;
+  // Reorder-free estimates for a future protocol:
+  //
+  //   lane_static_real_* keeps slot p mapped to lane p, but only schedules real
+  //   entries. It removes reorder holes while preserving a simple fixed-lane
+  //   accumulator; remaining padding is lane imbalance.
+  //
+  //   real_compact_* packs only real entries into 512-bit beats. It is a lower
+  //   bound for a dynamic/demux protocol that carries enough row/lane metadata.
+  size_t lane_static_real_batch_read_beats = 0;
+  size_t real_compact_batch_read_beats = 0;
 
   for (int batch = 0; batch < batch_num; ++batch) {
     size_t max_len = 0;
@@ -454,9 +488,15 @@ static void profile_one_hbm(const Meta* meta,
     size_t batch_scheduled = 0;
     size_t channel_batch_len[32];
     size_t channel_batch_sched[32];
+    size_t channel_batch_real[32];
+    size_t channel_lane_real[32][kPeNum];
     for (int c = 0; c < hbm; ++c) {
       channel_batch_len[c] = 0;
       channel_batch_sched[c] = 0;
+      channel_batch_real[c] = 0;
+      for (int lane = 0; lane < kPeNum; ++lane) {
+        channel_lane_real[c][lane] = 0;
+      }
     }
 
     for (int pe = 0; pe < num_pe; ++pe) {
@@ -472,6 +512,8 @@ static void profile_one_hbm(const Meta* meta,
       const int channel = pe / kPeNum;
       if (sched > channel_batch_len[channel]) channel_batch_len[channel] = sched;
       channel_batch_sched[channel] += sched;
+      channel_batch_real[channel] += b->count;
+      channel_lane_real[channel][pe % kPeNum] = b->count;
       batch_real += b->count;
       batch_scheduled += sched;
       scheduled_slots += sched;
@@ -484,13 +526,25 @@ static void profile_one_hbm(const Meta* meta,
 
     size_t channel_batch_read_beats = 0;
     size_t pe_compact_batch_beats = 0;
+    size_t lane_static_real_batch_beats = 0;
+    size_t real_compact_batch_beats = 0;
     for (int c = 0; c < hbm; ++c) {
       channel_dynamic_len[c] += channel_batch_len[c];
       channel_batch_read_beats += channel_batch_len[c];
       pe_compact_batch_beats += ceil_div_size(channel_batch_sched[c], (size_t)kPeNum);
+      size_t channel_lane_max = 0;
+      for (int lane = 0; lane < kPeNum; ++lane) {
+        if (channel_lane_real[c][lane] > channel_lane_max) {
+          channel_lane_max = channel_lane_real[c][lane];
+        }
+      }
+      lane_static_real_batch_beats += channel_lane_max;
+      real_compact_batch_beats += ceil_div_size(channel_batch_real[c], (size_t)kPeNum);
     }
     channel_dynamic_read_beats += channel_batch_read_beats;
     pe_compact_batch_read_beats += pe_compact_batch_beats;
+    lane_static_real_batch_read_beats += lane_static_real_batch_beats;
+    real_compact_batch_read_beats += real_compact_batch_beats;
 
     matrix_len += max_len;
     batch_stats[batch].id = batch;
@@ -500,6 +554,10 @@ static void profile_one_hbm(const Meta* meta,
     batch_stats[batch].read_slots = max_len * (size_t)num_pe;
     batch_stats[batch].channel_read_slots = channel_batch_read_beats * (size_t)kPeNum;
     batch_stats[batch].pe_compact_read_slots = pe_compact_batch_beats * (size_t)kPeNum;
+    batch_stats[batch].lane_static_real_slots =
+        lane_static_real_batch_beats * (size_t)kPeNum;
+    batch_stats[batch].real_compact_read_slots =
+        real_compact_batch_beats * (size_t)kPeNum;
     batch_stats[batch].density = batch_stats[batch].read_slots
                                      ? (double)batch_real /
                                            (double)batch_stats[batch].read_slots
@@ -512,6 +570,14 @@ static void profile_one_hbm(const Meta* meta,
         batch_stats[batch].pe_compact_read_slots
             ? (double)batch_real / (double)batch_stats[batch].pe_compact_read_slots
             : 0.0;
+    batch_stats[batch].lane_static_real_density =
+        batch_stats[batch].lane_static_real_slots
+            ? (double)batch_real / (double)batch_stats[batch].lane_static_real_slots
+            : 0.0;
+    batch_stats[batch].real_compact_density =
+        batch_stats[batch].real_compact_read_slots
+            ? (double)batch_real / (double)batch_stats[batch].real_compact_read_slots
+            : 0.0;
   }
 
   const size_t read_beats = matrix_len * (size_t)hbm;
@@ -520,6 +586,10 @@ static void profile_one_hbm(const Meta* meta,
       channel_dynamic_read_beats * (size_t)kPeNum;
   const size_t pe_compact_batch_read_slots =
       pe_compact_batch_read_beats * (size_t)kPeNum;
+  const size_t lane_static_real_batch_read_slots =
+      lane_static_real_batch_read_beats * (size_t)kPeNum;
+  const size_t real_compact_batch_read_slots =
+      real_compact_batch_read_beats * (size_t)kPeNum;
   const size_t padding_slots = (read_slots >= real_nnz) ? read_slots - real_nnz : 0;
   const size_t channel_dynamic_padding_slots =
       (channel_dynamic_read_slots >= real_nnz) ? channel_dynamic_read_slots - real_nnz : 0;
@@ -539,6 +609,12 @@ static void profile_one_hbm(const Meta* meta,
       (pe_compact_batch_read_slots >= scheduled_slots) ? pe_compact_batch_read_slots - scheduled_slots : 0;
   const size_t pe_compact_batch_savings_slots =
       (read_slots >= pe_compact_batch_read_slots) ? read_slots - pe_compact_batch_read_slots : 0;
+  const size_t lane_static_real_batch_savings_slots =
+      (read_slots >= lane_static_real_batch_read_slots) ? read_slots - lane_static_real_batch_read_slots : 0;
+  const size_t real_compact_batch_align_pad =
+      (real_compact_batch_read_slots >= real_nnz) ? real_compact_batch_read_slots - real_nnz : 0;
+  const size_t real_compact_batch_savings_slots =
+      (read_slots >= real_compact_batch_read_slots) ? read_slots - real_compact_batch_read_slots : 0;
   const double density = read_slots ? (double)real_nnz / (double)read_slots : 0.0;
   const double channel_dynamic_density =
       channel_dynamic_read_slots ? (double)real_nnz / (double)channel_dynamic_read_slots : 0.0;
@@ -546,18 +622,37 @@ static void profile_one_hbm(const Meta* meta,
       scheduled_slots ? (double)real_nnz / (double)scheduled_slots : 0.0;
   const double pe_compact_batch_density =
       pe_compact_batch_read_slots ? (double)real_nnz / (double)pe_compact_batch_read_slots : 0.0;
+  const double lane_static_real_batch_density =
+      lane_static_real_batch_read_slots ? (double)real_nnz / (double)lane_static_real_batch_read_slots : 0.0;
+  const double real_compact_batch_density =
+      real_compact_batch_read_slots ? (double)real_nnz / (double)real_compact_batch_read_slots : 0.0;
   const double channel_dynamic_savings_pct =
       read_slots ? (double)channel_dynamic_savings_slots * 100.0 / (double)read_slots : 0.0;
   const double pe_dynamic_savings_pct =
       read_slots ? (double)pe_dynamic_total_savings_slots * 100.0 / (double)read_slots : 0.0;
   const double pe_compact_batch_savings_pct =
       read_slots ? (double)pe_compact_batch_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const double lane_static_real_batch_savings_pct =
+      read_slots ? (double)lane_static_real_batch_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const double real_compact_batch_savings_pct =
+      read_slots ? (double)real_compact_batch_savings_slots * 100.0 / (double)read_slots : 0.0;
 
   size_t pe_compact_stream_read_beats = 0;
+  size_t lane_static_real_stream_read_beats = 0;
+  size_t real_compact_stream_read_beats = 0;
   for (int c = 0; c < hbm; ++c) {
     channel_pe_compact_stream_beats[c] =
         ceil_div_size(channel_sched[c], (size_t)kPeNum);
     pe_compact_stream_read_beats += channel_pe_compact_stream_beats[c];
+    size_t channel_lane_real_max = 0;
+    for (int lane = 0; lane < kPeNum; ++lane) {
+      const size_t pe = (size_t)c * (size_t)kPeNum + (size_t)lane;
+      if (pe_real[pe] > channel_lane_real_max) {
+        channel_lane_real_max = pe_real[pe];
+      }
+    }
+    lane_static_real_stream_read_beats += channel_lane_real_max;
+    real_compact_stream_read_beats += ceil_div_size(channel_real[c], (size_t)kPeNum);
   }
   const size_t pe_compact_stream_read_slots =
       pe_compact_stream_read_beats * (size_t)kPeNum;
@@ -569,6 +664,38 @@ static void profile_one_hbm(const Meta* meta,
       pe_compact_stream_read_slots ? (double)real_nnz / (double)pe_compact_stream_read_slots : 0.0;
   const double pe_compact_stream_savings_pct =
       read_slots ? (double)pe_compact_stream_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const size_t lane_static_real_stream_read_slots =
+      lane_static_real_stream_read_beats * (size_t)kPeNum;
+  const size_t lane_static_real_stream_savings_slots =
+      (read_slots >= lane_static_real_stream_read_slots) ? read_slots - lane_static_real_stream_read_slots : 0;
+  const double lane_static_real_stream_density =
+      lane_static_real_stream_read_slots ? (double)real_nnz / (double)lane_static_real_stream_read_slots : 0.0;
+  const double lane_static_real_stream_savings_pct =
+      read_slots ? (double)lane_static_real_stream_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const size_t real_compact_stream_read_slots =
+      real_compact_stream_read_beats * (size_t)kPeNum;
+  const size_t real_compact_stream_align_pad =
+      (real_compact_stream_read_slots >= real_nnz) ? real_compact_stream_read_slots - real_nnz : 0;
+  const size_t real_compact_stream_savings_slots =
+      (read_slots >= real_compact_stream_read_slots) ? read_slots - real_compact_stream_read_slots : 0;
+  const double real_compact_stream_density =
+      real_compact_stream_read_slots ? (double)real_nnz / (double)real_compact_stream_read_slots : 0.0;
+  const double real_compact_stream_savings_pct =
+      read_slots ? (double)real_compact_stream_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const size_t balanced_channel_target_nnz =
+      ceil_div_size(real_nnz, (size_t)hbm);
+  const size_t balanced_compact_stream_channel_beats =
+      ceil_div_size(balanced_channel_target_nnz, (size_t)kPeNum);
+  const size_t balanced_compact_stream_read_beats =
+      balanced_compact_stream_channel_beats * (size_t)hbm;
+  const size_t balanced_compact_stream_read_slots =
+      balanced_compact_stream_read_beats * (size_t)kPeNum;
+  const size_t balanced_compact_stream_savings_slots =
+      (read_slots >= balanced_compact_stream_read_slots) ? read_slots - balanced_compact_stream_read_slots : 0;
+  const double balanced_compact_stream_density =
+      balanced_compact_stream_read_slots ? (double)real_nnz / (double)balanced_compact_stream_read_slots : 0.0;
+  const double balanced_compact_stream_savings_pct =
+      read_slots ? (double)balanced_compact_stream_savings_slots * 100.0 / (double)read_slots : 0.0;
 
   size_t channel_real_min = channel_real[0];
   size_t channel_real_max = channel_real[0];
@@ -610,7 +737,7 @@ static void profile_one_hbm(const Meta* meta,
   }
 
   if (opt->csv) {
-    printf("%s,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu\n",
+    printf("%s,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu\n",
            dataset, hbm, meta->m, meta->n, opt->drop_diag, real_nnz,
            slice_size, batch_size, slice_width, batch_num, matrix_len,
            read_beats, read_slots, density, padding_slots, reorder_holes,
@@ -638,7 +765,35 @@ static void profile_one_hbm(const Meta* meta,
            pe_sched_min,
            pe_sched_max,
            pe_compact_stream_channel_beats_min,
-           pe_compact_stream_channel_beats_max);
+           pe_compact_stream_channel_beats_max,
+           lane_static_real_batch_read_beats,
+           lane_static_real_batch_read_slots,
+           lane_static_real_batch_density,
+           lane_static_real_batch_savings_slots,
+           lane_static_real_batch_savings_pct,
+           lane_static_real_stream_read_beats,
+           lane_static_real_stream_read_slots,
+           lane_static_real_stream_density,
+           lane_static_real_stream_savings_slots,
+           lane_static_real_stream_savings_pct,
+           real_compact_batch_read_beats,
+           real_compact_batch_read_slots,
+           real_compact_batch_density,
+           real_compact_batch_align_pad,
+           real_compact_batch_savings_slots,
+           real_compact_batch_savings_pct,
+           real_compact_stream_read_beats,
+           real_compact_stream_read_slots,
+           real_compact_stream_density,
+           real_compact_stream_align_pad,
+           real_compact_stream_savings_slots,
+           real_compact_stream_savings_pct,
+           balanced_compact_stream_read_beats,
+           balanced_compact_stream_read_slots,
+           balanced_compact_stream_density,
+           balanced_compact_stream_savings_slots,
+           balanced_compact_stream_savings_pct,
+           balanced_compact_stream_channel_beats);
   } else {
     printf("\nHBM=%d\n", hbm);
     printf("  slice_size=%d batch_size=%d slice_width=%d col_slices=%d batch_num=%d num_pe=%d\n",
@@ -684,6 +839,39 @@ static void profile_one_hbm(const Meta* meta,
            pe_compact_stream_align_pad,
            pe_compact_stream_savings_slots,
            pe_compact_stream_savings_pct);
+    printf("  lane-static real/batch: read_beats=%zu read_slots=%zu density=%.2f%% saved=%zu (%.2f%%)\n",
+           lane_static_real_batch_read_beats,
+           lane_static_real_batch_read_slots,
+           lane_static_real_batch_density * 100.0,
+           lane_static_real_batch_savings_slots,
+           lane_static_real_batch_savings_pct);
+    printf("  lane-static real/stream: read_beats=%zu read_slots=%zu density=%.2f%% saved=%zu (%.2f%%)\n",
+           lane_static_real_stream_read_beats,
+           lane_static_real_stream_read_slots,
+           lane_static_real_stream_density * 100.0,
+           lane_static_real_stream_savings_slots,
+           lane_static_real_stream_savings_pct);
+    printf("  real compact512/batch: read_beats=%zu read_slots=%zu density=%.2f%% align_pad=%zu saved=%zu (%.2f%%)\n",
+           real_compact_batch_read_beats,
+           real_compact_batch_read_slots,
+           real_compact_batch_density * 100.0,
+           real_compact_batch_align_pad,
+           real_compact_batch_savings_slots,
+           real_compact_batch_savings_pct);
+    printf("  real compact512/stream: read_beats=%zu read_slots=%zu density=%.2f%% align_pad=%zu saved=%zu (%.2f%%)\n",
+           real_compact_stream_read_beats,
+           real_compact_stream_read_slots,
+           real_compact_stream_density * 100.0,
+           real_compact_stream_align_pad,
+           real_compact_stream_savings_slots,
+           real_compact_stream_savings_pct);
+    printf("  balanced compact512/stream: read_beats=%zu read_slots=%zu density=%.2f%% saved=%zu (%.2f%%) channel_beats=%zu\n",
+           balanced_compact_stream_read_beats,
+           balanced_compact_stream_read_slots,
+           balanced_compact_stream_density * 100.0,
+           balanced_compact_stream_savings_slots,
+           balanced_compact_stream_savings_pct,
+           balanced_compact_stream_channel_beats);
     print_min_max_avg("HBM real nnz", channel_real, hbm);
     print_min_max_avg("HBM scheduled slots", channel_sched, hbm);
     print_min_max_avg("HBM dynamic beats", channel_dynamic_len, hbm);
@@ -697,17 +885,22 @@ static void profile_one_hbm(const Meta* meta,
       qsort(sorted, (size_t)batch_num, sizeof(BatchStat), cmp_batch_padding);
       const int top = (opt->top_batches < batch_num) ? opt->top_batches : batch_num;
       printf("  worst batches by padding:\n");
-      printf("    batch      real  scheduled  max_len  global_slots  hbm_dyn_slots  pe_pack_slots  global_den  hbm_dyn_den  pe_pack_den  hbm_saved  pe_saved\n");
+      printf("    batch      real  scheduled  max_len  global_slots  hbm_dyn_slots  pe_pack_slots  lane_real_slots  real_pack_slots  global_den  hbm_dyn_den  pe_pack_den  lane_real_den  real_pack_den  hbm_saved  pe_saved  real_saved\n");
       for (int i = 0; i < top; ++i) {
         const BatchStat* b = &sorted[i];
-        printf("    %5d %9zu %10zu %8zu %13zu %14zu %14zu %9.2f%% %10.2f%% %10.2f%% %9zu %9zu\n",
+        printf("    %5d %9zu %10zu %8zu %13zu %14zu %14zu %16zu %16zu %9.2f%% %10.2f%% %10.2f%% %13.2f%% %13.2f%% %9zu %9zu %11zu\n",
                b->id, b->real, b->scheduled, b->max_len, b->read_slots,
                b->channel_read_slots, b->pe_compact_read_slots,
+               b->lane_static_real_slots,
+               b->real_compact_read_slots,
                b->density * 100.0,
                b->channel_density * 100.0,
                b->pe_compact_density * 100.0,
+               b->lane_static_real_density * 100.0,
+               b->real_compact_density * 100.0,
                b->read_slots - b->channel_read_slots,
-               b->read_slots - b->pe_compact_read_slots);
+               b->read_slots - b->pe_compact_read_slots,
+               b->read_slots - b->real_compact_read_slots);
       }
       free(sorted);
     }

@@ -71,7 +71,9 @@ write_spmv_metrics_resp:
     }
 }
 
-#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
+#if defined(JACOBI_SPMV_STRIP_PADDING) || \
+    defined(JACOBI_SPMV_COMPACT_PE) || \
+    defined(JACOBI_SPMV_LANE_STATIC_REAL)
 void CuperSpmvOnly_StripPtrLoader(
     const INDEX_TYPE Batch_num,
     const INDEX_TYPE Row_num,
@@ -764,7 +766,9 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>         Vector_Y_Param("Vector_Y_Param");
     tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 1024>    Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 1024>         Vector_Y_Stream("Vector_Y_Stream");
-#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
+#if defined(JACOBI_SPMV_STRIP_PADDING) || \
+    defined(JACOBI_SPMV_COMPACT_PE) || \
+    defined(JACOBI_SPMV_LANE_STATIC_REAL)
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2>           Matrix_Len_Stream("Matrix_Len_Stream");
 #endif
     // 8 路 checker/sort tree 仍按 Cuper 原始输出规整逻辑工作。
@@ -773,7 +777,9 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<float_v16, FIFO_DEPTH>                    Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");
 
     tapa::task()
-#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
+#if defined(JACOBI_SPMV_STRIP_PADDING) || \
+    defined(JACOBI_SPMV_COMPACT_PE) || \
+    defined(JACOBI_SPMV_LANE_STATIC_REAL)
         // 去 padding 版本：ptr 表先给每个 Matrix loader 一路独立总长度，
         // 再按 HBM channel 分发每个 batch 的本地 start/end。
         .invoke(CuperSpmvOnly_StripPtrLoader,
@@ -800,7 +806,9 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 X,
                 Vector_X_Stream[0])
-#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
+#if defined(JACOBI_SPMV_STRIP_PADDING) || \
+    defined(JACOBI_SPMV_COMPACT_PE) || \
+    defined(JACOBI_SPMV_LANE_STATIC_REAL)
         // 每个 HBM channel 按自己的总长度读矩阵，剔除跨 channel 的尾部 padding。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_MatrixLoaderStrip,
                                              Iteration_num,
@@ -853,7 +861,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(30)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(31)
 #endif
-#elif defined(JACOBI_SPMV_STRIP_PADDING)
+#elif defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_LANE_STATIC_REAL)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(0)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(1)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(2)
