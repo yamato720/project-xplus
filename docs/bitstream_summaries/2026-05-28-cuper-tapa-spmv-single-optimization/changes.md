@@ -15,6 +15,48 @@ timeout 结论只保留为历史记录，不再对应当前同名 demo 文件。
 已完成 demo-only 上板测试，可返回到完整 `thermal2`；共同成功点性能略慢于
 standalone TAPA Cuper SpMV 标准，因此本轮仍不更新正式 `source.diff`。
 
+## 2026-06-18：CuperSpmvServiceOnly compact16 协议实验
+
+本次新增的是 `DLC/Cuper-jacobi-iteration` 目录下的 SpMV-only 实验，不改变
+`DLC/Cuper` 原标准 `Cuper(...)` 或历史 `CuperPcgSpmv(...)` one-shot demo。目标是
+验证“在每个 HBM channel 内把 8 条 PE lane 紧凑打包”是否能作为下一步动态、均衡
+SpMV 协议的可行边界。
+
+源码和构建开关：
+
+- `JACOBI_SPMV_COMPACT_PE=1`：打开 compact-PE host 打包和 kernel compact 路径；
+- `DLC/Cuper-jacobi-iteration/host/main.cpp`：SpMV-only 模式下调用 compact 打包，
+  打印 original/compact read beats 和节省比例；
+- `DLC/Cuper-jacobi-iteration/include/Cuper_common.h`：定义 compact lane tag 编码；
+- `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`：
+  新增 compact core/accumulator 路径；
+- `DLC/Cuper-jacobi-iteration/tools/pack_profile.c`：扩展 C 侧打包 profile，输出
+  per-HBM dynamic、per-PE lower bound、compact512/batch 和 compact512/stream 估算；
+- 根 `Makefile`、子目录 `Makefile`、`CMakeLists.txt`、`scripts/build_xo_u55c.sh`
+  和 `scripts/launcher.py`：向 host、TAPA/HLS 和 hw build 传播
+  `JACOBI_SPMV_COMPACT_PE`。
+
+当前 compact 协议：
+
+- `rowIdx[17]` 继续表示 padding；
+- `rowIdx[16:14]` 记录原 PE lane id；
+- `rowIdx[13:0]` 记录原 Cuper 行号编码；
+- host 对 `rowIdx < 2^14` 做检查，避免 silent overflow。
+
+已生成 demo bitstream：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin
+```
+
+当前代价和限制：
+
+- 它只覆盖 `CuperSpmvServiceOnly`，不覆盖普通 Jacobi iteration full graph；
+- 它减少 HBM 读取 beat，但还没有消除 PE 内部 reorder holes；
+- compact accumulator 当前按 512-bit beat 内 slot 串行分发，功能正确但未必比原
+  16 路并行 accumulator 更快；
+- 还没有服务器上板结果，因此本轮不更新正式 `source.diff`。
+
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
 本轮新增内容：

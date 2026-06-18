@@ -45,6 +45,71 @@ SHA256: 19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2
 DATA/KERNEL/HBM clock: 147 / 500 / 418 MHz
 ```
 
+## 2026-06-18 compact16 SpMV-only demo
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin
+kernel: CuperSpmvServiceOnly
+UUID: 7f1e6302-e2a1-05e5-ab24-42a81b9f1488
+SHA256: 2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6
+DATA/KERNEL/HBM clock: 200 / 500 / 448 MHz
+HBM mapping: Matrix_data_0..15 -> HBM[0..15], SpElement_list_ptr -> HBM[16],
+             X -> HBM[17], Y_out -> HBM[18], Status -> HBM[30], Metrics -> HBM[31]
+Timing: HBM WNS -0.006 ns, TNS -0.007 ns, setup failing endpoints 2
+```
+
+构建：
+
+```text
+session: cuper_jacobi_iteration_hw_build
+build_dir: cuper-jacobi-spmv-compact16-build/
+log: cuper-jacobi-spmv-compact16-build/logs/build_hw_tmux.log
+xclbin: cuper-jacobi-spmv-compact16-build/CuperSpmvServiceOnly.xclbin
+```
+
+关键构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-jacobi-spmv-compact16-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 3h 55m 24s
+```
+
+软件仿真命令口径：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_COMPACT_PE=1 \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/<dataset>
+```
+
+本机 software simulation 已通过：
+
+| 数据集 | 结果 | 原读 beats | compact 后 beats | 节省 |
+| --- | --- | ---: | ---: | ---: |
+| `thermal2_n1024` | `Correctness Verification: Passed`, `Error Num=0` | 2,624 | 2,208 | 15.85% |
+| `thermal2_n65536` | `Correctness Verification: Passed`, `Error Num=0` | 68,464 | 60,824 | 11.16% |
+| `thermal2` | `Correctness Verification: Passed`, `Error Num=0` | 1,373,424 | 1,187,402 | 13.54% |
+
+服务器侧上板测试命令：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_COMPACT_PE=1 \
+BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin \
+BUILD_DIR=cuper-jacobi-spmv-compact16-build \
+  bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+当前状态：bitstream 已同步，待服务器上板；因此不写入正式 `source.diff`，也不把它
+作为标准版性能提升结论。
+
 说明：旧 2026-05-28 service 抽出版的 timeout 结论只对应旧 UUID
 `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不再对应当前同名 demo 文件。
 

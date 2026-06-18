@@ -105,6 +105,7 @@ kernel launch、m_axi 写回和 BO sync 边界可用；该 probe 结果现在只
 | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | `aa594af3-f811-1b17-f507-fd504f93425e` | `232c5afeaf8e122f7b30e5b26e95553a40ea44556ea59723480cab1f77453f9c` | `JACOBI_WIDE_HBM=1` no-debug，24 路 Matrix_data，DATA 147 MHz，WNS `-0.120 ns`，服务器 smoke 已失败 |
 | `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | `e24b74ad-ec70-f13f-98a9-e6f1cf7676ed` | `59956a30907259784712e66fa06ff44a8166e5afb8ebffb97018634851000b15` | `CuperJacobiIteration` light-trace restore，DATA 150 MHz，WNS `-0.005 ns`，TNS `-0.010 ns`，待服务器上板 |
 | `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` | `492f929f-4232-3a37-b7e0-3969b5052219` | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` | `CuperSpmvServiceOnly` 24 路 SpMV-only，DATA 141 MHz，WNS `-0.420 ns`，待服务器上板 |
+| `395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | `7f1e6302-e2a1-05e5-ab24-42a81b9f1488` | `2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6` | `CuperSpmvServiceOnly` 16 路 PE-lane compact，DATA 200 MHz，HBM WNS `-0.006 ns`，待服务器上板 |
 
 ## 常用命令
 
@@ -186,6 +187,18 @@ JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=32 \
 32 路 connectivity 将 `Matrix_data_0..31` 映射到 HBM[0..31]，辅助 buffer 暂时
 共享 HBM[28..31]，这是探索版的已知边界。
 
+16 路 compact-PE 实验在 SpMV-only 基础上打开：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_COMPACT_PE=1
+```
+
+host 会在每个 HBM channel 内按 batch 紧凑填充 8 条 PE lane，并把原 lane id 编进
+`rowIdx[16:14]`。kernel 端 compact core/accumulator 解出 lane tag 后把乘积累加回
+对应 lane。这版仍是功能/协议探索：它减少 HBM 读取 beat，但当前 accumulator 内部
+按 slot 串行分发，尚不等价于最终的动态均衡 SpMV 协议。
+
 2026-06-17 已同步 24 路 SpMV-only xclbin 到
 `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin`。本机没有 Xilinx OpenCL
 platform，无法上板；服务器侧测试时必须设置：
@@ -201,3 +214,9 @@ BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin
 `You have run out of port connections on /hmss_0. All 33 connections are used`。
 这说明 32 个 Matrix_data m_axi 口加辅助 m_axi 口超过平台 HBM subsystem 连接数；
 后续需要合并 top-level m_axi 端口后再继续做 32 路硬件。
+
+2026-06-18 已同步 16 路 compact-PE SpMV-only xclbin 到
+`395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin`。服务器侧测试时
+必须额外设置 `JACOBI_SPMV_COMPACT_PE=1`。本机 software simulation 已通过
+`thermal2_n1024`、`thermal2_n65536` 和完整 `thermal2`；上板性能和大规模返回边界
+待服务器验证。

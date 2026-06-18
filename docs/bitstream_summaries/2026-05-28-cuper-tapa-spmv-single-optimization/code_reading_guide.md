@@ -12,10 +12,16 @@ task graph。历史上那版 `Pcg_Single*` finite-exit service demo 已上板 ti
 | `Cuper(...)` | `DLC/Cuper/kernels/detail/cuper_top_graphs.hpp` | 满血 standalone TAPA Cuper single SpMV 标准路径 |
 | `CuperPcgSpmv(...)` | `DLC/Cuper/kernels/detail/cuper_top_graphs.hpp` | 保留旧 kernel 名的 Cuper-compatible single SpMV demo |
 | `CuperPcg(...)` | `DLC/Cuper/kernels/detail/cuper_top_graphs.hpp` | TAPA Cuper SpMV + FPGA 内 PCG，全流程 kernel |
+| `CuperSpmvServiceOnly(...)` | `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp` | Jacobi 目录下的 SpMV-only 协议实验入口 |
 
 当前 `CuperPcgSpmv(...)` 不是从 `CuperPcg(...)` service 链抠出来的版本。它不使用
 `Pcg_SingleSpmv_Controller`、`Pcg_Single_Vector_Loader` 或 writer-done stop
 控制壳。
+
+2026-06-18 的 `compact16` demo 不是 `CuperPcgSpmv(...)`，而是
+`DLC/Cuper-jacobi-iteration` 下的 `CuperSpmvServiceOnly(...)`。它属于
+`cuper-tapa-spmv` demo 对比口径，但用于探索 Jacobi 目录里 service 化 Cuper SpMV 的
+数据打包协议。
 
 ## 2. Host 到 kernel 的调用链
 
@@ -139,3 +145,32 @@ make run-cuper-pcg-tapa-fpga \
 2. `Pcg_Mult_Sort_Tree` 是否仍每拍检查 `Sort_Stop_Stream`；
 3. controller 是否在消费完预期 `Pcg_Spmv_Stream` packet 后才广播 checker/sort stop；
 4. 不要把 single one-shot 或 finite-exit 的自然返回逻辑直接搬到 full-PCG 常驻任务里。
+
+## 7. 2026-06-18 compact16 阅读入口
+
+compact16 相关路径按这个顺序读：
+
+1. `DLC/Cuper-jacobi-iteration/host/main.cpp`
+   - 搜 `JACOBI_SPMV_COMPACT_PE`；
+   - host 在 SpMV-only 分支调用 compact 打包，并打印
+     `[spmv-only-compact-pe] original_read_beats=... compact_read_beats=...`。
+2. `DLC/Cuper-jacobi-iteration/include/Cuper_common.h`
+   - compact lane tag 编码在这里定义；
+   - `rowIdx[17]` 是 padding，`rowIdx[16:14]` 是原 PE lane，
+     `rowIdx[13:0]` 是原 Cuper 行号。
+3. `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`
+   - `CuperSpmvOnly_CoreCompactPe` 解 compact slot；
+   - `CuperSpmvOnly_AccumulatorCompactPe` 按 lane tag 累加回对应 PE lane；
+   - 当前实现偏功能验证，beat 内 slot 分发仍是串行结构。
+4. `DLC/Cuper-jacobi-iteration/tools/pack_profile.c`
+   - 用纯 C 评估 current/per-HBM/per-PE/compact512 的读取密度；
+   - 这个工具不代表硬件吞吐，只用于判断打包协议还能挤掉多少 padding。
+
+构建和运行必须同时设置：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_COMPACT_PE=1
+```

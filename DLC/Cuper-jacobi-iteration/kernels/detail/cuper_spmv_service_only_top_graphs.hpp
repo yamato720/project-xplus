@@ -71,7 +71,7 @@ write_spmv_metrics_resp:
     }
 }
 
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
 void CuperSpmvOnly_StripPtrLoader(
     const INDEX_TYPE Batch_num,
     const INDEX_TYPE Row_num,
@@ -319,6 +319,350 @@ iter:
 }
 #endif
 
+#ifdef JACOBI_SPMV_COMPACT_PE
+inline ap_uint<3> CuperSpmvOnly_CompactLane(ap_uint<18> tagged_row) {
+#pragma HLS inline
+    return tagged_row(16, 14);
+}
+
+inline ap_uint<18> CuperSpmvOnly_CompactCleanRow(ap_uint<18> tagged_row) {
+#pragma HLS inline
+    ap_uint<18> clean = 0;
+    clean(13, 0) = tagged_row(13, 0);
+    return clean;
+}
+
+inline void CuperSpmvOnly_AddCompactTagged(
+    ap_uint<18> tagged_row,
+    VALUE_TYPE val_new,
+#ifdef PINGPONG
+    ap_uint<32> local_part_Y_ping[8][URAM_DEPTH],
+    ap_uint<32> local_part_Y_pong[8][URAM_DEPTH]
+#else
+    ap_uint<64> local_part_Y_ping[8][URAM_DEPTH]
+#endif
+) {
+#pragma HLS inline
+    if (tagged_row[17] != 0) {
+        return;
+    }
+
+    const ap_uint<3> lane = CuperSpmvOnly_CompactLane(tagged_row);
+    const ap_uint<18> clean_row = CuperSpmvOnly_CompactCleanRow(tagged_row);
+
+    // compact-PE beat 内可能出现多个 slot 指向同一个 lane。这里用 switch
+    // 显式选择 lane，避免把旧 accumulator 的“slot p == lane p”假设带进来。
+    switch (lane) {
+    case 0:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[0]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[0]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[0]);
+#endif
+        break;
+    case 1:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[1]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[1]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[1]);
+#endif
+        break;
+    case 2:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[2]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[2]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[2]);
+#endif
+        break;
+    case 3:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[3]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[3]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[3]);
+#endif
+        break;
+    case 4:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[4]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[4]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[4]);
+#endif
+        break;
+    case 5:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[5]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[5]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[5]);
+#endif
+        break;
+    case 6:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[6]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[6]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[6]);
+#endif
+        break;
+    default:
+#ifdef PINGPONG
+        if (clean_row[0] == 0) Adder_p(clean_row(17, 1), val_new, local_part_Y_ping[7]);
+        else Adder_p(clean_row(17, 1), val_new, local_part_Y_pong[7]);
+#else
+        Adder(clean_row, val_new, local_part_Y_ping[7]);
+#endif
+        break;
+    }
+}
+
+inline void CuperSpmvOnly_CoreComputeRoundCompactPe(
+    const INDEX_TYPE Core_id,
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Column_num,
+    tapa::istream<INDEX_TYPE> &PE_Param_in,
+    tapa::istream<ap_uint<512>> &Matrix_A_Stream,
+    tapa::istream<float_v16> &Vector_X_Stream_in,
+    tapa::ostream<INDEX_TYPE> &PE_Param_out,
+    tapa::ostream<float_v16> &Vector_X_Stream_out,
+    tapa::ostream<INDEX_TYPE> &Vector_Y_Param,
+    tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream) {
+#pragma HLS inline
+    VALUE_TYPE local_X[X_BRAM_DEPTH][Slice_WIDTH];
+
+#pragma HLS bind_storage variable=local_X latency=2
+#pragma HLS array_partition variable=local_X complete dim=1
+#pragma HLS array_partition variable=local_X cyclic factor=X_PARTITION_FACTOR dim=2
+
+    INDEX_TYPE start_32 =
+        CuperSpmvOnly_ReadStripBoundary(Core_id, PE_Param_in, PE_Param_out);
+    Vector_Y_Param.write(start_32);
+
+cuper_spmv_only_compact_core_main:
+    for (INDEX_TYPE i = 0; i < Batch_num; ++i) {
+#pragma HLS loop_tripcount min=1 max=200
+        const INDEX_TYPE total_vector_packets = Cuper_NumFloatV16Packets(Column_num);
+        const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
+        const INDEX_TYPE end_idx = std::min(start_idx + Slice_WIDTH_DIV_16,
+                                            total_vector_packets);
+
+    load_vector:
+        for (INDEX_TYPE j = start_idx; j < end_idx;) {
+#pragma HLS loop_tripcount min=1 max=512
+#pragma HLS pipeline II=1
+            if (!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
+                float_v16 x;
+                Vector_X_Stream_in.try_read(x);
+                Vector_X_Stream_out.try_write(x);
+
+                for (INDEX_TYPE k = 0; k < 16; ++k) {
+                    for (INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
+                        local_X[l][((j - start_idx) << 4) + k] = x[k];
+                    }
+                }
+                ++j;
+            }
+        }
+
+        const INDEX_TYPE end_32 =
+            CuperSpmvOnly_ReadStripBoundary(Core_id, PE_Param_in, PE_Param_out);
+        Vector_Y_Param.write(end_32);
+
+    decode_matrix:
+        for (INDEX_TYPE j = start_32; j < end_32;) {
+#pragma HLS loop_tripcount min=1 max=200
+#pragma HLS pipeline II=1
+            if (!Matrix_A_Stream.empty()) {
+                ap_uint<512> spelement;
+                Matrix_A_Stream.try_read(spelement);
+                Matrix_Mult_X matmultx;
+
+                for (INDEX_TYPE p = 0; p < 8; ++p) {
+                    matmultx.row[p] = 0x3FFFF;
+                    matmultx.val[p] = 0.0;
+                }
+
+#ifdef FLEX_REUSE
+                ap_uint<14> col_old = 0x3FFF;
+                VALUE_TYPE val_old = 0.0;
+#endif
+                for (INDEX_TYPE p = 0; p < 8; ++p) {
+                    ap_uint<64> a = spelement(63 + p * 64, p * 64);
+                    ap_uint<14> a_col = a(63, 50);
+                    ap_uint<18> a_row = a(49, 32);
+                    ap_uint<32> a_val = a(31, 0);
+
+                    matmultx.row[p] = a_row;
+                    if (a_row[17] == 0) {
+                        const ap_uint<3> lane = CuperSpmvOnly_CompactLane(a_row);
+#ifdef FLEX_REUSE
+                        VALUE_TYPE val;
+                        if ((col_old & a_col) == 0x3FFF) {
+                            val = val_old;
+                        } else {
+                            val = tapa::bit_cast<VALUE_TYPE>(a_val);
+                        }
+#else
+                        VALUE_TYPE val = tapa::bit_cast<VALUE_TYPE>(a_val);
+#endif
+                        matmultx.val[p] =
+                            val * local_X[lane / (8 / X_BRAM_DEPTH)][a_col];
+#ifdef FLEX_REUSE
+                        col_old = a_col;
+                        val_old = val;
+#endif
+                    }
+                }
+                Matrix_Mult_Vector_Stream.write(matmultx);
+                ++j;
+            }
+        }
+        start_32 = end_32;
+    }
+}
+
+void CuperSpmvOnly_CoreCompactPe(
+    tapa::istream<INDEX_TYPE> &PE_Param_in,
+    tapa::istream<ap_uint<512>> &Matrix_A_Stream,
+    tapa::istream<float_v16> &Vector_X_Stream_in,
+    tapa::ostream<INDEX_TYPE> &PE_Param_out,
+    tapa::ostream<float_v16> &Vector_X_Stream_out,
+    tapa::ostream<INDEX_TYPE> &Vector_Y_Param,
+    tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
+    const INDEX_TYPE Core_id) {
+    const INDEX_TYPE Batch_num = PE_Param_in.read();
+    const INDEX_TYPE Row_num = PE_Param_in.read();
+    const INDEX_TYPE Iteration_num = PE_Param_in.read();
+    const INDEX_TYPE Column_num = PE_Param_in.read();
+
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+
+    PE_Param_out.write(Batch_num);
+    PE_Param_out.write(Row_num);
+    PE_Param_out.write(Iteration_num);
+    PE_Param_out.write(Column_num);
+
+    Vector_Y_Param.write(Batch_num);
+    Vector_Y_Param.write(Row_num);
+    Vector_Y_Param.write(Iteration_num);
+
+iter:
+    for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        CuperSpmvOnly_CoreComputeRoundCompactPe(Core_id,
+                                                Batch_num,
+                                                Column_num,
+                                                PE_Param_in,
+                                                Matrix_A_Stream,
+                                                Vector_X_Stream_in,
+                                                PE_Param_out,
+                                                Vector_X_Stream_out,
+                                                Vector_Y_Param,
+                                                Matrix_Mult_Vector_Stream);
+    }
+}
+
+void CuperSpmvOnly_AccumulatorCompactPe(
+    tapa::istream<INDEX_TYPE> &Vector_Y_Param,
+    tapa::istream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
+    tapa::ostream<float_v2> &Vector_Y_Stream) {
+    const INDEX_TYPE Batch_num = Vector_Y_Param.read();
+    const INDEX_TYPE Row_num = Vector_Y_Param.read();
+    const INDEX_TYPE Iteration_num = Vector_Y_Param.read();
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+
+#ifdef PINGPONG
+    ap_uint<32> local_part_Y_ping[8][URAM_DEPTH];
+#pragma HLS bind_storage variable=local_part_Y_ping type=RAM_2P impl=URAM latency=1
+#pragma HLS array_partition complete variable=local_part_Y_ping dim=1
+
+    ap_uint<32> local_part_Y_pong[8][URAM_DEPTH];
+#pragma HLS bind_storage variable=local_part_Y_pong type=RAM_2P impl=URAM latency=1
+#pragma HLS array_partition complete variable=local_part_Y_pong dim=1
+#else
+    ap_uint<64> local_part_Y_ping[8][URAM_DEPTH];
+#pragma HLS bind_storage variable=local_part_Y_ping type=RAM_2P impl=URAM latency=1
+#pragma HLS array_partition complete variable=local_part_Y_ping dim=1
+#endif
+
+iter:
+    for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        const INDEX_TYPE num_v_init = Cuper_NumAccumulatorInitGroups(Row_num);
+        const INDEX_TYPE num_v_out = Cuper_NumAccumulatorOutputs(Row_num);
+
+    init:
+        for (int i = 0; i < num_v_init; ++i) {
+#pragma HLS loop_tripcount min=1 max=800
+#pragma HLS pipeline II=1
+            for (int p = 0; p < 8; ++p) {
+                local_part_Y_ping[p][i] = 0;
+#ifdef PINGPONG
+                local_part_Y_pong[p][i] = 0;
+#endif
+            }
+        }
+
+        INDEX_TYPE start_32 = Vector_Y_Param.read();
+    batches:
+        for (int i = 0; i < Batch_num; ++i) {
+#pragma HLS loop_tripcount min=1 max=200
+            const INDEX_TYPE end_32 = Vector_Y_Param.read();
+        accumulate:
+            for (INDEX_TYPE j = start_32; j < end_32; ++j) {
+#pragma HLS loop_tripcount min=1 max=200
+                Matrix_Mult_X matmultx = Matrix_Mult_Vector_Stream.read();
+            slots:
+                for (int p = 0; p < 8; ++p) {
+#pragma HLS loop_tripcount min=8 max=8
+                    CuperSpmvOnly_AddCompactTagged(
+                        matmultx.row[p],
+                        matmultx.val[p],
+#ifdef PINGPONG
+                        local_part_Y_ping,
+                        local_part_Y_pong
+#else
+                        local_part_Y_ping
+#endif
+                    );
+                }
+            }
+            start_32 = end_32;
+        }
+
+    writer:
+        for (INDEX_TYPE i = 0, c_idx = 0; i < num_v_out; ++i) {
+#pragma HLS loop_tripcount min=1 max=1800
+#pragma HLS pipeline II=1
+            float_v2 out_v;
+#ifdef PINGPONG
+            ap_uint<32> u_32_0 = local_part_Y_ping[c_idx][i >> 3];
+            ap_uint<32> u_32_1 = local_part_Y_pong[c_idx][i >> 3];
+            out_v[0] = tapa::bit_cast<VALUE_TYPE>(u_32_0);
+            out_v[1] = tapa::bit_cast<VALUE_TYPE>(u_32_1);
+#else
+            ap_uint<64> u_64 = local_part_Y_ping[c_idx][i >> 3];
+            for (INDEX_TYPE d = 0; d < 2; ++d) {
+                ap_uint<32> u_32_d = u_64(31 + 32 * d, 32 * d);
+                out_v[d] = tapa::bit_cast<VALUE_TYPE>(u_32_d);
+            }
+#endif
+            Vector_Y_Stream.write(out_v);
+            ++c_idx;
+            if (c_idx == 8) {
+                c_idx = 0;
+            }
+        }
+    }
+}
+#endif
+
 void CuperSpmvOnly_VectorWriter(const INDEX_TYPE Iteration_num,
                                 const INDEX_TYPE Row_num,
                                 const INDEX_TYPE Batch_num,
@@ -389,6 +733,17 @@ iter:
                 Matrix_Mult_Vector_Stream[CORE_ID], \
                 CORE_ID)
 
+#define CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(CORE_ID) \
+        .invoke(CuperSpmvOnly_CoreCompactPe, \
+                PE_Param[CORE_ID], \
+                Matrix_A_Stream[CORE_ID], \
+                Vector_X_Stream[CORE_ID], \
+                PE_Param[(CORE_ID) + 1], \
+                Vector_X_Stream[(CORE_ID) + 1], \
+                Vector_Y_Param[CORE_ID], \
+                Matrix_Mult_Vector_Stream[CORE_ID], \
+                CORE_ID)
+
 void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
                           tapa::mmap<float_v16> X,
@@ -409,7 +764,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 64>         Vector_Y_Param("Vector_Y_Param");
     tapa::streams<Matrix_Mult_X, HBM_CHANNEL_NUM, 1024>    Matrix_Mult_Vector_Stream("Matrix_Mult_Vector_Stream");
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 1024>         Vector_Y_Stream("Vector_Y_Stream");
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2>           Matrix_Len_Stream("Matrix_Len_Stream");
 #endif
     // 8 路 checker/sort tree 仍按 Cuper 原始输出规整逻辑工作。
@@ -418,7 +773,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<float_v16, FIFO_DEPTH>                    Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");
 
     tapa::task()
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
         // 去 padding 版本：ptr 表先给每个 Matrix loader 一路独立总长度，
         // 再按 HBM channel 分发每个 batch 的本地 start/end。
         .invoke(CuperSpmvOnly_StripPtrLoader,
@@ -445,7 +800,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 X,
                 Vector_X_Stream[0])
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#if defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_COMPACT_PE)
         // 每个 HBM channel 按自己的总长度读矩阵，剔除跨 channel 的尾部 padding。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_MatrixLoaderStrip,
                                              Iteration_num,
@@ -461,7 +816,44 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Matrix_A_Stream)
 #endif
         // Core 链按当前编译通道数展开：默认 16 路，实验可编 24/32 路。
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#ifdef JACOBI_SPMV_COMPACT_PE
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(0)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(1)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(2)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(3)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(4)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(5)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(6)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(7)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(8)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(9)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(10)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(11)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(12)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(13)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(14)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(15)
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(16)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(17)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(18)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(19)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(20)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(21)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(22)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(24)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(25)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(26)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(27)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(28)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(29)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(30)
+        CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(31)
+#endif
+#elif defined(JACOBI_SPMV_STRIP_PADDING)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(0)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(1)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(2)
@@ -539,11 +931,19 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         // 链尾 drain 和 sort tree 是 one-shot Cuper 的原始写法：它们常驻消费尾流。
         .invoke<tapa::detach>(Destroy_int, PE_Param[HBM_CHANNEL_NUM])
         .invoke<tapa::detach>(Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM])
+#ifdef JACOBI_SPMV_COMPACT_PE
+        // compact-PE 版本的 slot 位置不再等于 lane，需要 accumulator 按 lane tag 累加。
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_AccumulatorCompactPe,
+                                             Vector_Y_Param,
+                                             Matrix_Mult_Vector_Stream,
+                                             Vector_Y_Stream)
+#else
         // 每一路 accumulator 完成该 HBM/Core 局部 SpMV 累加。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Accumulator,
                                              Vector_Y_Param,
                                              Matrix_Mult_Vector_Stream,
                                              Vector_Y_Stream)
+#endif
         // 8 路 checker 过滤 padding，随后 sort tree 重新拼成 float_v16。
         .invoke<tapa::join, 8>(Vector_Checker,
                                Iteration_num,
@@ -569,3 +969,4 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 
 #undef CUPER_SPMV_ONLY_INVOKE_CORE
 #undef CUPER_SPMV_ONLY_INVOKE_CORE_STRIP
+#undef CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE

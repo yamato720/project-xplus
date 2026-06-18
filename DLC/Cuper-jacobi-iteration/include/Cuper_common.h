@@ -6,6 +6,7 @@
 #include <bitset>
 #include <unordered_set>
 #include <algorithm>
+#include <stdexcept>
 
 #include "Cuper.h"
 #include "mmio_highlevel.h"
@@ -744,6 +745,34 @@ inline unsigned long PackSpElementForCuper(const SpElement &sp) {
     return x_col | x_row | x_val_64;
 }
 
+inline unsigned long PackSpElementForCuperCompactPe(const SpElement &sp,
+                                                    const INDEX_TYPE lane) {
+    if (sp.rowIdx == -1) {
+        return 0x3FFFFULL << 32;
+    }
+    // compact-PE 版本把同一个 HBM channel 内 8 个 PE lane 混合压进
+    // 512-bit beat，因此需要把 lane 编码给 kernel。当前 demo 使用 rowIdx
+    // 的高 3 个有效位 [16:14] 保存 lane，低 14 bit 仍保存 Cuper row 编码。
+    // 对 thermal2 及当前 16/24/32 路实验规模足够；更大矩阵若超过该范围，
+    // host 直接报错，避免静默生成错误 bitstream 输入。
+    if (lane < 0 || lane >= PE_NUM) {
+        throw std::runtime_error("compact-PE lane is outside [0, PE_NUM)");
+    }
+    if (sp.rowIdx < 0 || sp.rowIdx >= (1 << 14)) {
+        throw std::runtime_error(
+            "compact-PE row encoding exceeds 14 bits; current demo cannot tag lane safely");
+    }
+
+    unsigned int x_float_bits = *(unsigned int*)(&sp.val);
+    unsigned long x_val_64 = (unsigned long)(x_float_bits & 0xFFFFFFFFULL);
+    unsigned long tagged_row =
+        ((((unsigned long)lane) & 0x7ULL) << 14) |
+        (((unsigned long)sp.rowIdx) & 0x3FFFULL);
+    unsigned long x_row = (tagged_row & 0x3FFFFULL) << 32;
+    unsigned long x_col = ((unsigned long)sp.colIdx & 0x3FFFULL) << 50;
+    return x_col | x_row | x_val_64;
+}
+
 // SpMV-only 实验用的 per-HBM 去 padding 打包。
 //
 // 原始 Cuper 协议每个 batch 只保留一份全局边界，所有 HBM channel 都读到
@@ -833,6 +862,109 @@ void Create_SpElement_list_for_all_channels_strip_hbm_padding(
                         SpElement_list_pes[pe_idx][global_start + offset];
                     Matrix_fpga_data[channel][(local_start + offset) * PE_NUM + lane] =
                         PackSpElementForCuper(sp);
+                }
+            }
+        }
+    }
+}
+
+// SpMV-only 实验用的 per-PE compact 打包。
+//
+// 相比 per-HBM strip：
+//   - 每个 HBM channel 仍有自己的 batch 边界；
+//   - channel 内不再保留固定 lane 位置，而是把 8 个 PE lane 的 scheduled slot
+//     继续压成 dense 512-bit beat；
+//   - PE 内部 Reordering 产生的空洞仍然作为 padding slot 保留，因此本 helper
+//     不尝试消除 reorder_holes。
+//
+// 这是一版协议探索：slot 中用 rowIdx[16:14] 保存 lane，kernel 端 compact
+// accumulator 按 lane tag 累加。旧 strip-padding path 不受影响。
+void Create_SpElement_list_for_all_channels_compact_pe_batch(
+    const vector<vector<SpElement> > &SpElement_list_pes,
+    const vector<INDEX_TYPE>         &SpElement_list_ptr,
+    vector<vector<unsigned long, tapa::aligned_allocator<unsigned long> > > &Matrix_fpga_data,
+    vector<INDEX_TYPE>               &SpElement_list_ptr_per_hbm,
+    vector<INDEX_TYPE>               &Matrix_len_per_hbm,
+    const int HBM_CHANNEL_NUM = ::HBM_CHANNEL_NUM
+) {
+    const INDEX_TYPE batch_num =
+        static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) - 1;
+    vector<INDEX_TYPE> ptr_by_channel(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+
+    Matrix_len_per_hbm.assign(HBM_CHANNEL_NUM, 0);
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        const INDEX_TYPE global_start = SpElement_list_ptr[batch];
+        const INDEX_TYPE global_end = SpElement_list_ptr[batch + 1];
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            INDEX_TYPE channel_scheduled_slots = 0;
+            for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                INDEX_TYPE lane_batch_len = 0;
+                for (INDEX_TYPE pos = global_end; pos > global_start; --pos) {
+                    if (SpElement_list_pes[pe_idx][pos - 1].rowIdx != -1) {
+                        lane_batch_len = pos - global_start;
+                        break;
+                    }
+                }
+                channel_scheduled_slots += lane_batch_len;
+            }
+
+            const INDEX_TYPE channel_batch_beats =
+                (channel_scheduled_slots + PE_NUM - 1) / PE_NUM;
+            Matrix_len_per_hbm[channel] += channel_batch_beats;
+            ptr_by_channel[channel * (batch_num + 1) + batch + 1] =
+                Matrix_len_per_hbm[channel];
+        }
+    }
+
+    SpElement_list_ptr_per_hbm.assign(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+    for (INDEX_TYPE boundary = 0; boundary <= batch_num; ++boundary) {
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            SpElement_list_ptr_per_hbm[boundary * HBM_CHANNEL_NUM + channel] =
+                ptr_by_channel[channel * (batch_num + 1) + boundary];
+        }
+    }
+
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        INDEX_TYPE channel_words = Matrix_len_per_hbm[channel] * PE_NUM;
+        INDEX_TYPE channel_size = ((channel_words + 511) / 512) * 512;
+        if (channel_size == 0) {
+            channel_size = PE_NUM;
+        }
+        Matrix_fpga_data[channel].assign(channel_size, 0);
+    }
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        const INDEX_TYPE global_start = SpElement_list_ptr[batch];
+        const INDEX_TYPE global_end = SpElement_list_ptr[batch + 1];
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            INDEX_TYPE write_slot =
+                ptr_by_channel[channel * (batch_num + 1) + batch] * PE_NUM;
+
+            for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                INDEX_TYPE lane_batch_len = 0;
+                for (INDEX_TYPE pos = global_end; pos > global_start; --pos) {
+                    if (SpElement_list_pes[pe_idx][pos - 1].rowIdx != -1) {
+                        lane_batch_len = pos - global_start;
+                        break;
+                    }
+                }
+
+                for (INDEX_TYPE offset = 0; offset < lane_batch_len; ++offset) {
+                    const SpElement &sp =
+                        SpElement_list_pes[pe_idx][global_start + offset];
+                    Matrix_fpga_data[channel][write_slot++] =
+                        PackSpElementForCuperCompactPe(sp, lane);
                 }
             }
         }

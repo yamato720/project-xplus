@@ -32,6 +32,57 @@
 - SHA256：`19d227179db7f22adfd12e78da119a99d102c59ebe25df686a652c6715ea95f2`
 - DATA/KERNEL/HBM clock：147 / 500 / 418 MHz
 
+## 2026-06-18 补充：Jacobi 目录 SpMV-only compact16 demo
+
+本轮新增一个独立的 `CuperSpmvServiceOnly` demo artifact，用于探索 Cuper 数据格式在
+单 HBM 内部继续消除 PE-lane padding 后的边界。它属于 `cuper-tapa-spmv` demo
+候选，但源码入口在：
+
+```text
+DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp
+```
+
+顶层为：
+
+```text
+CuperSpmvServiceOnly
+```
+
+这版只计算 `Y=A*X`，不拆 `A=D+R`，不取负 `X`，也不执行 Jacobi update。它打开
+`JACOBI_SPMV_COMPACT_PE=1`，host 在每个 HBM channel 的 batch 内把 8 条 PE lane
+紧凑打包，并在 `rowIdx[16:14]` 记录原 lane id。kernel 端用 compact core 和
+compact accumulator 解码 lane tag，再把结果累加回对应 lane。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin.info
+```
+
+构建目录和日志：
+
+```text
+cuper-jacobi-spmv-compact16-build/
+cuper-jacobi-spmv-compact16-build/logs/build_hw_tmux.log
+```
+
+版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: 7f1e6302-e2a1-05e5-ab24-42a81b9f1488
+SHA256: 2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6
+DATA/KERNEL/HBM clock: 200 / 500 / 448 MHz
+Timing: HBM WNS -0.006 ns, TNS -0.007 ns, setup failing endpoints 2
+```
+
+本机 software simulation 已通过 `thermal2_n1024`、`thermal2_n65536` 和完整
+`thermal2`。full `thermal2` 的矩阵读取 beat 从 `1,373,424` 降到 `1,187,402`，
+理论读取节省约 `13.54%`。这版还没有服务器上板性能数据，不建议晋级标准，也不更新
+正式 `source.diff`。当前 compact accumulator 为功能优先的串行 slot 分发结构，
+后续若要把读 beat 节省转化为稳定性能提升，还需要继续重写动态/均衡 SpMV 协议。
+
 ## 目标
 
 本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**，

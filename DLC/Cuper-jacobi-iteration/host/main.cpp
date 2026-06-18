@@ -729,7 +729,41 @@ int RunSpmvServiceOnly(const std::string& bitstream,
     }
 
     vector<aligned_vector<unsigned long> > Matrix_fpga_data(HBM_CHANNEL_NUM);
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#ifdef JACOBI_SPMV_COMPACT_PE
+    vector<INDEX_TYPE> Matrix_len_per_hbm;
+    vector<INDEX_TYPE> SpElement_list_ptr_per_hbm;
+    Create_SpElement_list_for_all_channels_compact_pe_batch(
+                                           SpElement_list_pes,
+                                           SpElement_list_ptr,
+                                           Matrix_fpga_data,
+                                           SpElement_list_ptr_per_hbm,
+                                           Matrix_len_per_hbm,
+                                           HBM_CHANNEL_NUM);
+
+    const INDEX_TYPE ptr_payload_size =
+        static_cast<INDEX_TYPE>(HBM_CHANNEL_NUM + SpElement_list_ptr_per_hbm.size());
+    SpElement_list_ptr_fpga_size = ((ptr_payload_size + 15) / 16) * 16;
+    SpElement_list_ptr_fpga_channel_size =
+        ((SpElement_list_ptr_fpga_size + 1023) / 1024) * 1024;
+    SpElement_list_ptr_fpga.assign(SpElement_list_ptr_fpga_channel_size, 0);
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        SpElement_list_ptr_fpga[channel] = Matrix_len_per_hbm[channel];
+    }
+    for (INDEX_TYPE i = 0; i < static_cast<INDEX_TYPE>(SpElement_list_ptr_per_hbm.size()); ++i) {
+        SpElement_list_ptr_fpga[HBM_CHANNEL_NUM + i] = SpElement_list_ptr_per_hbm[i];
+    }
+
+    INDEX_TYPE stripped_matrix_len_total = 0;
+    INDEX_TYPE stripped_matrix_len_min = Matrix_len_per_hbm[0];
+    INDEX_TYPE stripped_matrix_len_max = Matrix_len_per_hbm[0];
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        stripped_matrix_len_total += Matrix_len_per_hbm[channel];
+        stripped_matrix_len_min = std::min(stripped_matrix_len_min,
+                                           Matrix_len_per_hbm[channel]);
+        stripped_matrix_len_max = std::max(stripped_matrix_len_max,
+                                           Matrix_len_per_hbm[channel]);
+    }
+#elif defined(JACOBI_SPMV_STRIP_PADDING)
     vector<INDEX_TYPE> Matrix_len_per_hbm;
     vector<INDEX_TYPE> SpElement_list_ptr_per_hbm;
     Create_SpElement_list_for_all_channels_strip_hbm_padding(
@@ -798,7 +832,22 @@ int RunSpmvServiceOnly(const std::string& bitstream,
         static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) - 1;
     const INDEX_TYPE SpElement_list_ptr_max_len =
         SpElement_list_ptr[SpElement_list_ptr_size];
-#ifdef JACOBI_SPMV_STRIP_PADDING
+#ifdef JACOBI_SPMV_COMPACT_PE
+    const INDEX_TYPE original_read_beats =
+        SpElement_list_ptr_max_len * HBM_CHANNEL_NUM;
+    cout << "[spmv-only-compact-pe] enabled=1"
+         << " original_read_beats=" << original_read_beats
+         << " compact_read_beats=" << stripped_matrix_len_total
+         << " saved_beats=" << (original_read_beats - stripped_matrix_len_total)
+         << " saved_pct="
+         << (original_read_beats == 0
+                 ? 0.0
+                 : 100.0 * static_cast<double>(original_read_beats - stripped_matrix_len_total) /
+                       static_cast<double>(original_read_beats))
+         << " per_hbm_len_min=" << stripped_matrix_len_min
+         << " per_hbm_len_max=" << stripped_matrix_len_max
+         << endl;
+#elif defined(JACOBI_SPMV_STRIP_PADDING)
     const INDEX_TYPE original_read_beats =
         SpElement_list_ptr_max_len * HBM_CHANNEL_NUM;
     cout << "[spmv-only-strip-padding] enabled=1"

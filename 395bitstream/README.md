@@ -12,8 +12,8 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 `cuper-tapa-pcg` full-PCG 候选和 `cuper-tapa-jacobi` Jacobi iteration 候选；
 新 demo 进入同一主线槽位时优先覆盖旧 demo 文件。五个标准版
 只有在用户明确确认满意后才会归档旧版并晋级替换。当前 `395bitstream/` 保留四个
-已有标准 bitstream、一个 single SpMV demo 槽、一个 full-PCG demo 槽、一个
-已板测通过的 Jacobi demo 槽，以及一个 Jacobi wide-HBM 实验 artifact；
+已有标准 bitstream、若干 single SpMV demo/实验 artifact、一个 full-PCG demo 槽、
+一个已板测通过的 Jacobi demo 槽，以及一个 Jacobi wide-HBM 实验 artifact；
 `cuper-tapa-jacobi` 还没有标准 bitstream。
 
 如果某个文件带 `legacy`，说明它不是当前五条主线的首选版本，只作为历史对照保留。
@@ -30,6 +30,7 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
 | `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，服务器侧性能提升不足，保留为宽 HBM 边界 |
 | `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -164,7 +165,41 @@ software simulation：`thermal2_n1024`、`thermal2_n4096`、`thermal2_n65536` �
 `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_STRIP_PADDING=1`。
 
-它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
+TAPA Cuper / SpMV-only 16 路 PE-lane compact 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin
+```
+
+这版仍是 `CuperSpmvServiceOnly`，只计算 `Y=A*X`，不进入 Jacobi update。它打开
+`JACOBI_SPMV_COMPACT_PE=1`，host 在每个 HBM channel 的 batch 内把 8 条 PE lane
+重新紧凑打包，并把原 lane id 写进 `rowIdx[16:14]`；`rowIdx[13:0]` 保留原 Cuper
+行号编码，`rowIdx[17]` 仍作为 padding 标记。kernel 端使用 compact core 和
+accumulator 解 lane tag，再把贡献累加回对应 PE lane。
+
+这版用于验证“每个 HBM 内部先消 PE-lane padding”的协议边界；它还没有消除
+PE 内部由 reorder 顺序造成的 `reorder_holes`，且当前 compact accumulator 为了先保证
+功能正确，在 512-bit beat 内按 slot 串行分发，未必能直接带来硬件加速。
+
+UUID 为 `7f1e6302-e2a1-05e5-ab24-42a81b9f1488`，SHA256 为
+`2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6`。DATA/KERNEL/HBM
+clock 为 `200/500/448 MHz`；routed timing 只有 HBM clock 轻微 setup violation：
+WNS `-0.006 ns`，TNS `-0.007 ns`，setup failing endpoints `2`。DATA 和 KERNEL
+clock 分别为 WNS `0.027 ns` / `0.518 ns`。构建目录为
+`cuper-jacobi-spmv-compact16-build/`，构建日志为
+`cuper-jacobi-spmv-compact16-build/logs/build_hw_tmux.log`，v++ link 总耗时
+`3h 55m 24s`。
+
+HBM 映射为：`Matrix_data_0..15` 使用 HBM[0..15]，`SpElement_list_ptr` 使用
+HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]，
+`Metrics` 使用 HBM[31]。本机 software simulation 已通过 `thermal2_n1024`、
+`thermal2_n65536` 和完整 `thermal2`，对应 compact 读取 beat 节省约 `15.85%`、
+`11.16%` 和 `13.54%`。服务器侧测试必须设置
+`JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_COMPACT_PE=1`。
+
+下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
+`20260614` timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
 `4d1fb090afebcf75d8087156665d969f02105813f984935feb8818c31afc38ab`。该版仍使用旧的
 token/frame 自传播控制路径，150 MHz timing 已收敛，但服务器侧最小

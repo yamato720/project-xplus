@@ -94,6 +94,10 @@ if [[ "${JACOBI_SPMV_STRIP_PADDING:-0}" != "0" && "${JACOBI_SPMV_STRIP_PADDING:-
   cmd+=(-c "-DJACOBI_SPMV_STRIP_PADDING=1")
 fi
 
+if [[ "${JACOBI_SPMV_COMPACT_PE:-0}" != "0" && "${JACOBI_SPMV_COMPACT_PE:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_SPMV_COMPACT_PE=1")
+fi
+
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
 printf '\n'

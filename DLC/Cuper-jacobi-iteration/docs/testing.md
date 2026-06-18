@@ -196,6 +196,52 @@ BUILD_DIR=cuper-jacobi-spmv-strip16-build \
   bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n1024
 ```
 
+### SpMV-only 16 路 PE-lane compact
+
+2026-06-18 新增 `CuperSpmvServiceOnly` 的 16 路 compact-PE 实验。它继续只跑
+`Y=A*X`，但打开 `JACOBI_SPMV_COMPACT_PE=1`。host 在每个 HBM channel 的 batch 内
+把 8 条 PE lane 紧凑填充，`rowIdx[16:14]` 记录原 lane id，`rowIdx[13:0]` 保留原
+Cuper 行号编码，`rowIdx[17]` 仍是 padding 标记。kernel 端用 compact core 和
+compact accumulator 解 lane tag 并累加回对应 lane。
+
+这版的目标是验证“先在单 HBM 内部消 PE-lane padding”的协议可行性。它减少矩阵读取
+beat，但还没有消除 PE 内部 reorder 造成的洞；当前 compact accumulator 也为了简化
+验证在 beat 内按 slot 串行分发，性能不应直接按读 beat 节省等比例估算。
+
+本机 software simulation 已通过：
+
+| 数据集 | 结果 | 原读 beats | compact 后 beats | 节省 |
+| --- | --- | ---: | ---: | ---: |
+| `thermal2_n1024` | 通过，`Error Num=0` | 2,624 | 2,208 | 15.85% |
+| `thermal2_n65536` | 通过，`Error Num=0` | 68,464 | 60,824 | 11.16% |
+| `thermal2` | 通过，`Error Num=0` | 1,373,424 | 1,187,402 | 13.54% |
+
+已生成并同步 16 路 compact-PE SpMV-only xclbin：
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-spmv-compact16-build/` |
+| Kernel | `CuperSpmvServiceOnly` |
+| 必要宏 | `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16 JACOBI_SPMV_COMPACT_PE=1` |
+| UUID | `7f1e6302-e2a1-05e5-ab24-42a81b9f1488` |
+| SHA256 | `2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6` |
+| DATA / KERNEL / HBM clock | `200 MHz` / `500 MHz` / `448 MHz` |
+| HBM 映射 | `Matrix_data_0..15` -> HBM[0..15]，`SpElement_list_ptr` -> HBM[16]，`X` -> HBM[17]，`Y_out` -> HBM[18]，`Status` -> HBM[30]，`Metrics` -> HBM[31] |
+| 时序状态 | HBM clock 轻微未收敛：WNS `-0.006 ns`，TNS `-0.007 ns`，setup failing endpoints `2`；DATA/KERNEL clock 收敛 |
+
+服务器侧测试命令示例：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_COMPACT_PE=1 \
+BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin \
+BUILD_DIR=cuper-jacobi-spmv-compact16-build \
+  bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
 ## 3. 当前记录数据
 
 | 数据集 | 矩阵规模 | 迭代 | 当前记录 | 关键输出 |

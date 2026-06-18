@@ -147,6 +147,13 @@ else()
     message(STATUS "Cuper SpMV-only per-HBM padding strip is disabled")
 endif()
 
+if(DEFINED ENV{JACOBI_SPMV_COMPACT_PE} AND NOT "$ENV{JACOBI_SPMV_COMPACT_PE}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_COMPACT_PE}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_SPMV_COMPACT_PE=1)
+    message(STATUS "Cuper SpMV-only per-PE compact packing is ENABLED")
+else()
+    message(STATUS "Cuper SpMV-only per-PE compact packing is disabled")
+endif()
+
 # -----------------------------------------------------------------------------
 # 4. 链接库 (保持你的手动链接逻辑，但改为变量管理)
 # -----------------------------------------------------------------------------
