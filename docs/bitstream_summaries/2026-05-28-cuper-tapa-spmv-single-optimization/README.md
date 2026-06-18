@@ -150,11 +150,25 @@ Timing: WNS -0.073 ns, TNS -4.957 ns, setup failing endpoints 215
 `thermal2_n1024` matrix read beats 从 `2624` 降到 `883`；
 `thermal2_n65536` 从 `68464` 降到 `57472`，节省 `16.0552%`。
 
-当前限制：这版还是 `lane-static real/batch`，不是最终的
-`lane-static real/stream`，因为现有 core 仍按 column batch 装载 X。HLS 报告同时
-显示 `Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 对应路径
-为 II=`2`。因此这版先作为协议/功能探索件，同步到 `395bitstream/` 等服务器上板；
-在上板数据出来前不建议晋级，也不更新正式 `source.diff`。
+服务器侧上板 sweep 已完成，日志为：
+
+```text
+logs/spmv_lanereal16_hw_sweep_20260618_233431/
+```
+
+8 个 `thermal2` 数据集全部 `rc=0`、`Status=1`、`Correctness Verification: Passed`、
+`Error Num=0`。完整 `thermal2` 上，lanereal16 时间为 `2.35566 ms`，吞吐为
+`7.2848 GFLOP/s`，matrix read beats 从 `1,373,424` 降到 `1,151,370`，节省
+`16.1679%`。
+
+性能结论：lanereal16 已经替代 HTML 主报告里前一条异常慢的 compact16 曲线，作为
+固定 lane 去 reorder-hole 的实测线；但它仍慢于 strip16。完整 `thermal2` 上 strip16
+为 `1.29158 ms` / `13.2865 GFLOP/s`，lanereal16 只有 strip16 的约 `0.55x`。当前
+限制仍是 `lane-static real/batch`，不是最终的 `lane-static real/stream`；现有 core
+仍按 column batch 装载 X。HLS 报告显示
+`Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 对应路径为
+II=`2`，上板结果也支持后端 accumulator 吞吐是主要瓶颈。因此这版不建议晋级，也不
+更新正式 `source.diff`。
 
 ## 目标
 

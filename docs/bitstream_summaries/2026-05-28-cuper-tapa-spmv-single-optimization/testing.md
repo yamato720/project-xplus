@@ -263,16 +263,7 @@ HLS 关键对比：
 | strip16 | `cuper-jacobi-spmv-strip16-build/` | 2 |
 | lanereal16 | `cuper-jacobi-spmv-lanereal16-build/` | 5 |
 
-结论：
-
-- 功能边界：software simulation 已通过 `thermal2_n1024` 和 `thermal2_n65536`。
-- 硬件状态：xclbin 已生成并同步到 `395bitstream/`，等待服务器上板。
-- 性能风险：读包减少明显，但 accumulator II 从 strip16 的 `2` 退到 `5`，如果后端
-  成为瓶颈，性能可能不会提升。
-- 本轮只同步 demo 和 Markdown 记录，不更新正式 `source.diff`；上板结果出来后再决定
-  是否写入 HTML 性能表。
-
-服务器侧建议命令口径：
+服务器侧命令口径：
 
 ```bash
 make cuper-jacobi-build-host \
@@ -292,6 +283,42 @@ timeout 240s env \
   ./cuper-jacobi-spmv-lanereal16-build/cuper_jacobi_host \
   $PWD/data/suitesparse/Schmid/csr/<dataset>
 ```
+
+服务器侧 smoke 日志：
+
+```text
+logs/spmv_lanereal16_hw_20260618_233409/
+```
+
+服务器侧完整 sweep 日志：
+
+```text
+logs/spmv_lanereal16_hw_sweep_20260618_233431/
+```
+
+上板结果：
+
+| 数据集 | rc | spmv ms | GFLOP/s | original beats | lane-static beats | 节省 | 状态 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 0 | 0.073251 | 0.000437 | 176 | 16 | 90.91% | `Status=1`, `Error Num=0` |
+| `thermal2_n1024` | 0 | 0.089773 | 0.1417 | 2,624 | 883 | 66.35% | `Status=1`, `Error Num=0` |
+| `thermal2_n4096` | 0 | 0.087198 | 0.6010 | 4,704 | 3,455 | 26.55% | `Status=1`, `Error Num=0` |
+| `thermal2_n16384` | 0 | 0.101947 | 2.1169 | 16,960 | 14,062 | 17.09% | `Status=1`, `Error Num=0` |
+| `thermal2_n65536` | 0 | 0.186370 | 4.6896 | 68,464 | 57,472 | 16.06% | `Status=1`, `Error Num=0` |
+| `thermal2_n131072` | 0 | 0.319455 | 5.4221 | 137,152 | 114,874 | 16.24% | `Status=1`, `Error Num=0` |
+| `thermal2_n262144` | 0 | 0.546613 | 6.3993 | 280,848 | 234,721 | 16.42% | `Status=1`, `Error Num=0` |
+| `thermal2` | 0 | 2.355660 | 7.2848 | 1,373,424 | 1,151,370 | 16.17% | `Status=1`, `Error Num=0` |
+
+结论：
+
+- 功能边界：lanereal16 上板可跑通完整 `thermal2`，8 个点校验全通过。
+- 报告口径：HTML 主报告中用 lanereal16 直接替代前一条异常慢的 compact16 曲线；
+  compact16 只作为历史退步记录保留。
+- 性能：不建议晋级。完整 `thermal2` 上 lanereal16 为 `2.35566 ms`，慢于 strip16
+  `1.29158 ms`，速度比约 `0.55x`；也慢于 one-shot demo `1.781541 ms`。
+- 原因判断：读包节省在大规模约 `16%`，但 accumulator II 从 strip16 的 `2` 退到
+  `5`，后端吞吐抵消了前端读量收益。
+- 本轮只更新 HTML 和 Markdown 测试结论，不写入正式 `source.diff`。
 
 说明：旧 2026-05-28 service 抽出版的 timeout 结论只对应旧 UUID
 `08f1f2dc-8c44-007f-a0a5-4dce1236ddd9`，不再对应当前同名 demo 文件。

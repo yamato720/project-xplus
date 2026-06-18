@@ -15,14 +15,14 @@
       --std: #146b70;
       --oneshot: #6a5aa8;
       --strip: #b8612a;
-      --compact: #4b7f35;
+      --lane: #2f6fb5;
       --ok: #1f7a4d;
       --warn: #9a4c18;
       --bad: #9b2c2c;
       --soft-std: #e2f0f1;
       --soft-one: #ebe8f7;
       --soft-strip: #f5e7dd;
-      --soft-compact: #e7f1df;
+      --soft-lane: #e3edf8;
       --soft-ok: #e2f1e9;
       --soft-warn: #fbecd8;
       --shadow: 0 10px 28px rgba(24, 32, 38, 0.08);
@@ -159,7 +159,7 @@
     .std-bg { background: var(--std); }
     .one-bg { background: var(--oneshot); }
     .strip-bg { background: var(--strip); }
-    .compact-bg { background: var(--compact); }
+    .lane-bg { background: var(--lane); }
     .chart {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -231,7 +231,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 1560px;
+      min-width: 1600px;
       background: white;
     }
     th, td {
@@ -265,7 +265,7 @@
     .tag.std { color: var(--std); background: var(--soft-std); }
     .tag.one { color: var(--oneshot); background: var(--soft-one); }
     .tag.strip { color: var(--strip); background: var(--soft-strip); }
-    .tag.compact { color: var(--compact); background: var(--soft-compact); }
+    .tag.lane { color: var(--lane); background: var(--soft-lane); }
     .tag.ok { color: var(--ok); background: var(--soft-ok); }
     .tag.warn { color: var(--warn); background: var(--soft-warn); }
     .footnote {
@@ -295,14 +295,14 @@
     <div class="wrap">
       <h1>U55C Cuper SpMV 优化独立报告</h1>
       <div class="subtitle">
-        本页只汇总 single SpMV 相关实验，不混入 PCG/Jacobi 一次迭代图。柱状图对比原 TAPA Cuper 标准、20260528 one-shot demo、20260618 strip16 去 padding 实验和 20260618 compact16 PE-lane 紧凑打包实验的时间、吞吐和去 padding 效果。
+        本页只汇总 single SpMV 相关实验，不混入 PCG/Jacobi 一次迭代图。柱状图对比原 TAPA Cuper 标准、20260528 one-shot demo、20260618 strip16 去 padding 实验和 20260618 lanereal16 固定 lane 去 reorder-hole 实验的时间、吞吐和读包节省效果。
       </div>
       <div class="meta">
         <span class="pill">更新日期：2026-06-18</span>
         <span class="pill">数据集：Schmid/thermal2 sweep</span>
         <span class="pill">时间：kernel/tapa reported ms</span>
         <span class="pill">吞吐：GFLOP/s = 2 * nnz / time</span>
-        <span class="pill">本次新增：compact16 demo</span>
+        <span class="pill">本次新增：lanereal16 demo</span>
         <span class="pill">图形：柱状图</span>
       </div>
     </div>
@@ -313,20 +313,20 @@
       <h2>结论</h2>
       <div class="grid">
         <div class="metric">
-          <strong>1.38x</strong>
-          <span>完整 <code>thermal2</code> 上 strip16 相对 20260528 one-shot demo 的速度比。</span>
-        </div>
-        <div class="metric">
           <strong>8/8 pass</strong>
-          <span>本次 compact16 上板 sweep 全部返回，<code>Status=1</code> 且 <code>Error Num=0</code>。</span>
+          <span>本次 lanereal16 上板 sweep 全部返回，<code>Status=1</code> 且 <code>Error Num=0</code>。</span>
         </div>
         <div class="metric">
-          <strong>0.043x</strong>
-          <span>完整 <code>thermal2</code> 上 compact16 相对 strip16 的速度比，性能明显退步。</span>
+          <strong>2.35566 ms</strong>
+          <span>lanereal16 完整 <code>thermal2</code> 单次 SpMV 时间。</span>
         </div>
         <div class="metric">
-          <strong>13.54%</strong>
-          <span>compact16 在完整 <code>thermal2</code> 上减少的 matrix read beats，但未转化为加速。</span>
+          <strong>7.2848 GFLOP/s</strong>
+          <span>lanereal16 完整 <code>thermal2</code> 吞吐。</span>
+        </div>
+        <div class="metric">
+          <strong>0.55x</strong>
+          <span>完整 <code>thermal2</code> 上 lanereal16 相对 strip16 的速度比，仍未超过当前最佳。</span>
         </div>
         <div class="metric">
           <strong>115 GFLOP/s</strong>
@@ -338,10 +338,10 @@
         </div>
       </div>
       <p>
-        结论分两层看：strip16 仍是目前这组 SpMV 优化实验里最好的结果，完整 <code>thermal2</code> 比 one-shot 快 <code>1.38x</code>，并把原标准曲线的 <code>thermal2_n262144</code> 和完整 <code>thermal2</code> timeout 点跑通。compact16 这版功能上已经闭合，8 个数据集全部通过校验，但性能退步很大：完整 <code>thermal2</code> 为 <code>30.2804 ms</code> / <code>0.5667 GFLOP/s</code>，只有 strip16 的 <code>0.043x</code>。
+        结论分两层看：lanereal16 功能上已经闭合，8 个数据集全部通过校验；它直接替代前一条异常慢的 compact16 结果作为固定 lane 去空洞实验线。当前最佳仍是 strip16：完整 <code>thermal2</code> strip16 为 <code>1.29158 ms</code> / <code>13.2865 GFLOP/s</code>，lanereal16 为 <code>2.35566 ms</code> / <code>7.2848 GFLOP/s</code>，只有 strip16 的 <code>0.55x</code>。
       </p>
       <p class="callout">
-        compact16 的读 beat 节省确实存在，大规模约 <code>11%</code> 到 <code>13.5%</code>；但当前 compact accumulator 在 512-bit beat 内按 slot 串行分发，且没有消掉 reorder holes，实际瓶颈从 HBM 读量转成了解码/分发/累加路径。
+        lanereal16 的读 beat 节省在大规模约 <code>16%</code>，比 strip16 的约 <code>5%</code> 到 <code>6%</code> 更明显；但 HLS 显示 accumulator II 从 strip16 的 <code>2</code> 退到 <code>5</code>，上板结果也说明后端吞吐仍是主要瓶颈。
       </p>
     </section>
 
@@ -381,82 +381,82 @@
               <td>本轮 8 点均 <code>rc=0</code>、<code>Error Num=0</code>；timing WNS <code>-1.488 ns</code>。</td>
             </tr>
             <tr>
-              <td><span class="tag compact">20260618 compact16</span></td>
-              <td><code>395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin</code></td>
+              <td><span class="tag lane">20260618 lanereal16</span></td>
+              <td><code>395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin</code></td>
               <td><code>CuperSpmvServiceOnly</code></td>
-              <td>DATA/KERNEL/HBM 200/500/448 MHz</td>
-              <td>本轮 8 点均 <code>rc=0</code>、<code>Status=1</code>、<code>Error Num=0</code>；HBM timing WNS <code>-0.006 ns</code>。</td>
+              <td>DATA/KERNEL/HBM 197/500/450 MHz</td>
+              <td>本轮 8 点均 <code>rc=0</code>、<code>Status=1</code>、<code>Error Num=0</code>；timing WNS <code>-0.073 ns</code>。</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p class="footnote">
-        strip16 日志：<code>logs/spmv_strip16_hw_20260618_120346/</code>。compact16 日志：<code>logs/spmv_compact16_hw_sweep_20260618_174007/</code>。原标准与 one-shot 原 5 点来自 <code>395bitstream/cuper_spmv_u55c_compare_20260524.html</code>；one-shot 补跑 3 点来自 <code>logs/spmv_oneshot_fill_20260618_152520/</code>。
+        strip16 日志：<code>logs/spmv_strip16_hw_20260618_120346/</code>。lanereal16 日志：<code>logs/spmv_lanereal16_hw_sweep_20260618_233431/</code>。原标准与 one-shot 原 5 点来自 <code>395bitstream/cuper_spmv_u55c_compare_20260524.html</code>；one-shot 补跑 3 点来自 <code>logs/spmv_oneshot_fill_20260618_152520/</code>。
       </p>
     </section>
 
     <section>
       <h2>柱状图：小中规模</h2>
-      <p>横向柱状图，柱越短越快。该图归一化上限为 <code>3.1764 ms</code>，即这一组里最慢的 compact16 <code>thermal2_n131072</code>。</p>
+      <p>横向柱状图，柱越短越快。该图归一化上限为 <code>0.319455 ms</code>，即这一组里最慢的 lanereal16 <code>thermal2_n131072</code>。</p>
       <div class="legend">
         <span><i class="swatch std-bg"></i>原 TAPA Cuper 标准</span>
         <span><i class="swatch one-bg"></i>20260528 one-shot demo</span>
         <span><i class="swatch strip-bg"></i>20260618 strip16</span>
-        <span><i class="swatch compact-bg"></i>20260618 compact16</span>
+        <span><i class="swatch lane-bg"></i>20260618 lanereal16</span>
       </div>
       <div class="chart" aria-label="small and medium scale SpMV bar chart">
         <div class="bar-group">
           <div class="dataset">thermal2_n16</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 2.1%;"></div></div><div class="value">0.0670</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 2.2%;"></div></div><div class="value">0.068825</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 2.9%;"></div></div><div class="value">0.092274</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 2.8%;"></div></div><div class="value">0.088892</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 21.0%;"></div></div><div class="value">0.0670</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 21.5%;"></div></div><div class="value">0.068825</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 28.9%;"></div></div><div class="value">0.092274</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 22.9%;"></div></div><div class="value">0.073251</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n1024</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 2.3%;"></div></div><div class="value">0.0727</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 1.8%;"></div></div><div class="value">0.057057</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 2.7%;"></div></div><div class="value">0.086625</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 4.1%;"></div></div><div class="value">0.129026</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 22.8%;"></div></div><div class="value">0.0727</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 17.9%;"></div></div><div class="value">0.057057</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 27.1%;"></div></div><div class="value">0.086625</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 28.1%;"></div></div><div class="value">0.089773</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n4096</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 2.5%;"></div></div><div class="value">0.0780</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 2.0%;"></div></div><div class="value">0.062703</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 2.9%;"></div></div><div class="value">0.092075</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 6.1%;"></div></div><div class="value">0.193093</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 24.4%;"></div></div><div class="value">0.0780</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 19.6%;"></div></div><div class="value">0.062703</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 28.8%;"></div></div><div class="value">0.092075</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 27.3%;"></div></div><div class="value">0.087198</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n16384</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 2.7%;"></div></div><div class="value">0.0866</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 2.6%;"></div></div><div class="value">0.082818</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 3.7%;"></div></div><div class="value">0.116819</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 14.4%;"></div></div><div class="value">0.457307</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 27.1%;"></div></div><div class="value">0.0866</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 25.9%;"></div></div><div class="value">0.082818</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 36.6%;"></div></div><div class="value">0.116819</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 31.9%;"></div></div><div class="value">0.101947</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n65536</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 4.3%;"></div></div><div class="value">0.1379</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 4.7%;"></div></div><div class="value">0.149121</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 5.1%;"></div></div><div class="value">0.160757</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 51.6%;"></div></div><div class="value">1.639790</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 43.2%;"></div></div><div class="value">0.1379</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 46.7%;"></div></div><div class="value">0.149121</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 50.3%;"></div></div><div class="value">0.160757</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 58.3%;"></div></div><div class="value">0.186370</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n131072</div>
           <div class="bars">
-            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 6.9%;"></div></div><div class="value">0.2197</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 7.4%;"></div></div><div class="value">0.235847</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 6.6%;"></div></div><div class="value">0.211017</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 100.0%;"></div></div><div class="value">3.176400</div></div>
+            <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 68.8%;"></div></div><div class="value">0.2197</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 73.8%;"></div></div><div class="value">0.235847</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 66.1%;"></div></div><div class="value">0.211017</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 100.0%;"></div></div><div class="value">0.319455</div></div>
           </div>
         </div>
       </div>
@@ -464,30 +464,30 @@
 
     <section>
       <h2>柱状图：大规模与 timeout 边界</h2>
-      <p>归一化上限为 <code>30.2804 ms</code>，即 compact16 完整 <code>thermal2</code> 时间。原 TAPA Cuper 在两个大点为 timeout，图中不画数值柱。</p>
+      <p>归一化上限为 <code>2.35566 ms</code>，即 lanereal16 完整 <code>thermal2</code> 时间。原 TAPA Cuper 在两个大点为 timeout，图中不画数值柱。</p>
       <div class="legend">
         <span><i class="swatch std-bg"></i>原 TAPA Cuper 标准</span>
         <span><i class="swatch one-bg"></i>20260528 one-shot demo</span>
         <span><i class="swatch strip-bg"></i>20260618 strip16</span>
-        <span><i class="swatch compact-bg"></i>20260618 compact16</span>
+        <span><i class="swatch lane-bg"></i>20260618 lanereal16</span>
       </div>
       <div class="chart" aria-label="large scale SpMV bar chart">
         <div class="bar-group">
           <div class="dataset">thermal2_n262144</div>
           <div class="bars">
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="missing">timeout / not returned</div><div class="value">-</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 1.4%;"></div></div><div class="value">0.425394</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 1.1%;"></div></div><div class="value">0.319271</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 20.9%;"></div></div><div class="value">6.322140</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 18.1%;"></div></div><div class="value">0.425394</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 13.6%;"></div></div><div class="value">0.319271</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 23.2%;"></div></div><div class="value">0.546613</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2</div>
           <div class="bars">
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="missing">timeout</div><div class="value">-</div></div>
-            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 5.9%;"></div></div><div class="value">1.781541</div></div>
-            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 4.3%;"></div></div><div class="value">1.291580</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 100.0%;"></div></div><div class="value">30.280400</div></div>
+            <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 75.6%;"></div></div><div class="value">1.781541</div></div>
+            <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 54.8%;"></div></div><div class="value">1.291580</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 100.0%;"></div></div><div class="value">2.355660</div></div>
           </div>
         </div>
       </div>
@@ -500,7 +500,7 @@
         <span><i class="swatch std-bg"></i>原 TAPA Cuper 标准</span>
         <span><i class="swatch one-bg"></i>20260528 one-shot demo</span>
         <span><i class="swatch strip-bg"></i>20260618 strip16</span>
-        <span><i class="swatch compact-bg"></i>20260618 compact16</span>
+        <span><i class="swatch lane-bg"></i>20260618 lanereal16</span>
       </div>
       <div class="chart" aria-label="SpMV GFLOP per second bar chart">
         <div class="bar-group">
@@ -509,7 +509,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 0.004%;"></div></div><div class="value">0.000478</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 0.004%;"></div></div><div class="value">0.000465</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 0.003%;"></div></div><div class="value">0.000347</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 0.003%;"></div></div><div class="value">0.000360</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 0.003%;"></div></div><div class="value">0.000437</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -518,7 +518,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 1.3%;"></div></div><div class="value">0.1750</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 1.7%;"></div></div><div class="value">0.2230</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 1.1%;"></div></div><div class="value">0.1469</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 0.7%;"></div></div><div class="value">0.0986</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 1.1%;"></div></div><div class="value">0.1417</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -527,7 +527,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 5.1%;"></div></div><div class="value">0.6719</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 6.3%;"></div></div><div class="value">0.8358</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 4.3%;"></div></div><div class="value">0.5692</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 2.0%;"></div></div><div class="value">0.2714</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 4.5%;"></div></div><div class="value">0.6010</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -536,7 +536,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 18.8%;"></div></div><div class="value">2.4921</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 19.6%;"></div></div><div class="value">2.6059</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 13.9%;"></div></div><div class="value">1.8474</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 3.6%;"></div></div><div class="value">0.4719</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 15.9%;"></div></div><div class="value">2.1169</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -545,7 +545,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 47.7%;"></div></div><div class="value">6.3379</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 44.1%;"></div></div><div class="value">5.8610</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 40.9%;"></div></div><div class="value">5.4368</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 4.0%;"></div></div><div class="value">0.5330</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 35.3%;"></div></div><div class="value">4.6896</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -554,7 +554,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="track"><div class="bar std-bg" style="width: 59.3%;"></div></div><div class="value">7.8840</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 55.3%;"></div></div><div class="value">7.3443</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 61.8%;"></div></div><div class="value">8.2084</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 4.1%;"></div></div><div class="value">0.5453</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 40.8%;"></div></div><div class="value">5.4221</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -563,7 +563,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="missing">timeout / not returned</div><div class="value">-</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 61.9%;"></div></div><div class="value">8.2229</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 82.5%;"></div></div><div class="value">10.9561</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 4.2%;"></div></div><div class="value">0.5533</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 48.2%;"></div></div><div class="value">6.3993</div></div>
           </div>
         </div>
         <div class="bar-group">
@@ -572,7 +572,7 @@
             <div class="bar-line"><div class="label">原 TAPA Cuper</div><div class="missing">timeout</div><div class="value">-</div></div>
             <div class="bar-line"><div class="label">one-shot demo</div><div class="track"><div class="bar one-bg" style="width: 72.5%;"></div></div><div class="value">9.6325</div></div>
             <div class="bar-line"><div class="label">strip16</div><div class="track"><div class="bar strip-bg" style="width: 100.0%;"></div></div><div class="value">13.2865</div></div>
-            <div class="bar-line"><div class="label">compact16</div><div class="track"><div class="bar compact-bg" style="width: 4.3%;"></div></div><div class="value">0.5667</div></div>
+            <div class="bar-line"><div class="label">lanereal16</div><div class="track"><div class="bar lane-bg" style="width: 54.8%;"></div></div><div class="value">7.2848</div></div>
           </div>
         </div>
       </div>
@@ -604,7 +604,7 @@
               <td class="num">0.25</td>
               <td class="num">115.0 GFLOP/s</td>
               <td class="num">11.6%</td>
-              <td>以当前最佳 strip16 完整 <code>thermal2</code> 实测 <code>13.2865 GFLOP/s</code> 对比；compact16 为 <code>0.5667 GFLOP/s</code>。</td>
+              <td>以当前最佳 strip16 完整 <code>thermal2</code> 实测 <code>13.2865 GFLOP/s</code> 对比；lanereal16 为 <code>7.2848 GFLOP/s</code>。</td>
             </tr>
             <tr>
               <td>Cuper 半带宽假设</td>
@@ -625,66 +625,66 @@
 
     <section>
       <h2>去 padding 效果</h2>
-      <p>该图展示 host 打包后减少的 512-bit matrix read beats。strip16 是 per-HBM 去 padding；compact16 进一步做 PE-lane 紧凑打包，因此读 beat 节省更多，但当前 kernel 端解码/分发成本更高。</p>
+      <p>该图展示 host 打包后减少的 512-bit matrix read beats。strip16 是 per-HBM 去 padding；lanereal16 保持固定 lane，但去掉 PE 内部 reorder holes，因此读 beat 节省更多。</p>
       <div class="legend">
         <span><i class="swatch strip-bg"></i>20260618 strip16</span>
-        <span><i class="swatch compact-bg"></i>20260618 compact16</span>
+        <span><i class="swatch lane-bg"></i>20260618 lanereal16</span>
       </div>
       <div class="chart" aria-label="padding saved beats chart">
         <div class="bar-group">
           <div class="dataset">thermal2_n16</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 55.0%;"></div></div><div class="value">50.00%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 100.0%;"></div></div><div class="value">90.91%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 100.0%;"></div></div><div class="value">90.91%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n1024</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 8.9%;"></div></div><div class="value">8.12%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 17.4%;"></div></div><div class="value">15.85%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 73.0%;"></div></div><div class="value">66.35%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n4096</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 4.5%;"></div></div><div class="value">4.08%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 10.2%;"></div></div><div class="value">9.31%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 29.2%;"></div></div><div class="value">26.55%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n16384</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 5.4%;"></div></div><div class="value">4.91%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 12.3%;"></div></div><div class="value">11.20%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 18.8%;"></div></div><div class="value">17.09%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n65536</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 5.2%;"></div></div><div class="value">4.70%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 12.3%;"></div></div><div class="value">11.16%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 17.7%;"></div></div><div class="value">16.06%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n131072</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 5.5%;"></div></div><div class="value">4.99%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 13.1%;"></div></div><div class="value">11.91%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 17.9%;"></div></div><div class="value">16.24%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2_n262144</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 6.3%;"></div></div><div class="value">5.69%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 14.8%;"></div></div><div class="value">13.42%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 18.1%;"></div></div><div class="value">16.42%</div></div>
           </div>
         </div>
         <div class="bar-group">
           <div class="dataset">thermal2</div>
           <div class="bars">
             <div class="bar-line"><div class="label">strip16 saved</div><div class="track"><div class="bar strip-bg" style="width: 6.5%;"></div></div><div class="value">5.91%</div></div>
-            <div class="bar-line"><div class="label">compact16 saved</div><div class="track"><div class="bar compact-bg" style="width: 14.9%;"></div></div><div class="value">13.54%</div></div>
+            <div class="bar-line"><div class="label">lanereal16 saved</div><div class="track"><div class="bar lane-bg" style="width: 17.8%;"></div></div><div class="value">16.17%</div></div>
           </div>
         </div>
       </div>
@@ -700,17 +700,17 @@
               <th class="num">原 TAPA Cuper ms</th>
               <th class="num">one-shot demo ms</th>
               <th class="num">strip16 ms</th>
-              <th class="num">compact16 ms</th>
+              <th class="num">lanereal16 ms</th>
               <th class="num">原 TAPA GFLOP/s</th>
               <th class="num">one-shot GFLOP/s</th>
               <th class="num">strip16 GFLOP/s</th>
-              <th class="num">compact16 GFLOP/s</th>
+              <th class="num">lanereal16 GFLOP/s</th>
               <th class="num">strip16 vs 原 TAPA</th>
               <th class="num">strip16 vs one-shot</th>
-              <th class="num">compact16 vs strip16</th>
-              <th class="num">compact16 vs one-shot</th>
+              <th class="num">lanereal16 vs strip16</th>
+              <th class="num">lanereal16 vs one-shot</th>
               <th class="num">strip16 padding 节省</th>
-              <th class="num">compact16 padding 节省</th>
+              <th class="num">lanereal16 padding 节省</th>
               <th>状态</th>
             </tr>
           </thead>
@@ -720,144 +720,144 @@
               <td class="num">0.0670</td>
               <td class="num">0.068825</td>
               <td class="num">0.092274</td>
-              <td class="num">0.088892</td>
+              <td class="num">0.073251</td>
               <td class="num">0.000478</td>
               <td class="num">0.000465</td>
               <td class="num">0.000347</td>
-              <td class="num">0.000360</td>
+              <td class="num">0.000437</td>
               <td class="num">0.73x</td>
               <td class="num">0.75x</td>
-              <td class="num">1.04x</td>
-              <td class="num">0.77x</td>
+              <td class="num">1.26x</td>
+              <td class="num">0.94x</td>
               <td class="num">50.00%</td>
               <td class="num">90.91%</td>
-              <td><span class="tag ok">pass</span> compact16 小矩阵通过，但固定开销仍高于 one-shot。</td>
+              <td><span class="tag ok">pass</span> lanereal16 小矩阵通过，略快于 strip16。</td>
             </tr>
             <tr>
               <td><code>thermal2_n1024</code></td>
               <td class="num">0.0727</td>
               <td class="num">0.057057</td>
               <td class="num">0.086625</td>
-              <td class="num">0.129026</td>
+              <td class="num">0.089773</td>
               <td class="num">0.1750</td>
               <td class="num">0.2230</td>
               <td class="num">0.1469</td>
-              <td class="num">0.0986</td>
+              <td class="num">0.1417</td>
               <td class="num">0.84x</td>
               <td class="num">0.66x</td>
-              <td class="num">0.67x</td>
-              <td class="num">0.44x</td>
+              <td class="num">0.96x</td>
+              <td class="num">0.64x</td>
               <td class="num">8.12%</td>
-              <td class="num">15.85%</td>
-              <td><span class="tag ok">pass</span> compact16 读量更少，但比 strip16 和 one-shot 都慢。</td>
+              <td class="num">66.35%</td>
+              <td><span class="tag ok">pass</span> lanereal16 读量大幅减少，但仍慢于 one-shot。</td>
             </tr>
             <tr>
               <td><code>thermal2_n4096</code></td>
               <td class="num">0.0780</td>
               <td class="num">0.062703</td>
               <td class="num">0.092075</td>
-              <td class="num">0.193093</td>
+              <td class="num">0.087198</td>
               <td class="num">0.6719</td>
               <td class="num">0.8358</td>
               <td class="num">0.5692</td>
-              <td class="num">0.2714</td>
+              <td class="num">0.6010</td>
               <td class="num">0.85x</td>
               <td class="num">0.68x</td>
-              <td class="num">0.48x</td>
-              <td class="num">0.32x</td>
+              <td class="num">1.06x</td>
+              <td class="num">0.72x</td>
               <td class="num">4.08%</td>
-              <td class="num">9.31%</td>
-              <td><span class="tag ok">pass</span> compact16 性能开始明显退步。</td>
+              <td class="num">26.55%</td>
+              <td><span class="tag ok">pass</span> lanereal16 略快于 strip16，但慢于 one-shot。</td>
             </tr>
             <tr>
               <td><code>thermal2_n16384</code></td>
               <td class="num">0.0866</td>
               <td class="num">0.082818</td>
               <td class="num">0.116819</td>
-              <td class="num">0.457307</td>
+              <td class="num">0.101947</td>
               <td class="num">2.4921</td>
               <td class="num">2.6059</td>
               <td class="num">1.8474</td>
-              <td class="num">0.4719</td>
+              <td class="num">2.1169</td>
               <td class="num">0.74x</td>
               <td class="num">0.71x</td>
-              <td class="num">0.26x</td>
-              <td class="num">0.18x</td>
+              <td class="num">1.15x</td>
+              <td class="num">0.81x</td>
               <td class="num">4.91%</td>
-              <td class="num">11.20%</td>
-              <td><span class="tag ok">pass</span> compact16 的分发/累加开销已主导。</td>
+              <td class="num">17.09%</td>
+              <td><span class="tag ok">pass</span> lanereal16 在中规模快于 strip16。</td>
             </tr>
             <tr>
               <td><code>thermal2_n65536</code></td>
               <td class="num">0.1379</td>
               <td class="num">0.149121</td>
               <td class="num">0.160757</td>
-              <td class="num">1.639790</td>
+              <td class="num">0.186370</td>
               <td class="num">6.3379</td>
               <td class="num">5.8610</td>
               <td class="num">5.4368</td>
-              <td class="num">0.5330</td>
+              <td class="num">4.6896</td>
               <td class="num">0.86x</td>
               <td class="num">0.93x</td>
-              <td class="num">0.10x</td>
-              <td class="num">0.09x</td>
+              <td class="num">0.86x</td>
+              <td class="num">0.80x</td>
               <td class="num">4.70%</td>
-              <td class="num">11.16%</td>
-              <td><span class="tag ok">pass</span> compact16 比 strip16 慢约 10.2x。</td>
+              <td class="num">16.06%</td>
+              <td><span class="tag ok">pass</span> 大规模开始慢于 strip16，后端 II 影响显现。</td>
             </tr>
             <tr>
               <td><code>thermal2_n131072</code></td>
               <td class="num">0.2197</td>
               <td class="num">0.235847</td>
               <td class="num">0.211017</td>
-              <td class="num">3.176400</td>
+              <td class="num">0.319455</td>
               <td class="num">7.8840</td>
               <td class="num">7.3443</td>
               <td class="num">8.2084</td>
-              <td class="num">0.5453</td>
+              <td class="num">5.4221</td>
               <td class="num">1.04x</td>
               <td class="num">1.12x</td>
-              <td class="num">0.07x</td>
-              <td class="num">0.07x</td>
+              <td class="num">0.66x</td>
+              <td class="num">0.74x</td>
               <td class="num">4.99%</td>
-              <td class="num">11.91%</td>
-              <td><span class="tag ok">pass</span> strip16 反超原 TAPA Cuper，compact16 大幅落后。</td>
+              <td class="num">16.24%</td>
+              <td><span class="tag ok">pass</span> lanereal16 读包更少，但性能低于 strip16。</td>
             </tr>
             <tr>
               <td><code>thermal2_n262144</code></td>
               <td class="num">timeout</td>
               <td class="num">0.425394</td>
               <td class="num">0.319271</td>
-              <td class="num">6.322140</td>
+              <td class="num">0.546613</td>
               <td class="num">-</td>
               <td class="num">8.2229</td>
               <td class="num">10.9561</td>
-              <td class="num">0.5533</td>
+              <td class="num">6.3993</td>
               <td class="num">返回 vs timeout</td>
               <td class="num">1.33x</td>
-              <td class="num">0.05x</td>
-              <td class="num">0.07x</td>
+              <td class="num">0.58x</td>
+              <td class="num">0.78x</td>
               <td class="num">5.69%</td>
-              <td class="num">13.42%</td>
-              <td><span class="tag ok">pass</span> compact16 也返回，但比 strip16 慢约 19.8x。</td>
+              <td class="num">16.42%</td>
+              <td><span class="tag ok">pass</span> lanereal16 返回，但仍慢于 strip16 和 one-shot。</td>
             </tr>
             <tr>
               <td><code>thermal2</code></td>
               <td class="num">timeout</td>
               <td class="num">1.781541</td>
               <td class="num">1.291580</td>
-              <td class="num">30.280400</td>
+              <td class="num">2.355660</td>
               <td class="num">-</td>
               <td class="num">9.6325</td>
               <td class="num">13.2865</td>
-              <td class="num">0.5667</td>
+              <td class="num">7.2848</td>
               <td class="num">返回 vs timeout</td>
               <td class="num">1.38x</td>
-              <td class="num">0.043x</td>
-              <td class="num">0.059x</td>
+              <td class="num">0.55x</td>
+              <td class="num">0.76x</td>
               <td class="num">5.91%</td>
-              <td class="num">13.54%</td>
-              <td><span class="tag ok">pass</span> compact16 完整规模通过，但性能不建议晋级。</td>
+              <td class="num">16.17%</td>
+              <td><span class="tag ok">pass</span> 完整规模通过，但性能仍未超过 strip16。</td>
             </tr>
           </tbody>
         </table>
@@ -870,11 +870,11 @@
         <li>原 TAPA Cuper 标准曲线：<code>395bitstream/cuper_spmv_u55c_compare_20260524.html</code> 的结果总表。</li>
         <li>20260528 one-shot demo：<code>395bitstream/cuper_spmv_u55c_compare_20260524.html</code> 的 <code>Single SpMV demo：Cuper-compatible one-shot</code> 表，加本轮补跑日志 <code>logs/spmv_oneshot_fill_20260618_152520/</code>。</li>
         <li>20260618 strip16：<code>logs/spmv_strip16_hw_20260618_120346/</code>，全部 <code>rc=0</code>、<code>Status=1</code>、<code>Error Num=0</code>。</li>
-        <li>20260618 compact16：<code>logs/spmv_compact16_hw_sweep_20260618_174007/</code>，全部 <code>rc=0</code>、<code>Status=1</code>、<code>Error Num=0</code>。</li>
+        <li>20260618 lanereal16：<code>logs/spmv_lanereal16_hw_sweep_20260618_233431/</code>，全部 <code>rc=0</code>、<code>Status=1</code>、<code>Error Num=0</code>。</li>
         <li>GFLOP/s 由本页 <code>spmv_avg</code> 与 <code>data/suitesparse/Schmid/csr/*/meta.txt</code> / <code>meta.json</code> 的 <code>nnz</code> 统一换算；timeout 点不计算吞吐。</li>
         <li>理论上限按用户给定 <code>460 GB/s</code> 和 <code>230 GB/s</code> 假设换算；矩阵 payload 口径来自 Cuper <code>Matrix_data</code> 的 512-bit beat / 8 个 64-bit <code>SpElement</code> slot。</li>
         <li>strip16 bitstream：<code>395bitstream/cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin</code>，UUID <code>d10e19f2-b1dd-72e8-cfb3-860a503a20f7</code>，SHA256 <code>0b74e6bafd8def47f66f0592464fd4d9f2baa33908b78525bf60762f37f87156</code>。</li>
-        <li>compact16 bitstream：<code>395bitstream/cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin</code>，UUID <code>7f1e6302-e2a1-05e5-ab24-42a81b9f1488</code>，SHA256 <code>2ec7758129ea44dfadd617b97587030de27a0f20d44b56f4bb727749768186b6</code>。</li>
+        <li>lanereal16 bitstream：<code>395bitstream/cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin</code>，UUID <code>98358acf-f40e-4f2f-b77f-4a25c24f4473</code>，SHA256 <code>c8ef2426248a1acd4d02a75da39d72439c1cabdd12450428cfa83ce0baf1b49d</code>。</li>
       </ul>
     </section>
   </main>

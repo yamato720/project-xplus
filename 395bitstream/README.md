@@ -31,7 +31,7 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，服务器侧性能提升不足，保留为宽 HBM 边界 |
 | `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，服务器侧完整 `thermal2` 已通过并为当前 SpMV 实验最佳 |
 | `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
-| `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，已同步待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，服务器侧完整 `thermal2` 已通过；替代 compact16 主报告线，但性能仍慢于 strip16 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -229,9 +229,22 @@ HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]�
 `Metrics` 使用 HBM[31]。本机 software simulation 已通过 `thermal2_n1024` 和
 `thermal2_n65536`：`thermal2_n1024` matrix read beats 从 `2624` 降到 `883`，
 `thermal2_n65536` 从 `68464` 降到 `57472`，节省 `16.0552%`。HLS 同时显示
-`Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 为 II=`2`；
-因此这版先作为协议/功能探索，不建议在上板前假设会快于 strip16。服务器侧测试必须
-设置：
+`Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`，而 strip16 为 II=`2`。
+
+2026-06-18 服务器侧已完成 demo-only 上板 sweep，日志为：
+
+```text
+logs/spmv_lanereal16_hw_sweep_20260618_233431/
+```
+
+`thermal2_n16` 到完整 `thermal2` 共 8 个数据集全部 `rc=0`、`Status=1`、
+`Correctness Verification: Passed`、`Error Num=0`。完整 `thermal2` 时间为
+`2.35566 ms`，吞吐为 `7.2848 GFLOP/s`，matrix read beats 从 `1,373,424` 降到
+`1,151,370`，节省 `16.1679%`。该结果已经替代 HTML 主报告里前一条异常慢的
+compact16 曲线；但它仍慢于 strip16 的完整 `thermal2` `1.29158 ms` /
+`13.2865 GFLOP/s`，因此不建议晋级标准，也不覆盖当前有效 `source.diff`。
+
+服务器侧测试设置为：
 
 ```text
 JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16

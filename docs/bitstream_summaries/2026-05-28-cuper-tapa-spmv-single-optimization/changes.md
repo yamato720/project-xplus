@@ -150,8 +150,13 @@ host packer 和长度协议，就已经接近理论下限。
 
 - HLS 报告显示 lanereal16 的 `Accumulator_Pipeline_cuper_acc_accumulate` 达成 II=`5`；
 - strip16 同一路径是 II=`2`；
-- 因此这版虽然前端读包减少，但后端可能成为瓶颈。服务器上板前只按协议探索件记录，
-  不建议晋级，也不更新正式 `source.diff`。
+- 服务器侧上板 sweep 已确认 8 个 `thermal2` 数据集全部 `rc=0`、`Status=1`、
+  `Error Num=0`，日志在 `logs/spmv_lanereal16_hw_sweep_20260618_233431/`；
+- 完整 `thermal2` 为 `2.35566 ms` / `7.2848 GFLOP/s`，matrix read beats 节省
+  `16.1679%`；
+- 这条线已在 HTML 主报告中直接替代前一条异常慢的 compact16 曲线，但仍慢于 strip16
+  的 `1.29158 ms` / `13.2865 GFLOP/s`。因此不建议晋级，也不更新正式
+  `source.diff`。
 
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
