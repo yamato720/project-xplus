@@ -731,4 +731,111 @@ void Create_SpElement_list_for_all_channels(const vector<vector<SpElement> > &Sp
         }
     }
 }
+
+inline unsigned long PackSpElementForCuper(const SpElement &sp) {
+    if (sp.rowIdx == -1) {
+        return 0x3FFFFULL << 32;
+    }
+
+    unsigned int x_float_bits = *(unsigned int*)(&sp.val);
+    unsigned long x_val_64 = (unsigned long)(x_float_bits & 0xFFFFFFFFULL);
+    unsigned long x_row = ((unsigned long)sp.rowIdx & 0x3FFFFULL) << 32;
+    unsigned long x_col = ((unsigned long)sp.colIdx & 0x3FFFULL) << 50;
+    return x_col | x_row | x_val_64;
+}
+
+// SpMV-only 实验用的 per-HBM 去 padding 打包。
+//
+// 原始 Cuper 协议每个 batch 只保留一份全局边界，所有 HBM channel 都读到
+// batch 内最长 PE 的长度。这个 helper 只剔除“跨 HBM channel 的尾部 padding”：
+//   - 每个 HBM channel 有自己的 batch 边界；
+//   - channel 内 8 个 PE 仍然按该 channel 的最长 PE 对齐；
+//   - PE 内部 Reordering 留下的空洞仍然保留。
+//
+// SpElement_list_ptr_per_hbm 采用 boundary-major 排列：
+//   ptr[(batch_boundary * HBM_CHANNEL_NUM) + channel]
+// 这样 kernel 的单个 ptr loader 可以顺序读取，并把每个 boundary 的 HBM_CHANNEL_NUM
+// 个边界值一起广播到 Core 链。
+void Create_SpElement_list_for_all_channels_strip_hbm_padding(
+    const vector<vector<SpElement> > &SpElement_list_pes,
+    const vector<INDEX_TYPE>         &SpElement_list_ptr,
+    vector<vector<unsigned long, tapa::aligned_allocator<unsigned long> > > &Matrix_fpga_data,
+    vector<INDEX_TYPE>               &SpElement_list_ptr_per_hbm,
+    vector<INDEX_TYPE>               &Matrix_len_per_hbm,
+    const int HBM_CHANNEL_NUM = ::HBM_CHANNEL_NUM
+) {
+    const INDEX_TYPE batch_num =
+        static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) - 1;
+    vector<INDEX_TYPE> ptr_by_channel(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+
+    Matrix_len_per_hbm.assign(HBM_CHANNEL_NUM, 0);
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        const INDEX_TYPE global_start = SpElement_list_ptr[batch];
+        const INDEX_TYPE global_end = SpElement_list_ptr[batch + 1];
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            INDEX_TYPE channel_batch_len = 0;
+
+            for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                for (INDEX_TYPE pos = global_end; pos > global_start; --pos) {
+                    if (SpElement_list_pes[pe_idx][pos - 1].rowIdx != -1) {
+                        channel_batch_len =
+                            max(channel_batch_len, pos - global_start);
+                        break;
+                    }
+                }
+            }
+
+            Matrix_len_per_hbm[channel] += channel_batch_len;
+            ptr_by_channel[channel * (batch_num + 1) + batch + 1] =
+                Matrix_len_per_hbm[channel];
+        }
+    }
+
+    SpElement_list_ptr_per_hbm.assign(
+        static_cast<size_t>(HBM_CHANNEL_NUM) *
+        static_cast<size_t>(batch_num + 1),
+        0);
+    for (INDEX_TYPE boundary = 0; boundary <= batch_num; ++boundary) {
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            SpElement_list_ptr_per_hbm[boundary * HBM_CHANNEL_NUM + channel] =
+                ptr_by_channel[channel * (batch_num + 1) + boundary];
+        }
+    }
+
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        INDEX_TYPE channel_words = Matrix_len_per_hbm[channel] * PE_NUM;
+        INDEX_TYPE channel_size = ((channel_words + 511) / 512) * 512;
+        if (channel_size == 0) {
+            channel_size = PE_NUM;
+        }
+        Matrix_fpga_data[channel].assign(channel_size, 0);
+    }
+
+    for (INDEX_TYPE batch = 0; batch < batch_num; ++batch) {
+        const INDEX_TYPE global_start = SpElement_list_ptr[batch];
+
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+            const INDEX_TYPE local_start =
+                ptr_by_channel[channel * (batch_num + 1) + batch];
+            const INDEX_TYPE local_end =
+                ptr_by_channel[channel * (batch_num + 1) + batch + 1];
+
+            for (INDEX_TYPE offset = 0; offset < local_end - local_start; ++offset) {
+                for (INDEX_TYPE lane = 0; lane < PE_NUM; ++lane) {
+                    const INDEX_TYPE pe_idx = channel * PE_NUM + lane;
+                    const SpElement &sp =
+                        SpElement_list_pes[pe_idx][global_start + offset];
+                    Matrix_fpga_data[channel][(local_start + offset) * PE_NUM + lane] =
+                        PackSpElementForCuper(sp);
+                }
+            }
+        }
+    }
+}
 #endif

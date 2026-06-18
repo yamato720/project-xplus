@@ -16,7 +16,8 @@ demo-only 上板：单轮 `MAX_ITERS=1` 覆盖到完整 `thermal2`，完整固�
 `thermal2_n1024`、`thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
 `thermal2`。2026-06-16 另生成并同步了 `JACOBI_WIDE_HBM=1` 的 24 路 Matrix_data
 no-debug 实验 artifact；服务器侧 smoke 已失败。2026-06-17 又同步了 16 路
-no-debug 正常 ABI 候选，以及 `CuperSpmvServiceOnly` 24 路 SpMV-only 候选；
+no-debug 正常 ABI 候选、`CuperSpmvServiceOnly` 24 路 SpMV-only 候选，以及
+2026-06-18 16 路 per-HBM 去 padding SpMV-only 候选；
 其中 16 路 no-debug Jacobi 在服务器侧 `thermal2_n16 MAX_ITERS=1` 已失败。因此
 当前 Jacobi 功能回退到 `20260615-demo` light-trace ABI。
 
@@ -29,7 +30,7 @@ no-debug 正常 ABI 候选，以及 `CuperSpmvServiceOnly` 24 路 SpMV-only 候�
 | 源码入口 | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` |
 | 当前构建目录 | `cuper-jacobi-iteration-build/` |
 | 当前 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260615-demo.xclbin` |
-| 当前实验 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin`, `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin`, `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` |
+| 当前实验 bitstream | `395bitstream/cuper-tapa-jacobi-u55c-20260616-demo.xclbin`, `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin`, `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin`, `395bitstream/cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` |
 | 版本状态 | software/TAPA simulation 通过；150 MHz timing-clean master-controller light-trace full graph 已完成 demo-only 上板单轮和完整固定轮数测试；wide-HBM 24 路 no-debug 与 16 路 no-debug Jacobi 已在服务器侧失败；当前恢复 light-trace debug ABI |
 | 是否建议晋级标准 | 暂不建议，当前仍是 debug demo，且硬件没有内部收敛 early-exit |
 
@@ -181,16 +182,25 @@ sentinel，但 `Finish()` 随后返回，最终 trace source 显示 controller �
 `.xclbin`，v++ 总耗时 `5h 42m 5s`。由于 timing 未收敛，当前只保存为性能方向
 实验 artifact，尚未做上板验证，也不覆盖 `20260615` 已板测通过 demo 的结论。
 
-## 2026-06-17 no-debug / SpMV-only 同步候选
+## 2026-06-17/18 no-debug / SpMV-only 同步候选
 
 | 文件 | Kernel | UUID | SHA256 | DATA/KERNEL/HBM | timing |
 | --- | --- | --- | --- | --- | --- |
 | `395bitstream/cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | `CuperJacobiIteration` | `f2d71afc-b5f0-5b13-9b9f-a6283fe61e6a` | `61456e3bc652f56624f26c66f31200b4a85cfd310eaf142feba29133451fa977` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns` |
 | `395bitstream/cuper-tapa-spmv-u55c-20260617-demo.xclbin` | `CuperSpmvServiceOnly` | `492f929f-4232-3a37-b7e0-3969b5052219` | `c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705` | `141/500/450 MHz` | WNS `-0.420 ns`, TNS `-359.841 ns` |
+| `395bitstream/cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | `CuperSpmvServiceOnly` | `d10e19f2-b1dd-72e8-cfb3-860a503a20f7` | `0b74e6bafd8def47f66f0592464fd4d9f2baa33908b78525bf60762f37f87156` | `207/500/436 MHz` | WNS `-1.488 ns`, TNS `-24182.635 ns` |
 
 本机没有 Xilinx OpenCL platform，`/etc/OpenCL/vendors` 只有 AMD ICD，因此上板 smoke
-没有运行成功；这不是 bitstream 功能失败。两个候选已同步到 `395bitstream/`，等待
+没有运行成功；这不是 bitstream 功能失败。候选已同步到 `395bitstream/`，等待
 服务器侧按对应 ABI 测试。
+
+`20260618-strip16-demo` 使用
+`JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_STRIP_PADDING=1`。它仍只计算 `Y=A*X`，但把 batch 边界从全局
+`SpElement_list_ptr[b]` 改为每个 HBM channel 独立边界，使短 channel 不再读同一
+batch 尾部的跨 HBM padding。本机 software simulation 已在 `thermal2_n1024`、
+`thermal2_n4096`、`thermal2_n65536` 和完整 `thermal2` 通过；矩阵读取 beat
+分别减少约 `8.12%`、`4.08%`、`4.70%` 和 `5.91%`。
 
 32 路 `CuperSpmvServiceOnly` 已通过 software simulation，但硬件 link 在 VPL
 `create_bd` 阶段失败：

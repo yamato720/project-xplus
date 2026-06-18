@@ -60,7 +60,9 @@ typedef struct {
   size_t scheduled;
   size_t max_len;
   size_t read_slots;
+  size_t channel_read_slots;
   double density;
+  double channel_density;
 } BatchStat;
 
 static void die(const char* msg) {
@@ -346,7 +348,11 @@ static void print_csv_header(void) {
   printf("dataset,hbm,m,n,drop_diag,real_nnz,slice_size,batch_size,slice_width,"
          "batch_num,matrix_len,read_beats,read_slots,density,padding_slots,"
          "reorder_holes,batch_pad,channel_real_min,channel_real_max,"
-         "pe_real_min,pe_real_max\n");
+         "pe_real_min,pe_real_max,channel_dyn_read_beats,"
+         "channel_dyn_read_slots,channel_dyn_density,channel_dyn_padding_slots,"
+         "channel_dyn_batch_pad,channel_dyn_savings_slots,"
+         "channel_dyn_savings_pct,pe_lower_read_slots,pe_lower_density,"
+         "channel_dyn_len_min,channel_dyn_len_max\n");
 }
 
 static void profile_one_hbm(const Meta* meta,
@@ -408,6 +414,7 @@ static void profile_one_hbm(const Meta* meta,
   BatchStat* batch_stats = (BatchStat*)xcalloc((size_t)batch_num, sizeof(BatchStat));
   size_t* channel_real = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
   size_t* channel_sched = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
+  size_t* channel_dynamic_len = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
   size_t* pe_real = (size_t*)xcalloc((size_t)num_pe, sizeof(size_t));
   size_t* pe_sched = (size_t*)xcalloc((size_t)num_pe, sizeof(size_t));
   Slot* dump_slots = NULL;
@@ -417,11 +424,14 @@ static void profile_one_hbm(const Meta* meta,
 
   size_t matrix_len = 0;
   size_t scheduled_slots = 0;
+  size_t channel_dynamic_read_beats = 0;
 
   for (int batch = 0; batch < batch_num; ++batch) {
     size_t max_len = 0;
     size_t batch_real = 0;
     size_t batch_scheduled = 0;
+    size_t channel_batch_len[32];
+    for (int c = 0; c < hbm; ++c) channel_batch_len[c] = 0;
 
     for (int pe = 0; pe < num_pe; ++pe) {
       Bucket* b = &buckets[(size_t)batch * (size_t)num_pe + (size_t)pe];
@@ -433,15 +443,24 @@ static void profile_one_hbm(const Meta* meta,
           b, meta->m, num_pe, kWindow,
           (capture ? (size_t)opt->dump_beats : 0u), capture);
       if (sched > max_len) max_len = sched;
+      const int channel = pe / kPeNum;
+      if (sched > channel_batch_len[channel]) channel_batch_len[channel] = sched;
       batch_real += b->count;
       batch_scheduled += sched;
       scheduled_slots += sched;
 
       pe_real[pe] += b->count;
       pe_sched[pe] += sched;
-      channel_real[pe / kPeNum] += b->count;
-      channel_sched[pe / kPeNum] += sched;
+      channel_real[channel] += b->count;
+      channel_sched[channel] += sched;
     }
+
+    size_t channel_batch_read_beats = 0;
+    for (int c = 0; c < hbm; ++c) {
+      channel_dynamic_len[c] += channel_batch_len[c];
+      channel_batch_read_beats += channel_batch_len[c];
+    }
+    channel_dynamic_read_beats += channel_batch_read_beats;
 
     matrix_len += max_len;
     batch_stats[batch].id = batch;
@@ -449,20 +468,39 @@ static void profile_one_hbm(const Meta* meta,
     batch_stats[batch].scheduled = batch_scheduled;
     batch_stats[batch].max_len = max_len;
     batch_stats[batch].read_slots = max_len * (size_t)num_pe;
+    batch_stats[batch].channel_read_slots = channel_batch_read_beats * (size_t)kPeNum;
     batch_stats[batch].density = batch_stats[batch].read_slots
                                      ? (double)batch_real /
                                            (double)batch_stats[batch].read_slots
                                      : 0.0;
+    batch_stats[batch].channel_density =
+        batch_stats[batch].channel_read_slots
+            ? (double)batch_real / (double)batch_stats[batch].channel_read_slots
+            : 0.0;
   }
 
   const size_t read_beats = matrix_len * (size_t)hbm;
   const size_t read_slots = read_beats * (size_t)kPeNum;
+  const size_t channel_dynamic_read_slots =
+      channel_dynamic_read_beats * (size_t)kPeNum;
   const size_t padding_slots = (read_slots >= real_nnz) ? read_slots - real_nnz : 0;
+  const size_t channel_dynamic_padding_slots =
+      (channel_dynamic_read_slots >= real_nnz) ? channel_dynamic_read_slots - real_nnz : 0;
   const size_t reorder_holes =
       (scheduled_slots >= real_nnz) ? scheduled_slots - real_nnz : 0;
   const size_t batch_pad =
       (read_slots >= scheduled_slots) ? read_slots - scheduled_slots : 0;
+  const size_t channel_dynamic_batch_pad =
+      (channel_dynamic_read_slots >= scheduled_slots) ? channel_dynamic_read_slots - scheduled_slots : 0;
+  const size_t channel_dynamic_savings_slots =
+      (read_slots >= channel_dynamic_read_slots) ? read_slots - channel_dynamic_read_slots : 0;
   const double density = read_slots ? (double)real_nnz / (double)read_slots : 0.0;
+  const double channel_dynamic_density =
+      channel_dynamic_read_slots ? (double)real_nnz / (double)channel_dynamic_read_slots : 0.0;
+  const double pe_lower_density =
+      scheduled_slots ? (double)real_nnz / (double)scheduled_slots : 0.0;
+  const double channel_dynamic_savings_pct =
+      read_slots ? (double)channel_dynamic_savings_slots * 100.0 / (double)read_slots : 0.0;
 
   size_t channel_real_min = channel_real[0];
   size_t channel_real_max = channel_real[0];
@@ -476,14 +514,28 @@ static void profile_one_hbm(const Meta* meta,
     if (pe_real[i] < pe_real_min) pe_real_min = pe_real[i];
     if (pe_real[i] > pe_real_max) pe_real_max = pe_real[i];
   }
+  size_t channel_dynamic_len_min = channel_dynamic_len[0];
+  size_t channel_dynamic_len_max = channel_dynamic_len[0];
+  for (int i = 1; i < hbm; ++i) {
+    if (channel_dynamic_len[i] < channel_dynamic_len_min) {
+      channel_dynamic_len_min = channel_dynamic_len[i];
+    }
+    if (channel_dynamic_len[i] > channel_dynamic_len_max) {
+      channel_dynamic_len_max = channel_dynamic_len[i];
+    }
+  }
 
   if (opt->csv) {
-    printf("%s,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n",
+    printf("%s,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu\n",
            dataset, hbm, meta->m, meta->n, opt->drop_diag, real_nnz,
            slice_size, batch_size, slice_width, batch_num, matrix_len,
            read_beats, read_slots, density, padding_slots, reorder_holes,
            batch_pad, channel_real_min, channel_real_max, pe_real_min,
-           pe_real_max);
+           pe_real_max, channel_dynamic_read_beats, channel_dynamic_read_slots,
+           channel_dynamic_density, channel_dynamic_padding_slots,
+           channel_dynamic_batch_pad, channel_dynamic_savings_slots,
+           channel_dynamic_savings_pct, scheduled_slots, pe_lower_density,
+           channel_dynamic_len_min, channel_dynamic_len_max);
   } else {
     printf("\nHBM=%d\n", hbm);
     printf("  slice_size=%d batch_size=%d slice_width=%d col_slices=%d batch_num=%d num_pe=%d\n",
@@ -497,8 +549,21 @@ static void profile_one_hbm(const Meta* meta,
            read_slots ? (double)padding_slots * 100.0 / (double)read_slots : 0.0,
            reorder_holes,
            batch_pad);
+    printf("  per-HBM dynamic: read_beats=%zu read_slots=%zu density=%.2f%% padding=%zu batch_pad=%zu saved=%zu (%.2f%%)\n",
+           channel_dynamic_read_beats,
+           channel_dynamic_read_slots,
+           channel_dynamic_density * 100.0,
+           channel_dynamic_padding_slots,
+           channel_dynamic_batch_pad,
+           channel_dynamic_savings_slots,
+           channel_dynamic_savings_pct);
+    printf("  per-PE lower bound: read_slots=%zu density=%.2f%% remaining_holes=%zu\n",
+           scheduled_slots,
+           pe_lower_density * 100.0,
+           reorder_holes);
     print_min_max_avg("HBM real nnz", channel_real, hbm);
     print_min_max_avg("HBM scheduled slots", channel_sched, hbm);
+    print_min_max_avg("HBM dynamic beats", channel_dynamic_len, hbm);
     print_min_max_avg("PE real nnz", pe_real, num_pe);
     print_min_max_avg("PE scheduled slots", pe_sched, num_pe);
 
@@ -508,12 +573,14 @@ static void profile_one_hbm(const Meta* meta,
       qsort(sorted, (size_t)batch_num, sizeof(BatchStat), cmp_batch_padding);
       const int top = (opt->top_batches < batch_num) ? opt->top_batches : batch_num;
       printf("  worst batches by padding:\n");
-      printf("    batch      real  scheduled  max_len  read_slots  density    padding\n");
+      printf("    batch      real  scheduled  max_len  global_slots  hbm_dyn_slots  global_den  hbm_dyn_den    saved\n");
       for (int i = 0; i < top; ++i) {
         const BatchStat* b = &sorted[i];
-        printf("    %5d %9zu %10zu %8zu %11zu %7.2f%% %10zu\n",
+        printf("    %5d %9zu %10zu %8zu %13zu %14zu %9.2f%% %10.2f%% %8zu\n",
                b->id, b->real, b->scheduled, b->max_len, b->read_slots,
-               b->density * 100.0, b->read_slots - b->real);
+               b->channel_read_slots, b->density * 100.0,
+               b->channel_density * 100.0,
+               b->read_slots - b->channel_read_slots);
       }
       free(sorted);
     }
@@ -542,6 +609,7 @@ static void profile_one_hbm(const Meta* meta,
   free(dump_slots);
   free(pe_sched);
   free(pe_real);
+  free(channel_dynamic_len);
   free(channel_sched);
   free(channel_real);
   free(batch_stats);

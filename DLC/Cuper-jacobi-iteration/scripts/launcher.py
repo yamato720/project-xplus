@@ -126,6 +126,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 *(["export JACOBI_KERNEL_FREQUENCY=" + shell_quote(os.environ["JACOBI_KERNEL_FREQUENCY"])] if os.environ.get("JACOBI_KERNEL_FREQUENCY") else []),
                 *(["export JACOBI_TOP=" + shell_quote(os.environ["JACOBI_TOP"])] if os.environ.get("JACOBI_TOP") else []),
                 *(["export JACOBI_SPMV_ONLY=" + shell_quote(os.environ["JACOBI_SPMV_ONLY"])] if os.environ.get("JACOBI_SPMV_ONLY") else []),
+                *(["export JACOBI_SPMV_STRIP_PADDING=1"] if os.environ.get("JACOBI_SPMV_STRIP_PADDING") not in {None, "", "0"} else []),
                 *(["export JOBS=" + shell_quote(os.environ["JOBS"])] if os.environ.get("JOBS") else []),
                 *(["export JACOBI_MMAP_PROBE_SPLIT=1"] if os.environ.get("JACOBI_MMAP_PROBE_SPLIT") not in {None, "", "0"} else []),
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",

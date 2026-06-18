@@ -90,6 +90,10 @@ if [[ "${JACOBI_BLOCKING_ENTRY_PROBE:-0}" != "0" && "${JACOBI_BLOCKING_ENTRY_PRO
   cmd+=(-c "-DJACOBI_BLOCKING_ENTRY_PROBE=1")
 fi
 
+if [[ "${JACOBI_SPMV_STRIP_PADDING:-0}" != "0" && "${JACOBI_SPMV_STRIP_PADDING:-}" != "" ]]; then
+  cmd+=(-c "-DJACOBI_SPMV_STRIP_PADDING=1")
+fi
+
 printf 'Running:'
 printf ' %q' "${cmd[@]}"
 printf '\n'

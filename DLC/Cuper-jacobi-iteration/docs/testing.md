@@ -154,6 +154,48 @@ ERROR: [VPL-1] You have run out of port connections on /hmss_0. All 33 connectio
 `SpElement_list_ptr/X/Y_out/Status/Metrics` 的 top-level m_axi 口，超过 U55C HBM
 subsystem 可连接端口数。因此当前没有 32 路 `.xclbin` 可同步。
 
+### SpMV-only 16 路 per-HBM 去 padding
+
+2026-06-18 新增 `CuperSpmvServiceOnly` 的 16 路 strip-padding 实验。它不改变
+SpElement 64-bit slot、512-bit matrix beat、accumulator、checker 或 sort tree；
+只把原来全 HBM 共享的一份 batch 边界改成每个 HBM channel 独立边界，从而让短
+channel 不再读同一 batch 尾部的跨 HBM padding。该功能由
+`JACOBI_SPMV_STRIP_PADDING=1` 打开，只用于 SpMV-only 实验。
+
+本机 software simulation 已通过：
+
+| 数据集 | 结果 | 原读 beats | strip 后 beats | 节省 |
+| --- | --- | ---: | ---: | ---: |
+| `thermal2_n1024` | 通过，`Error Num=0` | 2,624 | 2,411 | 8.12% |
+| `thermal2_n4096` | 通过，`Error Num=0` | 4,704 | 4,512 | 4.08% |
+| `thermal2_n65536` | 通过，`Error Num=0` | 68,464 | 65,249 | 4.70% |
+| `thermal2` | 通过，`Error Num=0` | 1,373,424 | 1,292,255 | 5.91% |
+
+已生成并同步 16 路 strip-padding SpMV-only xclbin：
+
+| 项目 | 内容 |
+| --- | --- |
+| 同步文件 | `395bitstream/cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` |
+| 构建目录 | `cuper-jacobi-spmv-strip16-build/` |
+| Kernel | `CuperSpmvServiceOnly` |
+| 必要宏 | `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16 JACOBI_SPMV_STRIP_PADDING=1` |
+| UUID | `d10e19f2-b1dd-72e8-cfb3-860a503a20f7` |
+| SHA256 | `0b74e6bafd8def47f66f0592464fd4d9f2baa33908b78525bf60762f37f87156` |
+| DATA / KERNEL / HBM clock | `207 MHz` / `500 MHz` / `436 MHz` |
+| 时序状态 | 未收敛：WNS `-1.488 ns`，TNS `-24182.635 ns`，setup failing endpoints `62619` |
+
+服务器侧测试命令示例：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_STRIP_PADDING=1 \
+BITFILE=395bitstream/cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin \
+BUILD_DIR=cuper-jacobi-spmv-strip16-build \
+  bash DLC/Cuper-jacobi-iteration/scripts/run_hw.sh data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
 ## 3. 当前记录数据
 
 | 数据集 | 矩阵规模 | 迭代 | 当前记录 | 关键输出 |

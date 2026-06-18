@@ -28,7 +28,8 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
-| `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，服务器侧性能提升不足，保留为宽 HBM 边界 |
+| `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -137,6 +138,31 @@ WNS `-0.420 ns`，TNS `-359.841 ns`，setup failing endpoints `2281`。构建目
 subsystem port connection 用满：`You have run out of port connections on /hmss_0.
 All 33 connections are used`。因此 32 路没有 `.xclbin` 可同步，后续若要继续探索，
 需要先减少 top-level `m_axi` 端口数，而不是只调整 HBM bank 映射。
+
+TAPA Cuper / SpMV-only 16 路 per-HBM 去 padding 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin
+```
+
+这版仍是 `CuperSpmvServiceOnly`，仍只计算 `Y=A*X`，但打开
+`JACOBI_SPMV_STRIP_PADDING=1`。host 打包时为每个 HBM channel 生成独立 batch
+边界和独立 `Matrix_len`，kernel 端 `CuperSpmvOnly_StripPtrLoader`、
+`CuperSpmvOnly_MatrixLoaderStrip` 和 `CuperSpmvOnly_CoreStrip` 按 per-HBM 边界消费
+矩阵流，从而剔除跨 HBM channel 的 batch 尾部 padding。它不改变 512-bit beat
+格式、每 beat 8 个 SpElement slot、乘加、accumulator、checker 或 sort tree。
+
+UUID 为 `d10e19f2-b1dd-72e8-cfb3-860a503a20f7`，SHA256 为
+`0b74e6bafd8def47f66f0592464fd4d9f2baa33908b78525bf60762f37f87156`。DATA/KERNEL/HBM
+clock 为 `207/500/436 MHz`；routed timing 未收敛：WNS `-1.488 ns`，
+TNS `-24182.635 ns`，setup failing endpoints `62619`，违例在
+`clk_kernel_00_unbuffered_net`。构建目录为 `cuper-jacobi-spmv-strip16-build/`，
+构建日志为 `cuper-jacobi-spmv-strip16-build/logs/build_hw_tmux.log`。本机已完成
+software simulation：`thermal2_n1024`、`thermal2_n4096`、`thermal2_n65536` 和完整
+`thermal2` 均 `Error Num=0`；对应矩阵读取 beat 节省约 `8.12%`、`4.08%`、`4.70%`
+和 `5.91%`。服务器侧测试必须设置
+`JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_STRIP_PADDING=1`。
 
 它覆盖的上一版 `20260614` timing-clean light-trace full graph demo UUID 为
 `3fc9b8f4-901b-008f-8bc9-26ea3bf6f0c1`，SHA256 为
