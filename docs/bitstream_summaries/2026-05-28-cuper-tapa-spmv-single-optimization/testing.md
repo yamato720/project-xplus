@@ -327,59 +327,68 @@ logs/spmv_lanereal16_hw_sweep_20260618_233431/
 ```text
 395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin
 kernel: CuperSpmvServiceOnly
-UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
-SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
-DATA/KERNEL/HBM clock: 149 / 500 / 450 MHz
+UUID: e6998763-ba80-b12f-f180-5099ba926c6d
+SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
 HBM mapping: Matrix_data_0..15 -> HBM[0..15], SpElement_list_ptr -> HBM[16],
              X -> HBM[17], Y_out -> HBM[18], Status -> HBM[30], Metrics -> HBM[31]
-Timing: WNS -0.005 ns, TNS -0.017 ns, setup failing endpoints 9
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
 ```
 
 构建：
 
 ```text
-session: project-xplus-cuper-spmv-ooo-bank-rtl-hw-150m
-build_dir: cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/
-log: cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/logs/build_hw_tmux.log
-xclbin: cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/CuperSpmvServiceOnly.xclbin
+session: project-xplus-cuper-spmv-ooobank16-fix-hw-150m
+build_dir: cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/
+log: cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/logs/build_hw_tmux.log
+xclbin: cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/CuperSpmvServiceOnly.xclbin
 ```
 
 关键构建结果：
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/CuperSpmvServiceOnly.xclbin
-Total elapsed time: 4h 34m 32s
+Created .../cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 3h 59m 28s
 ```
 
 资源摘要：
 
 | 资源 | 使用量 | 占比 |
 | --- | ---: | ---: |
-| CLB LUTs | 354,925 | 27.22% |
-| CLB | 86,691 | 53.20% |
-| CLB Registers | 534,591 | 20.50% |
+| CLB LUTs | 338,352 | 25.95% |
+| CLB | 85,532 | 52.49% |
+| CLB Registers | 527,305 | 20.22% |
 | Block RAM Tile | 1,320 | 65.48% |
 | URAM | 512 | 53.33% |
-| DSPs | 647 | 7.17% |
-| Total SLLs | 27,500 | - |
+| DSPs | 695 | 7.70% |
+| Total SLLs | 26,740 | - |
 
 本机 RTL 小仿真：
 
 ```bash
-make -C verilog tapa-bank-lint BUILD_DIR=build_bank
-make -C verilog tapa-bank-sim BUILD_DIR=build_bank
+make -C verilog tapa-bank-lint BUILD_DIR=build_bank_fp_fix
+make -C verilog tapa-bank-sim BUILD_DIR=build_bank_fp_fix
+make -C verilog tapa-lint BUILD_DIR=build_lane_fp_fix
+make -C verilog tapa-sim BUILD_DIR=build_lane_fp_fix
 ```
 
 结果：
 
 ```text
 PASS: TAPA owner-bank RTL accumulator cycles=69 real_events=40 outputs=16 cycles_per_event=1.725 cycles_per_output=4.312
+PASS: TAPA owner-lane RTL accumulator cycles=71
 ```
 
 本机 TAPA software smoke：
 
 ```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=16 \
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+  make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+
 JACOBI_TOP=CuperSpmvServiceOnly \
 JACOBI_SPMV_ONLY=1 \
 JACOBI_HBM_CHANNELS=16 \
@@ -394,11 +403,25 @@ Correctness Verification: Passed
 Error Num=0
 ```
 
+旧版上板失败记录：
+
+```text
+old UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
+old SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
+thermal2_n16: Finish 正常返回，Status=1，时间 0.104123 ms，但 16 个输出全是 0，Error Num=16/16
+thermal2_n1024: 240s timeout，停在 [tapa-invoke] after ReadFromDevice before Finish
+```
+
+本次 `e699...` 修复版针对旧失败现象调整了两点：
+
+- bank wrapper 统计 `expected_outputs` / `output_count`，不再早于 tagged output 完全吐出就 `ap_done`；
+- lane wrapper 显式接收 `Owner_id` 和 `Pair_lane`，不再从首 token 推断 tag。
+
 服务器侧建议测试口径：
 
 ```bash
 make cuper-jacobi-build-host \
-  CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build \
+  CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build \
   JACOBI_TOP=CuperSpmvServiceOnly \
   JACOBI_SPMV_ONLY=1 \
   JACOBI_HBM_CHANNELS=16 \
@@ -413,14 +436,14 @@ timeout 240s env \
   DIFF_TOL=1e-1 \
   SPMV_REPEATS=1 \
   LD_LIBRARY_PATH=/home/pyx/.tapa/usr/lib:/opt/xilinx/xrt/lib:$LD_LIBRARY_PATH \
-  ./cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/cuper_jacobi_host \
+  ./cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/cuper_jacobi_host \
   $PWD/data/suitesparse/Schmid/csr/<dataset>
 ```
 
 当前结论：
 
-- 这版已经完成 xclbin 生成并同步到 `395bitstream/`；
-- timing 仍有极小 setup violation，需结合服务器上板结果判断可靠性；
+- 这版已经完成 xclbin 生成并覆盖同步到 `395bitstream/` 同名 SpMV demo 槽；
+- 当前修复版 routed timing clean；
 - 服务器上板 sweep 尚未执行，当前不进入 HTML 性能曲线；
 - 未确认性能提升前，不更新正式 `source.diff`。
 

@@ -178,6 +178,19 @@ Jacobi full graph，也不动原版 `DLC/Cuper` 标准 `Cuper(...)`。
   生成目录，并替换 HLS placeholder；
 - 新增 `verilog/` 目录，包含 RTL 源码、小仿真 testbench 和 Makefile。
 
+2026-06-20 修复版在上一版 owner-bank RTL 基础上又补了两个边界问题：
+
+- `CuperSpmvOnly_RtlOwnerBankAccumulatorOoo` 不再只等 8 条 lane `done` 就拉高
+  `ap_done`，而是同时统计该 owner-bank 应输出的 tagged pair 数，确认输出 token
+  已全部写入 `TaggedScatterWriterOoo` 后才完成；
+- `CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo` 不再从第一条输入 token 推断
+  `owner_id` / `pair_lane`，改由 bank wrapper 显式传入 `Owner_id` 和固定
+  `Pair_lane=0..7`，避免空 lane 或首 token 为 done 时 tag 错误。
+
+这两个修复针对服务器侧旧 UUID `22b0a282-c282-cfaf-e45a-f8bebf4cc644` 的失败现象：
+`thermal2_n16` Finish 返回但输出全 0，`thermal2_n1024` 卡在
+`after ReadFromDevice before Finish`。
+
 这版和前一版 128 owner-lane RTL 的区别：
 
 | 项 | 128 owner-lane RTL | 16 owner-bank RTL |
@@ -198,18 +211,18 @@ Jacobi full graph，也不动原版 `DLC/Cuper` 标准 `Cuper(...)`。
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/CuperSpmvServiceOnly.xclbin
-Total elapsed time: 4h 34m 32s
-UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
-SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
-DATA/KERNEL/HBM clock: 149 / 500 / 450 MHz
-Timing: WNS -0.005 ns, TNS -0.017 ns, setup failing endpoints 9
+Created .../cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 3h 59m 28s
+UUID: e6998763-ba80-b12f-f180-5099ba926c6d
+SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
 ```
 
 当前状态：
 
 - 本机 Verilator 小仿真和 TAPA software smoke 已通过；
-- bitstream 已同步到 `395bitstream/`；
+- bitstream 已覆盖同步到 `395bitstream/` 同名 SpMV demo 槽；
 - 还没有服务器上板性能数据，暂不更新 HTML 曲线；
 - 由于尚未确认性能提升，本轮不更新正式 `source.diff`。
 

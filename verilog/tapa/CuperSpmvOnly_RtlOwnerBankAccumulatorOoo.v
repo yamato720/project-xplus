@@ -164,10 +164,19 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
     reg done_pulse;
     reg [7:0] done_seen;
     reg [2:0] arb_lane;
+    reg [31:0] expected_outputs;
+    reg [31:0] output_count;
 
     wire rst = ~ap_rst_n;
     wire bank_start = ap_start & ~active;
     wire selected_full_n = active & Vector_Y_Tagged_Stream_s_full_n;
+    wire selected_write = active & Vector_Y_Tagged_Stream_s_write;
+    wire [31:0] iteration_time = (Iteration_num == 32'd0) ? 32'd1 : Iteration_num;
+    wire [31:0] num_out_packets = (Row_num + 32'd15) >> 4;
+    wire [31:0] owner_packet_count =
+        (num_out_packets > Owner_id) ?
+            (((num_out_packets - Owner_id) + HBM_CHANNEL_NUM - 1) / HBM_CHANNEL_NUM) :
+            32'd0;
 
     assign lane_done_vec = {lane_done[7], lane_done[6], lane_done[5], lane_done[4],
                             lane_done[3], lane_done[2], lane_done[1], lane_done[0]};
@@ -229,7 +238,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[0]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[0]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[0]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd0)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -252,7 +263,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[1]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[1]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[1]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd1)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -275,7 +288,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[2]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[2]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[2]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd2)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -298,7 +313,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[3]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[3]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[3]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd3)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -321,7 +338,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[4]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[4]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[4]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd4)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -344,7 +363,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[5]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[5]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[5]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd5)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -367,7 +388,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[6]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[6]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[6]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd6)
     );
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo #(
@@ -390,7 +413,9 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
         .Vector_Y_Tagged_Stream_s_din(lane_out_din[7]),
         .Vector_Y_Tagged_Stream_s_full_n(lane_out_full_n[7]),
         .Vector_Y_Tagged_Stream_s_write(lane_out_write[7]),
-        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek)
+        .Vector_Y_Tagged_Stream_peek(Vector_Y_Tagged_Stream_peek),
+        .Owner_id(Owner_id),
+        .Pair_lane(32'd7)
     );
 
     always @(posedge ap_clk) begin
@@ -399,6 +424,8 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
             done_pulse <= 1'b0;
             done_seen <= 8'd0;
             arb_lane <= 3'd0;
+            expected_outputs <= 32'd0;
+            output_count <= 32'd0;
         end else begin
             done_pulse <= 1'b0;
 
@@ -407,6 +434,8 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
                     active <= 1'b1;
                     done_seen <= 8'd0;
                     arb_lane <= 3'd0;
+                    expected_outputs <= owner_packet_count * 32'd8 * iteration_time;
+                    output_count <= 32'd0;
                 end
             end else begin
                 done_seen <= done_seen | lane_done_vec;
@@ -415,7 +444,12 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
                     arb_lane <= arb_lane + 3'd1;
                 end
 
-                if ((done_seen | lane_done_vec) == 8'hff) begin
+                if (selected_write) begin
+                    output_count <= output_count + 32'd1;
+                end
+
+                if (((done_seen | lane_done_vec) == 8'hff) &&
+                    (output_count >= expected_outputs)) begin
                     active <= 1'b0;
                     done_pulse <= 1'b1;
                 end

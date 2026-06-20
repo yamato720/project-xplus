@@ -73,6 +73,13 @@ module tb_tapa_owner_lane_accumulator;
         end
     endfunction
 
+    function automatic [31:0] fbits;
+        input shortreal value;
+        begin
+            fbits = $shortrealtobits(value);
+        end
+    endfunction
+
     task automatic check_output;
         input integer idx;
         input [128:0] got;
@@ -81,8 +88,8 @@ module tb_tapa_owner_lane_accumulator;
         reg [31:0] expect_pong;
         begin
             expect_packet = OWNER_ID + idx * 16;
-            expect_ping = (idx == 0) ? 32'd17 : 32'd11;
-            expect_pong = (idx == 0) ? 32'd100 : 32'd7;
+            expect_ping = (idx == 0) ? fbits(17.0) : fbits(11.0);
+            expect_pong = (idx == 0) ? fbits(100.0) : fbits(7.0);
 
             if (output_packet(got) !== expect_packet ||
                 output_pair(got) !== PAIR_LANE ||
@@ -121,18 +128,20 @@ module tb_tapa_owner_lane_accumulator;
         .Vector_Y_Tagged_Stream_s_din(out_din),
         .Vector_Y_Tagged_Stream_s_full_n(out_full_n),
         .Vector_Y_Tagged_Stream_s_write(out_write),
-        .Vector_Y_Tagged_Stream_peek(129'd0)
+        .Vector_Y_Tagged_Stream_peek(129'd0),
+        .Owner_id(OWNER_ID),
+        .Pair_lane(PAIR_LANE)
     );
 
     always #5 clk = ~clk;
 
     initial begin
-        input_words[0] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd0, 32'd10);
-        input_words[1] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd0, 32'd7);
-        input_words[2] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd1, 32'd100);
-        input_words[3] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd0, 32'd11);
-        input_words[4] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd1, 32'd3);
-        input_words[5] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd1, 32'd4);
+        input_words[0] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd0, fbits(10.0));
+        input_words[1] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd0, fbits(7.0));
+        input_words[2] = pack_scalar(1'b0, OWNER_ID, PAIR_LANE, 32'd1, fbits(100.0));
+        input_words[3] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd0, fbits(11.0));
+        input_words[4] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd1, fbits(3.0));
+        input_words[5] = pack_scalar(1'b0, OWNER_ID + 16, PAIR_LANE, 32'd1, fbits(4.0));
         input_words[6] = pack_scalar(1'b1, OWNER_ID, PAIR_LANE, 32'd0, 32'd0);
     end
 

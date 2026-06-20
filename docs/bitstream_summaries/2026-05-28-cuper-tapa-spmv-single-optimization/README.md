@@ -207,35 +207,41 @@ JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
 构建目录和日志：
 
 ```text
-cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/
-cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/logs/build_hw_tmux.log
+cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/
+cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/logs/build_hw_tmux.log
 ```
 
 版本信息：
 
 ```text
 Kernel: CuperSpmvServiceOnly
-UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
-SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
-DATA/KERNEL/HBM clock: 149 / 500 / 450 MHz
-Timing: WNS -0.005 ns, TNS -0.017 ns, setup failing endpoints 9
+UUID: e6998763-ba80-b12f-f180-5099ba926c6d
+SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
 ```
 
 HBM 映射为：`Matrix_data_0..15 -> HBM[0..15]`，`SpElement_list_ptr -> HBM[16]`，
 `X -> HBM[17]`，`Y_out -> HBM[18]`，`Status -> HBM[30]`，`Metrics -> HBM[31]`。
-最终资源为 CLB LUT `27.22%`、CLB `53.20%`、BRAM Tile `65.48%`、URAM `53.33%`、
-DSP `7.17%`。相比失败的 128 owner-lane RTL 实例方向，16 owner-bank 包装后 routed
-完成，时序只剩 `-0.005 ns` 的极小 setup violation。
+最终资源为 CLB LUT `25.95%`、CLB `52.49%`、BRAM Tile `65.48%`、URAM `53.33%`、
+DSP `7.70%`、Total SLLs `26740`。相比失败的 128 owner-lane RTL 实例方向，
+16 owner-bank 包装后 routed 完成，并且当前修复版 timing clean。
 
 本机验证状态：
 
 - Verilator owner-bank 小仿真通过：`cycles=69`、`real_events=40`、`outputs=16`、
   `cycles_per_event=1.725`；
-- TAPA software smoke 通过 `thermal2_n1024`，`Correctness Verification: Passed`、
-  `Error Num=0`；
-- 硬件 bitstream 已生成并同步到 `395bitstream/`；
+- TAPA software smoke 通过 `thermal2_n16` 和 `thermal2_n1024`，均为
+  `Correctness Verification: Passed`、`Error Num=0`；
+- 硬件 bitstream 已生成并覆盖同步到 `395bitstream/` 同名 SpMV demo 槽；
 - 服务器上板 sweep 尚未执行，因此这版暂不写入 HTML 性能曲线，也不更新正式
   `source.diff`。
+
+该同名 demo 槽上一版 UUID 为 `22b0a282-c282-cfaf-e45a-f8bebf4cc644`，SHA256 为
+`a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4`。服务器侧已测出
+`thermal2_n16` Finish 正常返回但输出全 0，`thermal2_n1024` 卡在 Finish。当前
+`e699...` 修复版针对该边界修正了 bank 输出计数闭合和 lane tag 显式传递；旧失败
+结论只对应旧 UUID。
 
 ## 目标
 

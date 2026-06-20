@@ -34,7 +34,9 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
     Vector_Y_Tagged_Stream_s_din,
     Vector_Y_Tagged_Stream_s_full_n,
     Vector_Y_Tagged_Stream_s_write,
-    Vector_Y_Tagged_Stream_peek
+    Vector_Y_Tagged_Stream_peek,
+    Owner_id,
+    Pair_lane
 );
     parameter integer HBM_CHANNEL_NUM = 16;
     parameter integer MEM_DEPTH = 8192;
@@ -61,6 +63,8 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
     input Vector_Y_Tagged_Stream_s_full_n;
     output Vector_Y_Tagged_Stream_s_write;
     input [128:0] Vector_Y_Tagged_Stream_peek;
+    input [31:0] Owner_id;
+    input [31:0] Pair_lane;
 
     localparam [2:0] ST_IDLE      = 3'd0;
     localparam [2:0] ST_INIT      = 3'd1;
@@ -118,7 +122,6 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
     wire [31:0] input_value = Owner_Lane_Stream_s_dout[128:97];
     wire input_done = Owner_Lane_Stream_s_dout[0];
     wire input_is_pong = (input_scalar_lane != 32'd0);
-    wire [31:0] input_owner_id = input_packet_idx % HBM_CHANNEL_NUM;
     wire [31:0] input_owner_group_full = input_packet_idx / HBM_CHANNEL_NUM;
     wire [ADDR_WIDTH-1:0] input_owner_group =
         input_owner_group_full[ADDR_WIDTH-1:0];
@@ -330,8 +333,8 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
                                              HBM_CHANNEL_NUM - 1) / HBM_CHANNEL_NUM;
                         init_addr <= {ADDR_WIDTH{1'b0}};
                         owner_group <= {ADDR_WIDTH{1'b0}};
-                        owner_id <= 32'd0;
-                        pair_lane <= 32'd0;
+                        owner_id <= Owner_id;
+                        pair_lane <= Pair_lane;
                         meta_valid <= 1'b0;
                         rd_valid <= 1'b0;
                         rd_pending_valid <= 1'b0;
@@ -354,8 +357,6 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
                 ST_CONSUME: begin
                     if (can_accept_input) begin
                         if (!meta_valid) begin
-                            owner_id <= input_owner_id;
-                            pair_lane <= input_pair_lane;
                             meta_valid <= 1'b1;
                         end
 
@@ -407,8 +408,8 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
                             iter_idx <= iter_idx + 32'd1;
                             init_addr <= {ADDR_WIDTH{1'b0}};
                             owner_group <= {ADDR_WIDTH{1'b0}};
-                            owner_id <= 32'd0;
-                            pair_lane <= 32'd0;
+                            owner_id <= Owner_id;
+                            pair_lane <= Pair_lane;
                             meta_valid <= 1'b0;
                             rd_valid <= 1'b0;
                             rd_pending_valid <= 1'b0;
@@ -535,7 +536,8 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
                 pipe[i] <= {dout_WIDTH{1'b0}};
             end
         end else if (ce) begin
-            pipe[0] <= din0 + din1;
+            pipe[0] <= $shortrealtobits($bitstoshortreal(din0) +
+                                        $bitstoshortreal(din1));
             for (i = 1; i < 32; i = i + 1) begin
                 if (i < NUM_STAGE) begin
                     pipe[i] <= pipe[i - 1];

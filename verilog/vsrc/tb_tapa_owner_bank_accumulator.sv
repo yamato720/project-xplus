@@ -78,12 +78,19 @@ module tb_tapa_owner_bank_accumulator;
         end
     endfunction
 
+    function automatic [31:0] fbits;
+        input shortreal value;
+        begin
+            fbits = $shortrealtobits(value);
+        end
+    endfunction
+
     function automatic [31:0] expect_ping;
         input integer pair_lane;
         input integer group;
         begin
-            expect_ping = (group == 0) ? (32'd11 + pair_lane) :
-                                         (32'd30 + pair_lane);
+            expect_ping = (group == 0) ? fbits(11.0 + pair_lane) :
+                                         fbits(30.0 + pair_lane);
         end
     endfunction
 
@@ -91,8 +98,8 @@ module tb_tapa_owner_bank_accumulator;
         input integer pair_lane;
         input integer group;
         begin
-            expect_pong = (group == 0) ? (32'd20 + pair_lane) :
-                                         (32'd42 + pair_lane);
+            expect_pong = (group == 0) ? fbits(20.0 + pair_lane) :
+                                         fbits(42.0 + pair_lane);
         end
     endfunction
 
@@ -224,15 +231,15 @@ module tb_tapa_owner_bank_accumulator;
             seen[lane_init][1] = 0;
 
             input_words[lane_init][0] =
-                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd0, 32'd10 + lane_init);
+                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd0, fbits(10.0 + lane_init));
             input_words[lane_init][1] =
-                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd0, 32'd1);
+                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd0, fbits(1.0));
             input_words[lane_init][2] =
-                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd1, 32'd20 + lane_init);
+                pack_scalar(1'b0, OWNER_ID, lane_init, 32'd1, fbits(20.0 + lane_init));
             input_words[lane_init][3] =
-                pack_scalar(1'b0, OWNER_ID + 16, lane_init, 32'd0, 32'd30 + lane_init);
+                pack_scalar(1'b0, OWNER_ID + 16, lane_init, 32'd0, fbits(30.0 + lane_init));
             input_words[lane_init][4] =
-                pack_scalar(1'b0, OWNER_ID + 16, lane_init, 32'd1, 32'd40 + lane_init + 32'd2);
+                pack_scalar(1'b0, OWNER_ID + 16, lane_init, 32'd1, fbits(42.0 + lane_init));
             input_words[lane_init][5] =
                 pack_scalar(1'b1, OWNER_ID, lane_init, 32'd0, 32'd0);
         end
