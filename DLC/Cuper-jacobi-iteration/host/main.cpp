@@ -919,6 +919,21 @@ int RunSpmvServiceOnly(const std::string& bitstream,
 
     cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] "
          << "Run Cuper SpMV service only on FPGA/TAPA...";
+#ifdef JACOBI_SPMV_LANE_STATIC_REAL
+    double kernel_time = InvokeCuperSpmvServiceOnly(
+                                      bitstream,
+                                      tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
+                                      tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
+                                      tapa::read_only_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
+                                      tapa::read_write_mmap<float>(Y_fpga_data),
+                                      tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
+                                      tapa::read_write_mmap<double>(Metrics_fpga_data),
+                                      SpElement_list_ptr_size,
+                                      SpElement_list_ptr_max_len,
+                                      m,
+                                      n,
+                                      spmv_repeats);
+#else
     double kernel_time = InvokeCuperSpmvServiceOnly(
                                       bitstream,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
@@ -932,6 +947,7 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       m,
                                       n,
                                       spmv_repeats);
+#endif
     cout << " \t\tDone" << endl;
     kernel_time *= 1e-9;
     cout << "[" << setw(18) << "SpMV On FPGA" << "] Execution Time: \t"

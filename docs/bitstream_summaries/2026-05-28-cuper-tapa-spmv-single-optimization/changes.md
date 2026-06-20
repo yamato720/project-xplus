@@ -158,6 +158,61 @@ host packer 和长度协议，就已经接近理论下限。
   的 `1.29158 ms` / `13.2865 GFLOP/s`。因此不建议晋级，也不更新正式
   `source.diff`。
 
+## 2026-06-20：CuperSpmvServiceOnly RTL owner-bank accumulator 实验
+
+本次继续沿着 `lane-static real` 路线，只改 SpMV-only 后端 accumulator，不动
+Jacobi full graph，也不动原版 `DLC/Cuper` 标准 `Cuper(...)`。
+
+核心改动：
+
+- 新增 `JACOBI_SPMV_OOO_ACCUMULATE_RTL=1` 开关，和
+  `JACOBI_SPMV_OOO_ACCUMULATE=1`、`JACOBI_SPMV_LANE_STATIC_REAL=1` 配套使用；
+- `CuperSpmvServiceOnly` 的 OOO 输出流从 128 条 owner-lane stream 收缩为
+  16 条 owner-bank stream；
+- 新增 `CuperSpmvOnly_RtlOwnerBankAccumulatorOoo` TAPA 自定义 RTL wrapper，每个
+  owner bank 内部接 8 条 pair-lane 输入，并复用 RTL lane accumulator 做累加；
+- `TaggedScatterWriterOoo` 改为轮询 16 条 owner-bank 输出，而不是 128 条
+  owner-lane 输出；
+- `build_xo_u55c.sh` 在 RTL 开关打开时，把
+  `verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v` 和支持文件复制进 TAPA
+  生成目录，并替换 HLS placeholder；
+- 新增 `verilog/` 目录，包含 RTL 源码、小仿真 testbench 和 Makefile。
+
+这版和前一版 128 owner-lane RTL 的区别：
+
+| 项 | 128 owner-lane RTL | 16 owner-bank RTL |
+| --- | --- | --- |
+| RTL 实例数量 | owner * lane，约 128 个 | owner，16 个 wrapper |
+| 输出 stream | 128 条 | 16 条 |
+| 输出仲裁 | scatter writer 面对 128 输入 | bank 内 round-robin，再由 scatter writer 面对 16 输入 |
+| 资源压力 | BRAM 和布线压力过高，硬件 link 失败 | routed xclbin 已生成 |
+| 乱序强度 | owner-lane 粒度 | owner-bank 内 8 lane 粒度 |
+
+已生成 demo bitstream：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin
+```
+
+构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 4h 34m 32s
+UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
+SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
+DATA/KERNEL/HBM clock: 149 / 500 / 450 MHz
+Timing: WNS -0.005 ns, TNS -0.017 ns, setup failing endpoints 9
+```
+
+当前状态：
+
+- 本机 Verilator 小仿真和 TAPA software smoke 已通过；
+- bitstream 已同步到 `395bitstream/`；
+- 还没有服务器上板性能数据，暂不更新 HTML 曲线；
+- 由于尚未确认性能提升，本轮不更新正式 `source.diff`。
+
 ## 2026-05-28：CuperPcgSpmv 抽出版
 
 本轮新增内容：

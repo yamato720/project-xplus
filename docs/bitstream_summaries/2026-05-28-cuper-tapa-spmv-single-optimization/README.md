@@ -170,6 +170,73 @@ logs/spmv_lanereal16_hw_sweep_20260618_233431/
 II=`2`，上板结果也支持后端 accumulator 吞吐是主要瓶颈。因此这版不建议晋级，也不
 更新正式 `source.diff`。
 
+## 2026-06-20 补充：SpMV-only RTL owner-bank 乱序 accumulator demo
+
+本轮新增一个 `CuperSpmvServiceOnly` demo artifact，用于验证把 lane-static real
+路径后的 HLS accumulator 替换为自定义 RTL owner-bank accumulator 后，资源和时序是否
+能够支撑完整 bitstream。它仍属于 `cuper-tapa-spmv` demo 候选，源码入口仍在：
+
+```text
+DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp
+```
+
+顶层为：
+
+```text
+CuperSpmvServiceOnly
+```
+
+这版只计算 `Y=A*X`，不拆 `A=D+R`，不取负 `X`，也不执行 Jacobi update。宏组合为：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_LANE_STATIC_REAL=1
+JACOBI_SPMV_OOO_ACCUMULATE=1
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+```
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin.info
+```
+
+构建目录和日志：
+
+```text
+cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/
+cuper-tapa-spmv-ooo-bank-rtl-hw-150m-20260619-build/logs/build_hw_tmux.log
+```
+
+版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: 22b0a282-c282-cfaf-e45a-f8bebf4cc644
+SHA256: a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4
+DATA/KERNEL/HBM clock: 149 / 500 / 450 MHz
+Timing: WNS -0.005 ns, TNS -0.017 ns, setup failing endpoints 9
+```
+
+HBM 映射为：`Matrix_data_0..15 -> HBM[0..15]`，`SpElement_list_ptr -> HBM[16]`，
+`X -> HBM[17]`，`Y_out -> HBM[18]`，`Status -> HBM[30]`，`Metrics -> HBM[31]`。
+最终资源为 CLB LUT `27.22%`、CLB `53.20%`、BRAM Tile `65.48%`、URAM `53.33%`、
+DSP `7.17%`。相比失败的 128 owner-lane RTL 实例方向，16 owner-bank 包装后 routed
+完成，时序只剩 `-0.005 ns` 的极小 setup violation。
+
+本机验证状态：
+
+- Verilator owner-bank 小仿真通过：`cycles=69`、`real_events=40`、`outputs=16`、
+  `cycles_per_event=1.725`；
+- TAPA software smoke 通过 `thermal2_n1024`，`Correctness Verification: Passed`、
+  `Error Num=0`；
+- 硬件 bitstream 已生成并同步到 `395bitstream/`；
+- 服务器上板 sweep 尚未执行，因此这版暂不写入 HTML 性能曲线，也不更新正式
+  `source.diff`。
+
 ## 目标
 
 本目录当前负责 **single SpMV demo 与 full-PCG service/control 的拆分边界**，

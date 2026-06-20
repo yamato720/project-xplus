@@ -154,7 +154,11 @@ void CuperJacobiIteration(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           tapa::mmaps<ap_uint<512>, HBM_CHANNEL_NUM> Matrix_data,
                           tapa::mmap<float_v16> X,
+#ifdef JACOBI_SPMV_LANE_STATIC_REAL
+                          tapa::mmap<VALUE_TYPE> Y_out,
+#else
                           tapa::mmap<float_v16> Y_out,
+#endif
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
                           const INDEX_TYPE Batch_num,

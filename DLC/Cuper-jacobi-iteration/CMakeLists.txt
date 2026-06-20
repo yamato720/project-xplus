@@ -154,11 +154,30 @@ else()
     message(STATUS "Cuper SpMV-only per-PE compact packing is disabled")
 endif()
 
-if(DEFINED ENV{JACOBI_SPMV_LANE_STATIC_REAL} AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "0")
+if((DEFINED ENV{JACOBI_SPMV_LANE_STATIC_REAL} AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_LANE_STATIC_REAL}" STREQUAL "0") OR
+   (DEFINED ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL} AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "0"))
     target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_SPMV_LANE_STATIC_REAL=1)
     message(STATUS "Cuper SpMV-only lane-static real packing is ENABLED")
 else()
     message(STATUS "Cuper SpMV-only lane-static real packing is disabled")
+endif()
+
+if((DEFINED ENV{JACOBI_SPMV_OOO_ACCUMULATE} AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE}" STREQUAL "0") OR
+   (DEFINED ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL} AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "0"))
+    target_compile_definitions(cuper_jacobi_host PUBLIC JACOBI_SPMV_OOO_ACCUMULATE=1)
+    message(STATUS "Cuper SpMV-only out-of-order accumulator is ENABLED")
+else()
+    message(STATUS "Cuper SpMV-only out-of-order accumulator is disabled")
+endif()
+
+if(DEFINED ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL} AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "" AND NOT "$ENV{JACOBI_SPMV_OOO_ACCUMULATE_RTL}" STREQUAL "0")
+    target_compile_definitions(cuper_jacobi_host PUBLIC
+        JACOBI_SPMV_LANE_STATIC_REAL=1
+        JACOBI_SPMV_OOO_ACCUMULATE=1
+        JACOBI_SPMV_OOO_ACCUMULATE_RTL=1)
+    message(STATUS "Cuper SpMV-only RTL owner-lane accumulator is ENABLED")
+else()
+    message(STATUS "Cuper SpMV-only RTL owner-lane accumulator is disabled")
 endif()
 
 # -----------------------------------------------------------------------------
