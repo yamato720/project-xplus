@@ -60,7 +60,12 @@ constexpr INDEX_TYPE ROW_HBM_NUM            = 4;
 // 矩阵按 64 x 64 的 slice 块归类，再继续映射到 PE/HBM。
 constexpr INDEX_TYPE Slice_SIZE             = HBM_CHANNEL_NUM * ROW_HBM_NUM;
 constexpr INDEX_TYPE BATCH_SIZE             = 8192 / Slice_SIZE;
+#ifndef JACOBI_SPMV_ACC_WINDOW
 constexpr INDEX_TYPE WINDOWS                = 10;
+#else
+constexpr INDEX_TYPE WINDOWS                = JACOBI_SPMV_ACC_WINDOW;
+#endif
+static_assert(WINDOWS > 0, "JACOBI_SPMV_ACC_WINDOW must be a positive integer.");
 constexpr INDEX_TYPE X_PARTITION_FACTOR     = 8;
 constexpr INDEX_TYPE URAM_DEPTH             = (48 / HBM_CHANNEL_NUM) * 4096 / 2;
 // TAPA stream 模板参数里的 FIFO 深度，当前值为 2。

@@ -16,7 +16,7 @@
 enum {
   kPeNum = 8,
   kRowHbmNum = 4,
-  kWindow = 10,
+  kDefaultWindow = 10,
 };
 
 typedef struct {
@@ -52,6 +52,7 @@ typedef struct {
   int dump_batch;
   int dump_beats;
   int csv;
+  int window;
 } Options;
 
 typedef struct {
@@ -355,7 +356,7 @@ static void print_min_max_avg(const char* label, const size_t* data, int n) {
 }
 
 static void print_csv_header(void) {
-  printf("dataset,hbm,m,n,drop_diag,real_nnz,slice_size,batch_size,slice_width,"
+  printf("dataset,hbm,m,n,drop_diag,window,real_nnz,slice_size,batch_size,slice_width,"
          "batch_num,matrix_len,read_beats,read_slots,density,padding_slots,"
          "reorder_holes,batch_pad,channel_real_min,channel_real_max,"
          "pe_real_min,pe_real_max,channel_dyn_read_beats,"
@@ -506,7 +507,7 @@ static void profile_one_hbm(const Meta* meta,
         capture = dump_slots + (size_t)pe * (size_t)opt->dump_beats;
       }
       const size_t sched = simulate_bucket(
-          b, meta->m, num_pe, kWindow,
+          b, meta->m, num_pe, opt->window,
           (capture ? (size_t)opt->dump_beats : 0u), capture);
       if (sched > max_len) max_len = sched;
       const int channel = pe / kPeNum;
@@ -737,8 +738,8 @@ static void profile_one_hbm(const Meta* meta,
   }
 
   if (opt->csv) {
-    printf("%s,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu\n",
-           dataset, hbm, meta->m, meta->n, opt->drop_diag, real_nnz,
+    printf("%s,%d,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu\n",
+           dataset, hbm, meta->m, meta->n, opt->drop_diag, opt->window, real_nnz,
            slice_size, batch_size, slice_width, batch_num, matrix_len,
            read_beats, read_slots, density, padding_slots, reorder_holes,
            batch_pad, channel_real_min, channel_real_max, pe_real_min,
@@ -796,8 +797,9 @@ static void profile_one_hbm(const Meta* meta,
            balanced_compact_stream_channel_beats);
   } else {
     printf("\nHBM=%d\n", hbm);
-    printf("  slice_size=%d batch_size=%d slice_width=%d col_slices=%d batch_num=%d num_pe=%d\n",
-           slice_size, batch_size, slice_width, num_col_slices, batch_num, num_pe);
+    printf("  slice_size=%d batch_size=%d slice_width=%d col_slices=%d batch_num=%d num_pe=%d window=%d\n",
+           slice_size, batch_size, slice_width, num_col_slices, batch_num, num_pe,
+           opt->window);
     printf("  input_nnz=%zu diag_removed=%zu profiled_nnz=%zu\n",
            meta->nnz, diag_removed, real_nnz);
     printf("  matrix_len=%zu read_beats=%zu read_slots=%zu density=%.2f%%\n",
@@ -945,6 +947,7 @@ static void usage(const char* argv0) {
           "Options:\n"
           "  --drop-diag           profile Jacobi R = A - D packing\n"
           "  --hbm LIST            comma-separated HBM counts, default 16,24,32\n"
+          "  --window N            accumulator scheduling window, default 10\n"
           "  --top-batches N       print N worst padding batches, default 8\n"
           "  --dump-batch N        dump packed slots for one batch\n"
           "  --dump-beats N        beats per HBM for dump, default 4\n"
@@ -989,6 +992,7 @@ static Options default_options(void) {
   opt.top_batches = 8;
   opt.dump_batch = -1;
   opt.dump_beats = 4;
+  opt.window = kDefaultWindow;
   return opt;
 }
 
@@ -1012,6 +1016,10 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--hbm") == 0) {
       if (++i >= argc) die("--hbm needs a value");
       parse_hbm_list(argv[i], &opt);
+    } else if (strcmp(argv[i], "--window") == 0) {
+      if (++i >= argc || !parse_int(argv[i], &opt.window) || opt.window <= 0) {
+        die("--window needs a positive integer");
+      }
     } else if (strcmp(argv[i], "--top-batches") == 0) {
       if (++i >= argc || !parse_int(argv[i], &opt.top_batches)) {
         die("--top-batches needs an integer");

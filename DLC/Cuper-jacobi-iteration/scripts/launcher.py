@@ -127,6 +127,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 *(["export JACOBI_TOP=" + shell_quote(os.environ["JACOBI_TOP"])] if os.environ.get("JACOBI_TOP") else []),
                 *(["export JACOBI_SPMV_ONLY=" + shell_quote(os.environ["JACOBI_SPMV_ONLY"])] if os.environ.get("JACOBI_SPMV_ONLY") else []),
                 *(["export JACOBI_SPMV_STRIP_PADDING=1"] if os.environ.get("JACOBI_SPMV_STRIP_PADDING") not in {None, "", "0"} else []),
+                *(["export JACOBI_SPMV_ACC_WINDOW=" + shell_quote(os.environ["JACOBI_SPMV_ACC_WINDOW"])] if os.environ.get("JACOBI_SPMV_ACC_WINDOW") else []),
                 *(["export JACOBI_SPMV_COMPACT_PE=1"] if os.environ.get("JACOBI_SPMV_COMPACT_PE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_LANE_STATIC_REAL=1"] if os.environ.get("JACOBI_SPMV_LANE_STATIC_REAL") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE") not in {None, "", "0"} else []),

@@ -91,6 +91,14 @@ if [[ "${JACOBI_SPMV_STRIP_PADDING:-0}" != "0" && "${JACOBI_SPMV_STRIP_PADDING:-
   cflags+=("-DJACOBI_SPMV_STRIP_PADDING=1")
 fi
 
+if [[ "${JACOBI_SPMV_ACC_WINDOW:-}" != "" ]]; then
+  if [[ ! "$JACOBI_SPMV_ACC_WINDOW" =~ ^[1-9][0-9]*$ ]]; then
+    echo "JACOBI_SPMV_ACC_WINDOW must be a positive integer; got '$JACOBI_SPMV_ACC_WINDOW'." >&2
+    exit 1
+  fi
+  cflags+=("-DJACOBI_SPMV_ACC_WINDOW=$JACOBI_SPMV_ACC_WINDOW")
+fi
+
 if [[ "${JACOBI_SPMV_COMPACT_PE:-0}" != "0" && "${JACOBI_SPMV_COMPACT_PE:-}" != "" ]]; then
   cflags+=("-DJACOBI_SPMV_COMPACT_PE=1")
 fi
@@ -138,8 +146,12 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
 
   custom_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
   support_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
+  fadd_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+  fadd_ip_tcl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
   generated_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
   generated_support_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_support.vh"
+  generated_fadd_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+  generated_fadd_ip_tcl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
   pack_cmd=(
     tapa -w "$WORK_DIR" pack
     -o "$OUTPUT_XO"
@@ -163,14 +175,26 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
     echo "Missing custom RTL support file: $support_rtl" >&2
     exit 1
   fi
+  if [[ ! -f "$fadd_rtl" ]]; then
+    echo "Missing custom RTL fadd wrapper: $fadd_rtl" >&2
+    exit 1
+  fi
+  if [[ ! -f "$fadd_ip_tcl" ]]; then
+    echo "Missing custom RTL fadd IP tcl: $fadd_ip_tcl" >&2
+    exit 1
+  fi
   if [[ ! -f "$generated_rtl" ]]; then
     echo "TAPA synth did not generate expected RTL wrapper: $generated_rtl" >&2
     exit 1
   fi
   cp "$custom_rtl" "$generated_rtl"
   cp "$support_rtl" "$generated_support_rtl"
+  cp "$fadd_rtl" "$generated_fadd_rtl"
+  cp "$fadd_ip_tcl" "$generated_fadd_ip_tcl"
   echo "Replaced generated RTL wrapper with custom RTL: $generated_rtl"
   echo "Copied owner-lane RTL support module: $generated_support_rtl"
+  echo "Copied owner-bank fadd wrapper: $generated_fadd_rtl"
+  echo "Copied owner-bank fadd IP tcl: $generated_fadd_ip_tcl"
 
   printf 'Running pack:'
   printf ' %q' "${pack_cmd[@]}"

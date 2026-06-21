@@ -11,9 +11,10 @@
 `ifdef VERILATOR
 `include "CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
 `else
-`ifdef CUPER_SPMV_ONLY_EXTERNAL_FADD_WRAPPER
-`include "CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+`ifndef CUPER_SPMV_ONLY_EXTERNAL_FADD_WRAPPER
+`define CUPER_SPMV_ONLY_EXTERNAL_FADD_WRAPPER
 `endif
+`include "CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
 `include "CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_support.vh"
 `endif
 

@@ -603,7 +603,7 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
                                        SparseSlice &sliceMatrix,
                                        vector<vector<SpElement> > &SpElement_list_pes,
                                        vector<INDEX_TYPE> &SpElement_list_ptr,
-                                       const INDEX_TYPE WINDOWS = 10
+                                       const INDEX_TYPE acc_window = WINDOWS
                                       ) {
 
     // 把 SparseSlice 转成“按物理 PE 分桶”的 SpElement 列表。
@@ -656,7 +656,13 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
             INDEX_TYPE base_col_index = i * BATCH_SIZE * Slice_SIZE;
             // Reordering 会把全局列号转成当前 batch 的局部列号，并把全局行号
             // 转成硬件 accumulator 使用的内部 row 编码。
-            Reordering(temp_SpElement_list_pes[p], SpElement_list_pes[p], base_col_index, i_start, NUM_ROW, NUM_PE, WINDOWS);
+            Reordering(temp_SpElement_list_pes[p],
+                       SpElement_list_pes[p],
+                       base_col_index,
+                       i_start,
+                       NUM_ROW,
+                       NUM_PE,
+                       acc_window);
         }
 
         // 同一个 batch 的所有 PE 列表必须补齐到相同长度，这样后面能按

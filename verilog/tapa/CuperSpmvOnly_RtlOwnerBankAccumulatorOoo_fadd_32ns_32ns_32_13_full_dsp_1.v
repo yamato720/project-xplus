@@ -1,7 +1,6 @@
 `timescale 1ns/1ps
 
-`ifndef CUPER_SPMV_ONLY_FADD_IP_INCLUDED
-`define CUPER_SPMV_ONLY_FADD_IP_INCLUDED
+`ifdef CUPER_SPMV_ONLY_INCLUDE_FADD_IP_SIM
 `include "CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.v"
 `endif
 
