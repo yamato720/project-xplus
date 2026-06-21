@@ -79,6 +79,22 @@ static constexpr INDEX_TYPE kJacobiTracePackWriter =
 static constexpr INDEX_TYPE kJacobiTraceHbmWriter = kJacobiTracePackWriter + 1;
 static constexpr INDEX_TYPE kJacobiTraceSourceMax = kJacobiTraceHbmWriter;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
+static constexpr INDEX_TYPE kSpmvOnlyProgressMagic = 0x53504d56;  // "SPMV"
+
+const char* SpmvOnlyProgressStageName(const INDEX_TYPE stage) {
+    switch (stage) {
+    case 1: return "entry";
+    case 2: return "ptr_lengths";
+    case 3: return "ptr_done";
+    case 10: return "scatter_start";
+    case 11: return "scatter_first_tag";
+    case 12: return "scatter_first_write";
+    case 13: return "scatter_first_resp";
+    case 14: return "scatter_done";
+    case 15: return "final";
+    default: return "unknown";
+    }
+}
 
 uint32_t FloatBits(const VALUE_TYPE value) {
     uint32_t bits = 0;
@@ -325,6 +341,41 @@ void PrintSpmvOnlyPrefinishSnapshot(const char* label,
         cout << metrics_data[index];
     }
     cout << endl;
+
+    cout << "[" << label << "] Status[8..15]=";
+    for (INDEX_TYPE index = 8;
+         index < 16 && index < static_cast<INDEX_TYPE>(status_data.size());
+         ++index) {
+        if (index != 8) {
+            cout << ",";
+        }
+        cout << status_data[index];
+    }
+    cout << " Metrics[8..15]=";
+    for (INDEX_TYPE index = 8;
+         index < 16 && index < static_cast<INDEX_TYPE>(metrics_data.size());
+         ++index) {
+        if (index != 8) {
+            cout << ",";
+        }
+        cout << metrics_data[index];
+    }
+    cout << endl;
+
+    if (status_data.size() >= 16) {
+        cout << "[" << label << "] progress_magic="
+             << status_data[8]
+             << " valid=" << (status_data[8] == kSpmvOnlyProgressMagic ? 1 : 0)
+             << " stage=" << SpmvOnlyProgressStageName(status_data[9])
+             << "(" << status_data[9] << ")"
+             << " value0=" << status_data[10]
+             << " value1=" << status_data[11]
+             << " value2=" << status_data[12]
+             << " event_count=" << status_data[13]
+             << " hbm_channels=" << status_data[14]
+             << " slice_width=" << status_data[15]
+             << endl;
+    }
 
     cout << "[" << label << "] Y[0.." << (compare_count == 0 ? 0 : compare_count - 1)
          << "]=";

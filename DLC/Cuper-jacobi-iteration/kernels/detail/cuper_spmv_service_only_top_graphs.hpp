@@ -10,6 +10,166 @@
 
 #include "cuper_spmv_tasks.hpp"
 
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressMagic = 0x53504d56;  // "SPMV"
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressEntry = 1;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressPtrLengths = 2;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressPtrDone = 3;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterStart = 10;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstTag = 11;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstWrite = 12;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstResp = 13;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterDone = 14;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressFinal = 15;
+
+struct CuperSpmvOnlyProgressEvent {
+    INDEX_TYPE stage;
+    INDEX_TYPE value0;
+    INDEX_TYPE value1;
+    INDEX_TYPE value2;
+};
+
+inline void CuperSpmvOnly_WriteStatus(tapa::async_mmap<INDEX_TYPE> &Status,
+                                      const INDEX_TYPE iterations_done,
+                                      const INDEX_TYPE row_num);
+
+inline void CuperSpmvOnly_WriteMetrics(tapa::async_mmap<double> &Metrics,
+                                       const INDEX_TYPE batch_num,
+                                       const INDEX_TYPE matrix_len,
+                                       const INDEX_TYPE row_num,
+                                       const INDEX_TYPE column_num,
+                                       const INDEX_TYPE iterations_done);
+
+inline CuperSpmvOnlyProgressEvent CuperSpmvOnly_MakeProgressEvent(
+    const INDEX_TYPE stage,
+    const INDEX_TYPE value0,
+    const INDEX_TYPE value1,
+    const INDEX_TYPE value2) {
+#pragma HLS inline
+    CuperSpmvOnlyProgressEvent event;
+    event.stage = stage;
+    event.value0 = value0;
+    event.value1 = value1;
+    event.value2 = value2;
+    return event;
+}
+
+inline void CuperSpmvOnly_WriteProgressSnapshot(
+    tapa::async_mmap<INDEX_TYPE> &Status,
+    tapa::async_mmap<double> &Metrics,
+    const CuperSpmvOnlyProgressEvent event,
+    const INDEX_TYPE event_count) {
+#pragma HLS inline
+    Status.write_addr.write(8);
+    Status.write_data.write(kCuperSpmvOnlyProgressMagic);
+    Status.write_addr.write(9);
+    Status.write_data.write(event.stage);
+    Status.write_addr.write(10);
+    Status.write_data.write(event.value0);
+    Status.write_addr.write(11);
+    Status.write_data.write(event.value1);
+    Status.write_addr.write(12);
+    Status.write_data.write(event.value2);
+    Status.write_addr.write(13);
+    Status.write_data.write(event_count);
+    Status.write_addr.write(14);
+    Status.write_data.write(HBM_CHANNEL_NUM);
+    Status.write_addr.write(15);
+    Status.write_data.write(Slice_WIDTH);
+
+write_spmv_progress_status_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 8;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Status.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+
+    Metrics.write_addr.write(8);
+    Metrics.write_data.write(static_cast<double>(kCuperSpmvOnlyProgressMagic));
+    Metrics.write_addr.write(9);
+    Metrics.write_data.write(static_cast<double>(event.stage));
+    Metrics.write_addr.write(10);
+    Metrics.write_data.write(static_cast<double>(event.value0));
+    Metrics.write_addr.write(11);
+    Metrics.write_data.write(static_cast<double>(event.value1));
+    Metrics.write_addr.write(12);
+    Metrics.write_data.write(static_cast<double>(event.value2));
+    Metrics.write_addr.write(13);
+    Metrics.write_data.write(static_cast<double>(event_count));
+    Metrics.write_addr.write(14);
+    Metrics.write_data.write(static_cast<double>(HBM_CHANNEL_NUM));
+    Metrics.write_addr.write(15);
+    Metrics.write_data.write(static_cast<double>(Slice_WIDTH));
+
+write_spmv_progress_metrics_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 8;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Metrics.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+
+void CuperSpmvOnly_ProgressWriter(
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Matrix_len,
+    const INDEX_TYPE Row_num,
+    const INDEX_TYPE Column_num,
+    const INDEX_TYPE Iteration_num,
+    tapa::istream<CuperSpmvOnlyProgressEvent> &Ptr_Progress_in,
+    tapa::istream<CuperSpmvOnlyProgressEvent> &Writer_Progress_in,
+    tapa::async_mmap<INDEX_TYPE> &Status,
+    tapa::async_mmap<double> &Metrics) {
+    // Status/Metrics 的唯一 writer。
+    //
+    // 其他 task 只发 progress event，避免多个 task 同时写同一个 mmap 端口。
+    // 这些槽位会被 host 在 Finish() 前主动 sync 读取，用来判断板上卡住时
+    // kernel 到达了哪一段。
+    INDEX_TYPE event_count = 1;
+    CuperSpmvOnly_WriteProgressSnapshot(
+        Status,
+        Metrics,
+        CuperSpmvOnly_MakeProgressEvent(kCuperSpmvOnlyProgressEntry,
+                                        Row_num,
+                                        Batch_num,
+                                        Matrix_len),
+        event_count);
+
+progress_loop:
+    for (bool done = false; !done;) {
+        CuperSpmvOnlyProgressEvent event;
+        bool got_event = false;
+        if (!Writer_Progress_in.empty()) {
+            Writer_Progress_in.try_read(event);
+            got_event = true;
+        } else if (!Ptr_Progress_in.empty()) {
+            Ptr_Progress_in.try_read(event);
+            got_event = true;
+        }
+
+        if (got_event) {
+            ++event_count;
+            CuperSpmvOnly_WriteProgressSnapshot(Status, Metrics, event, event_count);
+            done = (event.stage == kCuperSpmvOnlyProgressFinal);
+        }
+    }
+
+    CuperSpmvOnly_WriteStatus(Status, Iteration_num == 0 ? 1 : Iteration_num, Row_num);
+    CuperSpmvOnly_WriteMetrics(Metrics,
+                               Batch_num,
+                               Matrix_len,
+                               Row_num,
+                               Column_num,
+                               Iteration_num == 0 ? 1 : Iteration_num);
+}
+
+void CuperSpmvOnly_NullProgressSource(
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
+    (void)Progress_out;
+}
+
 inline void CuperSpmvOnly_WriteStatus(tapa::async_mmap<INDEX_TYPE> &Status,
                                       const INDEX_TYPE iterations_done,
                                       const INDEX_TYPE row_num) {
@@ -81,7 +241,8 @@ void CuperSpmvOnly_StripPtrLoader(
     const INDEX_TYPE Column_num,
     tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
     tapa::ostream<INDEX_TYPE> &PE_Param,
-    tapa::ostreams<INDEX_TYPE, HBM_CHANNEL_NUM> &Matrix_Len_Stream) {
+    tapa::ostreams<INDEX_TYPE, HBM_CHANNEL_NUM> &Matrix_Len_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
     // 去 padding 版本的 ptr 表格式：
     //   [0, HBM_CHANNEL_NUM)                         : 每路 Matrix_data 总 beat 数
     //   [HBM_CHANNEL_NUM, ...] boundary-major layout : 每个 batch boundary 的每路 HBM 边界
@@ -103,6 +264,12 @@ read_lengths:
             ++i_response;
         }
     }
+
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressPtrLengths,
+        Batch_num,
+        matrix_len[0],
+        matrix_len[HBM_CHANNEL_NUM - 1]));
 
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
 
@@ -139,6 +306,12 @@ iter:
             }
         }
     }
+
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressPtrDone,
+        Row_num,
+        Batch_num,
+        Column_num));
 }
 
 void CuperSpmvOnly_MatrixLoaderStrip(
@@ -1959,8 +2132,7 @@ void CuperSpmvOnly_TaggedScatterWriter(
     const INDEX_TYPE Column_num,
     tapa::istreams<CuperSpmvOnly_TaggedFloatV2, HBM_CHANNEL_NUM> &Vector_Y_Tagged_Stream,
     tapa::async_mmap<VALUE_TYPE> &Y_out,
-    tapa::async_mmap<INDEX_TYPE> &Status,
-    tapa::async_mmap<double> &Metrics) {
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
     // SpMV-only 乱序写回层。
     //
     // 旧后端必须等 8 个 pair lane 齐了才能拼一个 float_v16，并隐含依赖
@@ -1981,6 +2153,15 @@ void CuperSpmvOnly_TaggedScatterWriter(
     bool next_valid = false;
     INDEX_TYPE next_addr = 0;
     VALUE_TYPE next_data = 0.0f;
+    bool first_tag_reported = false;
+    bool first_write_reported = false;
+    bool first_resp_reported = false;
+
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressScatterStart,
+        Row_num,
+        tagged_pairs_total,
+        scalar_writes_total));
 scatter:
     for (INDEX_TYPE pair_count = 0, response_count = 0;
          response_count < scalar_writes_total;) {
@@ -2010,6 +2191,14 @@ scatter:
             next_valid = true;
 
             ++pair_count;
+            if (!first_tag_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstTag,
+                    channel_cursor,
+                    tagged.packet_idx,
+                    tagged.pair_lane));
+                first_tag_reported = true;
+            }
         }
 
         if (pending_valid &&
@@ -2017,12 +2206,28 @@ scatter:
             !Y_out.write_data.full()) {
             Y_out.write_addr.try_write(pending_addr);
             Y_out.write_data.try_write(pending_data);
+            if (!first_write_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstWrite,
+                    pending_addr,
+                    pair_count,
+                    response_count));
+                first_write_reported = true;
+            }
             pending_valid = false;
         }
 
         uint8_t num_responses = 0;
         if (Y_out.write_resp.try_read(num_responses)) {
             response_count += int(num_responses) + 1;
+            if (!first_resp_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstResp,
+                    response_count,
+                    int(num_responses) + 1,
+                    pair_count));
+                first_resp_reported = true;
+            }
         }
 
         ++channel_cursor;
@@ -2031,13 +2236,11 @@ scatter:
         }
     }
 
-    CuperSpmvOnly_WriteStatus(Status, Iteration_time, Row_num);
-    CuperSpmvOnly_WriteMetrics(Metrics,
-                               Batch_num,
-                               Matrix_len,
-                               Row_num,
-                               Column_num,
-                               Iteration_time);
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressFinal,
+        scalar_writes_total,
+        tagged_pairs_total,
+        Iteration_time));
 }
 
 void CuperSpmvOnly_TaggedScatterWriterOoo(
@@ -2048,8 +2251,7 @@ void CuperSpmvOnly_TaggedScatterWriterOoo(
     const INDEX_TYPE Column_num,
     tapa::istreams<CuperSpmvOnly_TaggedFloatV2, HBM_CHANNEL_NUM> &Vector_Y_Tagged_Stream,
     tapa::async_mmap<VALUE_TYPE> &Y_out,
-    tapa::async_mmap<INDEX_TYPE> &Status,
-    tapa::async_mmap<double> &Metrics) {
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
     // OOO owner-bank 写回层。
     //
     // OOO 分支现在每个 output owner 只有一个 bank accumulator。bank 内部仍按
@@ -2070,6 +2272,15 @@ void CuperSpmvOnly_TaggedScatterWriterOoo(
     bool next_valid = false;
     INDEX_TYPE next_addr = 0;
     VALUE_TYPE next_data = 0.0f;
+    bool first_tag_reported = false;
+    bool first_write_reported = false;
+    bool first_resp_reported = false;
+
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressScatterStart,
+        Row_num,
+        tagged_pairs_total,
+        scalar_writes_total));
 scatter:
     for (INDEX_TYPE pair_count = 0, response_count = 0;
          response_count < scalar_writes_total;) {
@@ -2099,6 +2310,14 @@ scatter:
             next_valid = true;
 
             ++pair_count;
+            if (!first_tag_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstTag,
+                    channel_cursor,
+                    tagged.packet_idx,
+                    tagged.pair_lane));
+                first_tag_reported = true;
+            }
         }
 
         if (pending_valid &&
@@ -2106,12 +2325,28 @@ scatter:
             !Y_out.write_data.full()) {
             Y_out.write_addr.try_write(pending_addr);
             Y_out.write_data.try_write(pending_data);
+            if (!first_write_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstWrite,
+                    pending_addr,
+                    pair_count,
+                    response_count));
+                first_write_reported = true;
+            }
             pending_valid = false;
         }
 
         uint8_t num_responses = 0;
         if (Y_out.write_resp.try_read(num_responses)) {
             response_count += int(num_responses) + 1;
+            if (!first_resp_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressScatterFirstResp,
+                    response_count,
+                    int(num_responses) + 1,
+                    pair_count));
+                first_resp_reported = true;
+            }
         }
 
         ++channel_cursor;
@@ -2120,13 +2355,11 @@ scatter:
         }
     }
 
-    CuperSpmvOnly_WriteStatus(Status, Iteration_time, Row_num);
-    CuperSpmvOnly_WriteMetrics(Metrics,
-                               Batch_num,
-                               Matrix_len,
-                               Row_num,
-                               Column_num,
-                               Iteration_time);
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressFinal,
+        scalar_writes_total,
+        tagged_pairs_total,
+        Iteration_time));
 }
 #endif
 
@@ -2137,12 +2370,16 @@ void CuperSpmvOnly_VectorWriter(const INDEX_TYPE Iteration_num,
                                 const INDEX_TYPE Column_num,
                                 tapa::istream<float_v16> &Vector_Y_Stream_Ans,
                                 tapa::async_mmap<float_v16> &Y_out,
-                                tapa::async_mmap<INDEX_TYPE> &Status,
-                                tapa::async_mmap<double> &Metrics) {
+                                tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
     // 和普通 Vector_Writer 一样按地址顺序写 Y_out；不同点是最终等待所有
     // write response 后再写 Status/Metrics，方便上板确认完整 SpMV 是否自然结束。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_ite_Y = Cuper_NumFloatV16Packets(Row_num);
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressScatterStart,
+        Row_num,
+        num_ite_Y,
+        Iteration_time));
 
 iter:
     for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
@@ -2160,23 +2397,35 @@ iter:
                 float_v16 tmpv16;
                 Vector_Y_Stream_Ans.try_read(tmpv16);
                 Y_out.write_data.try_write(tmpv16);
+                if (iter == 0 && i_request == 0) {
+                    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                        kCuperSpmvOnlyProgressScatterFirstWrite,
+                        0,
+                        num_ite_Y,
+                        Iteration_time));
+                }
                 ++i_request;
             }
 
             uint8_t num_responses = 0;
             if (Y_out.write_resp.try_read(num_responses)) {
                 i_response += int(num_responses) + 1;
+                if (iter == 0 && i_response == int(num_responses) + 1) {
+                    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                        kCuperSpmvOnlyProgressScatterFirstResp,
+                        i_response,
+                        int(num_responses) + 1,
+                        num_ite_Y));
+                }
             }
         }
     }
 
-    CuperSpmvOnly_WriteStatus(Status, Iteration_time, Row_num);
-    CuperSpmvOnly_WriteMetrics(Metrics,
-                               Batch_num,
-                               Matrix_len,
-                               Row_num,
-                               Column_num,
-                               Iteration_time);
+    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+        kCuperSpmvOnlyProgressFinal,
+        num_ite_Y,
+        Row_num,
+        Iteration_time));
 }
 
 #define CUPER_SPMV_ONLY_INVOKE_CORE(CORE_ID) \
@@ -2313,8 +2562,20 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     defined(JACOBI_SPMV_LANE_STATIC_REAL)
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2>           Matrix_Len_Stream("Matrix_Len_Stream");
 #endif
+    tapa::stream<CuperSpmvOnlyProgressEvent, 64>             Ptr_Progress_Stream("Ptr_Progress_Stream");
+    tapa::stream<CuperSpmvOnlyProgressEvent, 64>             Writer_Progress_Stream("Writer_Progress_Stream");
 
     tapa::task()
+        .invoke(CuperSpmvOnly_ProgressWriter,
+                Batch_num,
+                Matrix_len,
+                Row_num,
+                Column_num,
+                Iteration_num,
+                Ptr_Progress_Stream,
+                Writer_Progress_Stream,
+                Status,
+                Metrics)
 #if defined(JACOBI_SPMV_STRIP_PADDING) || \
     defined(JACOBI_SPMV_COMPACT_PE) || \
     defined(JACOBI_SPMV_LANE_STATIC_REAL)
@@ -2327,8 +2588,11 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 SpElement_list_ptr,
                 PE_Param[0],
-                Matrix_Len_Stream)
+                Matrix_Len_Stream,
+                Ptr_Progress_Stream)
 #else
+        .invoke(CuperSpmvOnly_NullProgressSource,
+                Ptr_Progress_Stream)
         // 读取 batch 边界表，把 Batch/Row/Iter/Column 和 start/end 发到 Core 链首。
         .invoke(SpElement_list_ptr_Loader,
                 Batch_num,
@@ -2647,8 +2911,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 Vector_Y_Tagged_Stream,
                 Y_out,
-                Status,
-                Metrics)
+                Writer_Progress_Stream)
 #else
         .invoke(CuperSpmvOnly_TaggedScatterWriter,
                 Iteration_num,
@@ -2658,8 +2921,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 Vector_Y_Tagged_Stream,
                 Y_out,
-                Status,
-                Metrics)
+                Writer_Progress_Stream)
 #endif
 #else
 #ifdef JACOBI_SPMV_COMPACT_PE
@@ -2693,8 +2955,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 Vector_Y_Stream_Ans,
                 Y_out,
-                Status,
-                Metrics)
+                Writer_Progress_Stream)
 #endif
     ;
 }
