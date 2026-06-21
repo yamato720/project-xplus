@@ -33,6 +33,7 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
 | `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，服务器侧完整 `thermal2` 已通过；替代 compact16 主报告线，但性能仍慢于 strip16 |
 | `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator latency=12 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank progress 版，fadd RTL/IP Tcl 随 hotpatch 打包，完整 xclbin 已生成并同步，等待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -308,6 +309,43 @@ Vivado floating_point IP/xsim 实测的 12 cycle。服务器上板 sweep 尚未�
 `e6998763-ba80-b12f-f180-5099ba926c6d` 修复了 owner-bank 输出计数闭合和 lane tag
 显式传递，但仍未包含本轮 floating_point latency=12 修复。旧结论只对应旧 UUID，
 不对应当前同步文件。
+
+TAPA Cuper / SpMV-only 16 路 RTL owner-bank progress 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin
+```
+
+这版仍是 `CuperSpmvServiceOnly` 的 single SpMV 实验 artifact。它保留
+`JACOBI_SPMV_LANE_STATIC_REAL=1`、`JACOBI_SPMV_OOO_ACCUMULATE=1` 和
+`JACOBI_SPMV_OOO_ACCUMULATE_RTL=1`，并把 owner-bank fadd wrapper 与对应 Vivado IP
+Tcl 一起放进 hotpatch/pack 流程，避免只替换 bank/lane RTL 时漏掉 floating point IP
+生成脚本。该版未替换 `20260620-ooobank16-demo`，作为 progress 候选单独保留。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin.info
+```
+
+同步版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: a185de61-58e4-663a-3cc2-202fcc526665
+SHA256: de6aead23348eddb023d7b62dea3be56594d74fc4ad87ce41d493d135797f378
+DATA/KERNEL/HBM clock: 142 / 500 / 450 MHz
+Timing: WNS -0.350 ns, TNS -8.524 ns, setup failing endpoints 97
+```
+
+HBM 映射为：`Matrix_data_0..15` 使用 HBM[0..15]，`SpElement_list_ptr` 使用
+HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]，
+`Metrics` 使用 HBM[31]。构建目录为
+`cuper-tapa-spmv-ooobank16-progress-hw-150m-20260621-build/`，构建日志为
+`cuper-tapa-spmv-ooobank16-progress-hw-150m-20260621-build/logs/build_hw_tmux.log`。
+VPL implementation 和 xclbin 封装完成，POST-VPL `0 errors`，v++ link 总耗时
+`4h 44m 52s`。服务器上板 sweep 尚未执行。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为
