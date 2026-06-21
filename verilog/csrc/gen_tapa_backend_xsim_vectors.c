@@ -8,6 +8,8 @@
 enum {
   HBM_CHANNELS = 16,
   PAIR_LANES = 8,
+  SLICE_SIZE = HBM_CHANNELS * 4,
+  BATCH_SIZE = 8192 / SLICE_SIZE,
 };
 
 typedef struct {
@@ -29,6 +31,18 @@ typedef struct {
   size_t size;
   size_t capacity;
 } WordArray;
+
+typedef struct {
+  int col;
+  int row;
+  float value;
+} SpElem;
+
+typedef struct {
+  SpElem *data;
+  size_t size;
+  size_t capacity;
+} SpElemArray;
 
 static void die(const char *message) {
   fprintf(stderr, "%s\n", message);
@@ -152,6 +166,31 @@ static void append_word(WordArray *array, Word130 word) {
   array->data[array->size++] = word;
 }
 
+static void append_sp_elem(SpElemArray *array, SpElem elem) {
+  if (array->size == array->capacity) {
+    size_t next_capacity = array->capacity == 0 ? 16 : array->capacity * 2;
+    SpElem *next = realloc(array->data, next_capacity * sizeof(*array->data));
+    if (next == NULL) {
+      die("allocation failed");
+    }
+    array->data = next;
+    array->capacity = next_capacity;
+  }
+  array->data[array->size++] = elem;
+}
+
+static int compare_sp_elem_col_row(const void *lhs, const void *rhs) {
+  const SpElem *a = (const SpElem *)lhs;
+  const SpElem *b = (const SpElem *)rhs;
+  if (a->col != b->col) {
+    return (a->col < b->col) ? -1 : 1;
+  }
+  if (a->row != b->row) {
+    return (a->row < b->row) ? -1 : 1;
+  }
+  return 0;
+}
+
 static FILE *open_output(const char *path) {
   FILE *file = fopen(path, "w");
   if (file == NULL) {
@@ -181,10 +220,199 @@ static int parse_positive_int(const char *name, const char *value) {
   return (int)parsed;
 }
 
+static uint32_t map_row_to_pe(uint32_t row) {
+  const uint32_t packet_id = row >> 1;
+  const uint32_t group_size = HBM_CHANNELS / PAIR_LANES;
+  const uint32_t checker_id = packet_id % PAIR_LANES;
+  const uint32_t acc_offset = (packet_id / PAIR_LANES) % group_size;
+  const uint32_t pe_in_acc = (packet_id / HBM_CHANNELS) % PAIR_LANES;
+  return (checker_id * group_size + acc_offset) * PAIR_LANES + pe_in_acc;
+}
+
+static uint32_t tagged_packet_index_from_slot(uint32_t source,
+                                              uint32_t local_row_group,
+                                              uint32_t slot_lane) {
+  const uint32_t group_size = HBM_CHANNELS / PAIR_LANES;
+  const uint32_t acc_offset = source % group_size;
+  return local_row_group * HBM_CHANNELS + slot_lane * group_size + acc_offset;
+}
+
+static void append_splitter_done_tokens(WordArray streams[HBM_CHANNELS][PAIR_LANES]) {
+  for (uint32_t source = 0; source < HBM_CHANNELS; ++source) {
+    for (uint32_t lane = 0; lane < PAIR_LANES; ++lane) {
+      const uint32_t packet_idx =
+          tagged_packet_index_from_slot(source, 0, lane);
+      const uint32_t owner = packet_idx % HBM_CHANNELS;
+      const uint32_t pair_lane = source / (HBM_CHANNELS / PAIR_LANES);
+      append_word(&streams[owner][pair_lane],
+                  pack_scalar(1, packet_idx, pair_lane, 0, 0));
+    }
+  }
+}
+
+static void generate_row_order_streams(WordArray streams[HBM_CHANNELS][PAIR_LANES],
+                                       float *expected,
+                                       const IntArray *row_ptr,
+                                       const IntArray *col_idx,
+                                       const DoubleArray *values,
+                                       int rows,
+                                       int nnz,
+                                       int iteration_num) {
+  for (int iter = 0; iter < iteration_num; ++iter) {
+    for (int row = 0; row < rows; ++row) {
+      const int begin = row_ptr->data[row];
+      const int end = row_ptr->data[row + 1];
+      if (begin > end || begin < 0 || end > nnz) {
+        die("row_ptr must be nondecreasing and within nnz");
+      }
+
+      const uint32_t packet_idx = (uint32_t)row >> 4;
+      const uint32_t pair_lane = ((uint32_t)row >> 1) & 7u;
+      const uint32_t scalar_lane = (uint32_t)row & 1u;
+      const uint32_t owner = packet_idx % HBM_CHANNELS;
+
+      for (int offset = begin; offset < end; ++offset) {
+        const int col = col_idx->data[offset];
+        if (col < 0 || col >= rows) {
+          die("column index is outside row range");
+        }
+
+        const float product = (float)values->data[offset];
+        if (iter == 0) {
+          expected[row] += product;
+        }
+        append_word(&streams[owner][pair_lane],
+                    pack_scalar(0,
+                                packet_idx,
+                                pair_lane,
+                                scalar_lane,
+                                float_bits(product)));
+      }
+    }
+
+    for (uint32_t owner = 0; owner < HBM_CHANNELS; ++owner) {
+      for (uint32_t lane = 0; lane < PAIR_LANES; ++lane) {
+        append_word(&streams[owner][lane],
+                    pack_scalar(1, owner, lane, 0, 0));
+      }
+    }
+  }
+}
+
+static void generate_source_order_streams(WordArray streams[HBM_CHANNELS][PAIR_LANES],
+                                          float *expected,
+                                          const IntArray *row_ptr,
+                                          const IntArray *col_idx,
+                                          const DoubleArray *values,
+                                          int rows,
+                                          int nnz,
+                                          int iteration_num) {
+  const int num_pe = HBM_CHANNELS * PAIR_LANES;
+  const int num_col_slices = (rows + SLICE_SIZE - 1) / SLICE_SIZE;
+  const int batch_num = (num_col_slices + BATCH_SIZE - 1) / BATCH_SIZE;
+  SpElemArray lane_lists[HBM_CHANNELS * PAIR_LANES];
+  memset(lane_lists, 0, sizeof(lane_lists));
+
+  for (int iter = 0; iter < iteration_num; ++iter) {
+    for (int batch = 0; batch < batch_num; ++batch) {
+      for (int pe = 0; pe < num_pe; ++pe) {
+        lane_lists[pe].size = 0;
+      }
+
+      const int base_col = batch * BATCH_SIZE * SLICE_SIZE;
+      const int col_begin = base_col;
+      int col_end = (batch + 1) * BATCH_SIZE * SLICE_SIZE;
+      if (col_end > rows) {
+        col_end = rows;
+      }
+
+      for (int row = 0; row < rows; ++row) {
+        const int begin = row_ptr->data[row];
+        const int end = row_ptr->data[row + 1];
+        if (begin > end || begin < 0 || end > nnz) {
+          die("row_ptr must be nondecreasing and within nnz");
+        }
+
+        for (int offset = begin; offset < end; ++offset) {
+          const int col = col_idx->data[offset];
+          if (col < 0 || col >= rows) {
+            die("column index is outside row range");
+          }
+          if (col < col_begin || col >= col_end) {
+            continue;
+          }
+
+          const float product = (float)values->data[offset];
+          if (iter == 0) {
+            expected[row] += product;
+          }
+          const uint32_t pe = map_row_to_pe((uint32_t)row);
+          const uint32_t encoded_row =
+              ((uint32_t)row / (2u * (uint32_t)num_pe)) * 2u +
+              ((uint32_t)row & 1u);
+          SpElem elem;
+          elem.col = col - base_col;
+          elem.row = (int)encoded_row;
+          elem.value = product;
+          append_sp_elem(&lane_lists[pe], elem);
+        }
+      }
+
+      for (int pe = 0; pe < num_pe; ++pe) {
+        if (lane_lists[pe].size != 0) {
+          qsort(lane_lists[pe].data,
+                lane_lists[pe].size,
+                sizeof(lane_lists[pe].data[0]),
+                compare_sp_elem_col_row);
+        }
+      }
+
+      for (uint32_t source = 0; source < HBM_CHANNELS; ++source) {
+        size_t batch_len = 0;
+        for (uint32_t lane = 0; lane < PAIR_LANES; ++lane) {
+          const size_t len = lane_lists[source * PAIR_LANES + lane].size;
+          if (len > batch_len) {
+            batch_len = len;
+          }
+        }
+
+        for (size_t offset = 0; offset < batch_len; ++offset) {
+          for (uint32_t lane = 0; lane < PAIR_LANES; ++lane) {
+            const SpElemArray *list = &lane_lists[source * PAIR_LANES + lane];
+            if (offset >= list->size) {
+              continue;
+            }
+            const SpElem elem = list->data[offset];
+            const uint32_t local_row_group = (uint32_t)elem.row >> 1;
+            const uint32_t scalar_lane = (uint32_t)elem.row & 1u;
+            const uint32_t packet_idx =
+                tagged_packet_index_from_slot(source, local_row_group, lane);
+            const uint32_t owner = packet_idx % HBM_CHANNELS;
+            const uint32_t pair_lane = source / (HBM_CHANNELS / PAIR_LANES);
+            append_word(&streams[owner][pair_lane],
+                        pack_scalar(0,
+                                    packet_idx,
+                                    pair_lane,
+                                    scalar_lane,
+                                    float_bits(elem.value)));
+          }
+        }
+      }
+    }
+
+    append_splitter_done_tokens(streams);
+  }
+
+  for (int pe = 0; pe < num_pe; ++pe) {
+    free(lane_lists[pe].data);
+  }
+}
+
 int main(int argc, char **argv) {
   const char *matrix_dir = NULL;
   const char *out_dir = "build/backend_xsim_vectors";
   int iteration_num = 1;
+  int source_order = 0;
 
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--matrix") == 0 && i + 1 < argc) {
@@ -193,10 +421,12 @@ int main(int argc, char **argv) {
       out_dir = argv[++i];
     } else if (strcmp(argv[i], "--iteration-num") == 0 && i + 1 < argc) {
       iteration_num = parse_positive_int("--iteration-num", argv[++i]);
+    } else if (strcmp(argv[i], "--source-order") == 0) {
+      source_order = 1;
     } else {
       fprintf(stderr,
               "usage: %s --matrix CSR_DIR --out-dir DIR "
-              "[--iteration-num N]\n",
+              "[--iteration-num N] [--source-order]\n",
               argv[0]);
       return 2;
     }
@@ -239,44 +469,29 @@ int main(int argc, char **argv) {
     die("allocation failed");
   }
 
-  for (int iter = 0; iter < iteration_num; ++iter) {
-    for (int row = 0; row < rows; ++row) {
-      const int begin = row_ptr.data[row];
-      const int end = row_ptr.data[row + 1];
-      if (begin > end || begin < 0 || end > nnz) {
-        die("row_ptr must be nondecreasing and within nnz");
-      }
-
-      const uint32_t packet_idx = (uint32_t)row >> 4;
-      const uint32_t pair_lane = ((uint32_t)row >> 1) & 7u;
-      const uint32_t scalar_lane = (uint32_t)row & 1u;
-      const uint32_t owner = packet_idx % HBM_CHANNELS;
-
-      for (int offset = begin; offset < end; ++offset) {
-        const int col = col_idx.data[offset];
-        if (col < 0 || col >= rows) {
-          die("column index is outside row range");
-        }
-
-        const float product = (float)values.data[offset];
-        if (iter == 0) {
-          expected[row] += product;
-        }
-        append_word(&streams[owner][pair_lane],
-                    pack_scalar(0,
-                                packet_idx,
-                                pair_lane,
-                                scalar_lane,
-                                float_bits(product)));
-      }
-    }
+  if (source_order) {
+    generate_source_order_streams(streams,
+                                  expected,
+                                  &row_ptr,
+                                  &col_idx,
+                                  &values,
+                                  rows,
+                                  nnz,
+                                  iteration_num);
+  } else {
+    generate_row_order_streams(streams,
+                               expected,
+                               &row_ptr,
+                               &col_idx,
+                               &values,
+                               rows,
+                               nnz,
+                               iteration_num);
   }
 
   size_t max_stream_words = 0;
   for (int owner = 0; owner < HBM_CHANNELS; ++owner) {
     for (int lane = 0; lane < PAIR_LANES; ++lane) {
-      append_word(&streams[owner][lane],
-                  pack_scalar(1, (uint32_t)owner, (uint32_t)lane, 0, 0));
       if (streams[owner][lane].size > max_stream_words) {
         max_stream_words = streams[owner][lane].size;
       }
@@ -325,6 +540,7 @@ int main(int argc, char **argv) {
   fprintf(meta, "TAGGED_PAIRS_TOTAL=%d\n", ((rows + 15) / 16) * 8 * iteration_num);
   fprintf(meta, "SCALAR_WRITES_TOTAL=%d\n", ((rows + 15) / 16) * 16 * iteration_num);
   fprintf(meta, "MAX_STREAM_WORDS=%zu\n", max_stream_words);
+  fprintf(meta, "SOURCE_ORDER=%d\n", source_order);
   fclose(meta);
 
   for (int owner = 0; owner < HBM_CHANNELS; ++owner) {

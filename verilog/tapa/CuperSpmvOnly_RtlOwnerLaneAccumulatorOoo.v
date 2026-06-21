@@ -546,7 +546,16 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
                     pipe[i] <= pipe[i - 1];
                 end
             end
-            dout <= pipe[NUM_STAGE - 1];
+            // 这个轻量模型只用于 Verilator 协议仿真。真实 Vitis floating
+            // point IP 在当前 wrapper 下相对 issue tag 是 12 拍；若这里
+            // 取 pipe[NUM_STAGE-1]，Verilator 会比 xsim/IP 晚一拍，表现为
+            // scalar0 的结果被 scalar1 的 pong tag 写回。
+            if (NUM_STAGE == 1) begin
+                dout <= $shortrealtobits($bitstoshortreal(din0) +
+                                         $bitstoshortreal(din1));
+            end else begin
+                dout <= pipe[NUM_STAGE - 2];
+            end
         end
     end
 endmodule

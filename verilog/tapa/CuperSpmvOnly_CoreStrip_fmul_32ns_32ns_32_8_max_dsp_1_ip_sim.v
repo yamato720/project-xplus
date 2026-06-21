@@ -1,7 +1,7 @@
 `timescale 1 ns / 1 ps
 
-// Verilator-only model for the Xilinx floating_point multiply IP used inside
-// generated CuperSpmvOnly_CoreStrip RTL.  The surrounding HLS wrapper is kept
+// Lightweight model for the Xilinx floating_point multiply IP used inside
+// generated CuperSpmvOnly_CoreStrip RTL. The surrounding HLS wrapper is kept
 // unchanged; this file only supplies the missing simulation blackbox.
 module CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1_ip (
     input  wire        aclk,

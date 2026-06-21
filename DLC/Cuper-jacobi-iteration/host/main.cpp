@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <vector>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +14,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include <ap_int.h>
@@ -76,6 +79,128 @@ static constexpr INDEX_TYPE kJacobiTracePackWriter =
 static constexpr INDEX_TYPE kJacobiTraceHbmWriter = kJacobiTracePackWriter + 1;
 static constexpr INDEX_TYPE kJacobiTraceSourceMax = kJacobiTraceHbmWriter;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
+
+uint32_t FloatBits(const VALUE_TYPE value) {
+    uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "VALUE_TYPE must be 32-bit");
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+uint64_t DoubleBits(const double value) {
+    uint64_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "double must be 64-bit");
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+void WriteHex32(std::ostream& output, const uint32_t value) {
+    output << std::hex << std::setw(8) << std::setfill('0')
+           << value << std::dec << std::setfill(' ') << "\n";
+}
+
+void WriteHex64(std::ostream& output, const uint64_t value) {
+    output << std::hex << std::setw(16) << std::setfill('0')
+           << value << std::dec << std::setfill(' ') << "\n";
+}
+
+void WriteHex512FromU64(std::ostream& output, const uint64_t words[8]) {
+    output << std::hex << std::setfill('0');
+    for (INDEX_TYPE lane = 7; lane >= 0; --lane) {
+        output << std::setw(16) << words[lane];
+    }
+    output << std::dec << std::setfill(' ') << "\n";
+}
+
+void DumpSpmvOnlyHostImages(const fs::path& dump_dir,
+                            const aligned_vector<INDEX_TYPE>& ptr_data,
+                            const vector<aligned_vector<unsigned long> >& matrix_data,
+                            const aligned_vector<VALUE_TYPE>& x_data,
+                            const vector<VALUE_TYPE>& y_ref,
+                            const aligned_vector<INDEX_TYPE>& status_data,
+                            const aligned_vector<double>& metrics_data,
+                            const INDEX_TYPE row_num,
+                            const INDEX_TYPE column_num,
+                            const INDEX_TYPE batch_num,
+                            const INDEX_TYPE matrix_len,
+                            const INDEX_TYPE iteration_num) {
+    fs::create_directories(dump_dir);
+
+    {
+        std::ofstream output(dump_dir / "ptr.mem");
+        for (const INDEX_TYPE value : ptr_data) {
+            WriteHex32(output, static_cast<uint32_t>(value));
+        }
+    }
+
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        std::ostringstream name;
+        name << "matrix" << std::setw(2) << std::setfill('0') << channel << ".mem";
+        std::ofstream output(dump_dir / name.str());
+        const auto& channel_data = matrix_data[channel];
+        uint64_t words[8] = {};
+        for (std::size_t offset = 0; offset < channel_data.size(); offset += 8) {
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+                const std::size_t index = offset + static_cast<std::size_t>(lane);
+                words[lane] = index < channel_data.size()
+                                  ? static_cast<uint64_t>(channel_data[index])
+                                  : 0;
+            }
+            WriteHex512FromU64(output, words);
+        }
+    }
+
+    {
+        std::ofstream output(dump_dir / "x.mem");
+        uint64_t words[8] = {};
+        for (std::size_t offset = 0; offset < x_data.size(); offset += 16) {
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+                const std::size_t lo_index = offset + static_cast<std::size_t>(lane * 2);
+                const std::size_t hi_index = lo_index + 1;
+                const uint64_t lo = lo_index < x_data.size() ? FloatBits(x_data[lo_index]) : 0;
+                const uint64_t hi = hi_index < x_data.size() ? FloatBits(x_data[hi_index]) : 0;
+                words[lane] = (hi << 32) | lo;
+            }
+            WriteHex512FromU64(output, words);
+        }
+    }
+
+    {
+        std::ofstream output(dump_dir / "expected_y.mem");
+        for (const VALUE_TYPE value : y_ref) {
+            WriteHex32(output, FloatBits(value));
+        }
+    }
+    {
+        std::ofstream output(dump_dir / "status_init.mem");
+        for (const INDEX_TYPE value : status_data) {
+            WriteHex32(output, static_cast<uint32_t>(value));
+        }
+    }
+    {
+        std::ofstream output(dump_dir / "metrics_init.mem");
+        for (const double value : metrics_data) {
+            WriteHex64(output, DoubleBits(value));
+        }
+    }
+
+    std::ofstream meta(dump_dir / "meta.env");
+    meta << "ROWS=" << row_num << "\n";
+    meta << "COLS=" << column_num << "\n";
+    meta << "BATCH_NUM=" << batch_num << "\n";
+    meta << "MATRIX_LEN=" << matrix_len << "\n";
+    meta << "ITERATION_NUM=" << iteration_num << "\n";
+    meta << "PTR_WORDS=" << ptr_data.size() << "\n";
+    meta << "X_WORDS=" << ((x_data.size() + 15) / 16) << "\n";
+    meta << "Y_WORDS=" << y_ref.size() << "\n";
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        meta << "MATRIX_WORDS_" << channel << "="
+             << ((matrix_data[channel].size() + 7) / 8) << "\n";
+        if (channel < static_cast<INDEX_TYPE>(ptr_data.size())) {
+            meta << "PTR_HEAD_" << channel << "=" << ptr_data[channel] << "\n";
+        }
+    }
+}
 
 bool IsJacobiDebugSentinel(const INDEX_TYPE index, const INDEX_TYPE value) {
     return value == kJacobiDebugSentinelBase + index;
@@ -176,6 +301,56 @@ void PrintJacobiPrefinishSnapshot(const char* label,
     std::string probe_label = std::string(label) + "-probe";
     PrintJacobiProbeSnapshot(probe_label.c_str(), status_data, metrics_data);
 #endif
+}
+
+void PrintSpmvOnlyPrefinishSnapshot(const char* label,
+                                    const aligned_vector<VALUE_TYPE>& y_data,
+                                    const vector<VALUE_TYPE>& y_ref,
+                                    const aligned_vector<INDEX_TYPE>& status_data,
+                                    const aligned_vector<double>& metrics_data,
+                                    const INDEX_TYPE row_num) {
+    const INDEX_TYPE compare_count =
+        std::min<INDEX_TYPE>(row_num, std::min<INDEX_TYPE>(16, y_data.size()));
+    INDEX_TYPE visible_errors = 0;
+
+    cout << "[" << label << "] Status[0..2]="
+         << status_data[0] << ","
+         << status_data[1] << ","
+         << status_data[2]
+         << " Metrics[0..7]=";
+    for (INDEX_TYPE index = 0; index < 8; ++index) {
+        if (index != 0) {
+            cout << ",";
+        }
+        cout << metrics_data[index];
+    }
+    cout << endl;
+
+    cout << "[" << label << "] Y[0.." << (compare_count == 0 ? 0 : compare_count - 1)
+         << "]=";
+    for (INDEX_TYPE index = 0; index < compare_count; ++index) {
+        if (index != 0) {
+            cout << ",";
+        }
+        cout << y_data[index];
+        if (index < static_cast<INDEX_TYPE>(y_ref.size()) &&
+            std::fabs(static_cast<double>(y_data[index] - y_ref[index])) > 1.0e-4) {
+            ++visible_errors;
+        }
+    }
+    cout << endl;
+
+    cout << "[" << label << "] Y_bits[0.." << (compare_count == 0 ? 0 : compare_count - 1)
+         << "]=" << std::hex << std::setfill('0');
+    for (INDEX_TYPE index = 0; index < compare_count; ++index) {
+        if (index != 0) {
+            cout << ",";
+        }
+        cout << std::setw(8) << FloatBits(y_data[index]);
+    }
+    cout << std::dec << std::setfill(' ') << endl;
+
+    cout << "[" << label << "] visible_errors_first16=" << visible_errors << endl;
 }
 
 #ifdef JACOBI_TRACE_ENABLED
@@ -383,6 +558,81 @@ int64_t InvokeCuperSpmvServiceOnly(const std::string& bitstream, Args&&... args)
     return tapa::invoke(CuperSpmvServiceOnly,
                         bitstream,
                         std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+int64_t InvokeCuperSpmvServiceOnlyWithPrefinishDump(
+    const std::string& bitstream,
+    const aligned_vector<VALUE_TYPE>& y_data,
+    const vector<VALUE_TYPE>& y_ref,
+    const aligned_vector<INDEX_TYPE>& status_data,
+    const aligned_vector<double>& metrics_data,
+    const INDEX_TYPE row_num,
+    Args&&... args) {
+    if (bitstream.empty()) {
+        return tapa::invoke(CuperSpmvServiceOnly,
+                            bitstream,
+                            std::forward<Args>(args)...);
+    }
+
+    fpga::Instance instance(bitstream);
+
+    tapa::internal::frt_sync_kernel_instance = &instance;
+    std::signal(SIGINT, &tapa::internal::kill_frt_sync_kernel);
+
+    using SpmvInvoker = tapa::internal::invoker<decltype((CuperSpmvServiceOnly))>;
+    SpmvInvoker::set_fpga_args(instance,
+                               CuperSpmvServiceOnly,
+                               std::index_sequence_for<Args...>{},
+                               std::forward<Args>(args)...);
+
+    cout << "[tapa-invoke-spmv] before WriteToDevice" << endl;
+    instance.WriteToDevice();
+    cout << "[tapa-invoke-spmv] after WriteToDevice before Exec" << endl;
+    instance.Exec();
+    cout << "[tapa-invoke-spmv] after Exec before ReadFromDevice" << endl;
+
+    const int prefinish_poll_count =
+        std::max(1, EnvInt("SPMV_PREFINISH_POLL_COUNT", 1));
+    const int initial_delay_ms = EnvInt("SPMV_PREFINISH_SAMPLE_DELAY_MS", 250);
+    const int poll_interval_ms = EnvInt("SPMV_PREFINISH_POLL_INTERVAL_MS", 1000);
+    cout << "[tapa-invoke-spmv] pre-Finish polling: count="
+         << prefinish_poll_count
+         << " initial_delay_ms=" << initial_delay_ms
+         << " interval_ms=" << poll_interval_ms << endl;
+
+    for (int sample = 0; sample < prefinish_poll_count; ++sample) {
+        const int delay_ms = (sample == 0) ? initial_delay_ms : poll_interval_ms;
+        if (delay_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+        }
+
+        cout << "[tapa-invoke-spmv] before ReadFromDevice sample "
+             << (sample + 1) << "/" << prefinish_poll_count << endl;
+        instance.ReadFromDevice();
+
+        const std::string sample_label =
+            "spmv-prefinish#" + std::to_string(sample + 1);
+        PrintSpmvOnlyPrefinishSnapshot(sample_label.c_str(),
+                                       y_data,
+                                       y_ref,
+                                       status_data,
+                                       metrics_data,
+                                       row_num);
+        if (!status_data.empty() && status_data[0] != kJacobiStatusSentinelBase) {
+            cout << "[tapa-invoke-spmv] kernel status visible before Finish, stop polling" << endl;
+            break;
+        }
+    }
+
+    cout << "[tapa-invoke-spmv] after ReadFromDevice before Finish" << endl;
+    instance.Finish();
+    cout << "[tapa-invoke-spmv] after Finish" << endl;
+
+    std::signal(SIGINT, SIG_DFL);
+    tapa::internal::frt_sync_kernel_instance = nullptr;
+
+    return instance.ComputeTimeNanoSeconds();
 }
 
 bool IsCsrDatasetDir(const fs::path& path) {
@@ -868,6 +1118,23 @@ int RunSpmvServiceOnly(const std::string& bitstream,
         static_cast<INDEX_TYPE>(SpElement_list_ptr.size()) - 1;
     const INDEX_TYPE SpElement_list_ptr_max_len =
         SpElement_list_ptr[SpElement_list_ptr_size];
+    if (const char* dump_dir = std::getenv("JACOBI_SPMV_DUMP_DIR")) {
+        if (dump_dir[0] != '\0') {
+            DumpSpmvOnlyHostImages(dump_dir,
+                                   SpElement_list_ptr_fpga,
+                                   Matrix_fpga_data,
+                                   X_fpga_data,
+                                   Y_ref,
+                                   Status_fpga_data,
+                                   Metrics_fpga_data,
+                                   m,
+                                   n,
+                                   SpElement_list_ptr_size,
+                                   SpElement_list_ptr_max_len,
+                                   spmv_repeats);
+            cout << "[spmv-only-dump] wrote host input image to " << dump_dir << endl;
+        }
+    }
 #ifdef JACOBI_SPMV_LANE_STATIC_REAL
     const INDEX_TYPE original_read_beats =
         SpElement_list_ptr_max_len * HBM_CHANNEL_NUM;
@@ -920,8 +1187,13 @@ int RunSpmvServiceOnly(const std::string& bitstream,
     cout << "[" << setw(18) << setfill(' ') << "SpMV On FPGA" << "] "
          << "Run Cuper SpMV service only on FPGA/TAPA...";
 #ifdef JACOBI_SPMV_LANE_STATIC_REAL
-    double kernel_time = InvokeCuperSpmvServiceOnly(
+    double kernel_time = InvokeCuperSpmvServiceOnlyWithPrefinishDump(
                                       bitstream,
+                                      Y_fpga_data,
+                                      Y_ref,
+                                      Status_fpga_data,
+                                      Metrics_fpga_data,
+                                      m,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
                                       tapa::read_only_mmap<float>(X_fpga_data).reinterpret<float_v16>(),
@@ -934,8 +1206,13 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       n,
                                       spmv_repeats);
 #else
-    double kernel_time = InvokeCuperSpmvServiceOnly(
+    double kernel_time = InvokeCuperSpmvServiceOnlyWithPrefinishDump(
                                       bitstream,
+                                      Y_fpga_data,
+                                      Y_ref,
+                                      Status_fpga_data,
+                                      Metrics_fpga_data,
+                                      m,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
                                       tapa::read_only_mmap<float>(X_fpga_data).reinterpret<float_v16>(),

@@ -373,6 +373,9 @@ int main(int argc, char** argv) {
   int scatter_reads = 0;
   int writes = 0;
   int pending_responses = 0;
+  std::array<bool, kSources> core_done_seen{};
+  std::array<bool, kSources> splitter_done_seen{};
+  bool bank_done_seen = false;
   bool scatter_done_seen = false;
 
   for (uint64_t cycle = 0; cycle < kTimeoutCycles; ++cycle) {
@@ -384,7 +387,9 @@ int main(int argc, char** argv) {
       auto& core = *cores[static_cast<size_t>(source)];
       const int core_id = source * 2;
       core.ap_rst_n = rst ? 0 : 1;
-      core.ap_start = start_pulse ? 1 : 0;
+      core.ap_start = (!rst && !core_done_seen[static_cast<size_t>(source)])
+                          ? 1
+                          : 0;
       core.Core_id = static_cast<uint32_t>(core_id);
       clear_core_unused_inputs(core);
       drive_core_inputs(core,
@@ -400,7 +405,8 @@ int main(int argc, char** argv) {
 
       auto& splitter = *splitters[static_cast<size_t>(source)];
       splitter.ap_rst_n = rst ? 0 : 1;
-      splitter.ap_start = start_pulse ? 1 : 0;
+      splitter.ap_start =
+          (!rst && !splitter_done_seen[static_cast<size_t>(source)]) ? 1 : 0;
       splitter.Source_id = static_cast<uint32_t>(core_id);
       clear_splitter_unused_inputs(splitter);
       drive_splitter_inputs(splitter,
@@ -418,7 +424,7 @@ int main(int argc, char** argv) {
     }
 
     bank.ap_rst_n = rst ? 0 : 1;
-    bank.ap_start = start_pulse ? 1 : 0;
+    bank.ap_start = (!rst && !bank_done_seen) ? 1 : 0;
     bank.Iteration_num = kIterationNum;
     bank.Row_num = kRowNum;
     bank.Owner_id = 0;
@@ -520,6 +526,20 @@ int main(int argc, char** argv) {
     for (auto& splitter : splitters) eval_splitter(*splitter, context, 1);
     eval_bank(bank, context, 1);
     eval_scatter(scatter, context, 1);
+
+    if (!rst) {
+      for (int source = 0; source < kSources; ++source) {
+        if (cores[static_cast<size_t>(source)]->ap_done) {
+          core_done_seen[static_cast<size_t>(source)] = true;
+        }
+        if (splitters[static_cast<size_t>(source)]->ap_done) {
+          splitter_done_seen[static_cast<size_t>(source)] = true;
+        }
+      }
+      if (bank.ap_done) {
+        bank_done_seen = true;
+      }
+    }
 
     for (int source = 0; source < kSources; ++source) {
       if (core_param_read_pre[static_cast<size_t>(source)]) {
