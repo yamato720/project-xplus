@@ -41,7 +41,10 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
     parameter integer HBM_CHANNEL_NUM = 16;
     parameter integer MEM_DEPTH = 8192;
     parameter integer ADDR_WIDTH = 13;
-    parameter integer FADD_PIPE_LATENCY = 14;
+    // TAPA HLS 生成的 fadd wrapper 内部是 1 拍输入寄存器 + c_latency=11 的
+    // floating_point IP。xsim 真实 IP 表明结果相对 issue tag 延迟 12 拍；
+    // 这里必须和数据通路对齐，否则 scalar1 会被写到 ping，pong 读出为 0。
+    parameter integer FADD_PIPE_LATENCY = 12;
 
     input ap_clk;
     input ap_rst_n;
@@ -210,7 +213,7 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo (
 
     CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1 #(
         .ID(1),
-        .NUM_STAGE(13),
+        .NUM_STAGE(12),
         .din0_WIDTH(32),
         .din1_WIDTH(32),
         .dout_WIDTH(32)

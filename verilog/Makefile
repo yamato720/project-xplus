@@ -1,4 +1,5 @@
 BUILD_DIR ?= build
+TAPA_RTL_DIR ?= ../cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/tapa_CuperSpmvServiceOnly/hdl
 ROWS ?= 128
 EVENTS ?= 4096
 ENTRIES ?= 8
@@ -13,9 +14,12 @@ HBM_CHANNELS ?= 16
 CC ?= gcc
 CXX ?= g++
 VERILATOR ?= verilator
+VIVADO ?= /home/pyx/vivado/Vivado/2022.2/bin/vivado
+VIVADO_PART ?= xcu55c-fsvh2892-2L-e
 
 GEN := $(BUILD_DIR)/gen_ooo_accum_vectors
 CSR_GEN := $(BUILD_DIR)/gen_csr_accum_vectors
+BACKEND_XSIM_GEN := $(BUILD_DIR)/gen_tapa_backend_xsim_vectors
 INPUT := $(BUILD_DIR)/input.mem
 EXPECTED := $(BUILD_DIR)/expected.mem
 CONFIG := $(BUILD_DIR)/ooo_accum_config.vh
@@ -24,8 +28,9 @@ CSR_INPUT := $(BUILD_DIR)/csr_input.tsv
 CSR_EXPECTED := $(BUILD_DIR)/csr_expected.tsv
 CSR_META := $(BUILD_DIR)/csr_meta.env
 CSR_OBJ_DIR := $(BUILD_DIR)/csr_obj
+BACKEND_XSIM_DIR := $(BUILD_DIR)/backend_xsim_vectors
 
-.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim clean
+.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim clean
 
 all: sim
 
@@ -36,6 +41,9 @@ $(GEN): csrc/gen_ooo_accum_vectors.c | $(BUILD_DIR)
 	$(CC) -std=c11 -O2 -Wall -Wextra $< -o $@
 
 $(CSR_GEN): csrc/gen_csr_accum_vectors.c | $(BUILD_DIR)
+	$(CC) -std=c11 -O2 -Wall -Wextra $< -lm -o $@
+
+$(BACKEND_XSIM_GEN): csrc/gen_tapa_backend_xsim_vectors.c | $(BUILD_DIR)
 	$(CC) -std=c11 -O2 -Wall -Wextra $< -lm -o $@
 
 vectors: $(GEN)
@@ -87,6 +95,13 @@ csr-sim: csr-vectors
 	  --entries $(ENTRIES) \
 	  --freq-mhz $(FREQ_MHZ)
 
+backend-xsim-vectors: $(BACKEND_XSIM_GEN)
+	mkdir -p $(BACKEND_XSIM_DIR)
+	$(BACKEND_XSIM_GEN) \
+	  --matrix $(CSR_MATRIX) \
+	  --out-dir $(BACKEND_XSIM_DIR) \
+	  --iteration-num 1
+
 tapa-lint:
 	$(VERILATOR) --lint-only -Wall -Wno-fatal -Wno-UNUSED -Wno-WIDTH \
 	  tapa/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v
@@ -114,6 +129,239 @@ tapa-bank-sim: | $(BUILD_DIR)
 	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v \
 	  vsrc/tb_tapa_owner_bank_accumulator.sv
 	$(BUILD_DIR)/tapa_bank_obj/Vtb_tapa_owner_bank_accumulator
+
+tapa-bank-scatter-cpp-sim: | $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/tapa_bank_scatter_cpp_obj
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
+	  -Mdir $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank \
+	  -f VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo.mk \
+	  VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a verilated.o verilated_threads.o
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel \
+	  -Mdir $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/scatter \
+	  tapa/CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/scatter \
+	  -f VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.mk \
+	  VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a
+	$(CXX) -std=c++17 -O2 -Wall -Wextra \
+	  -I$(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank \
+	  -I$(BUILD_DIR)/tapa_bank_scatter_cpp_obj/scatter \
+	  -I/usr/local/share/verilator/include \
+	  -I/usr/local/share/verilator/include/vltstd \
+	  -DVERILATOR=1 \
+	  csrc/sim_tapa_bank_to_scatter.cpp \
+	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a \
+	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank/verilated.o \
+	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank/verilated_threads.o \
+	  -pthread -lpthread -latomic \
+	  -o $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/sim_tapa_bank_to_scatter
+	$(BUILD_DIR)/tapa_bank_scatter_cpp_obj/sim_tapa_bank_to_scatter
+
+tapa-splitter-bank-scatter-cpp-sim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v"
+	mkdir -p $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -I$(TAPA_RTL_DIR) \
+	  --top-module CuperSpmvOnly_SourceLaneSplitterOoo \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter \
+	  -f VCuperSpmvOnly_SourceLaneSplitterOoo.mk \
+	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank \
+	  -f VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo.mk \
+	  VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/scatter \
+	  tapa/CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/scatter \
+	  -f VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.mk \
+	  VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a
+	$(CXX) -std=c++17 -O2 -Wall -Wextra \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/scatter \
+	  -I/usr/local/share/verilator/include \
+	  -I/usr/local/share/verilator/include/vltstd \
+	  -DVERILATOR=1 \
+	  csrc/sim_tapa_splitter_bank_scatter.cpp \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter/verilated.o \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter/verilated_threads.o \
+	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter/verilated_timing.o \
+	  -pthread -lpthread -latomic \
+	  -o $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/sim_tapa_splitter_bank_scatter
+	$(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/sim_tapa_splitter_bank_scatter
+
+tapa-splitter-bank-generated-scatter-cpp-sim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v"
+	mkdir -p $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -I$(TAPA_RTL_DIR) \
+	  --top-module CuperSpmvOnly_SourceLaneSplitterOoo \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_SourceLaneSplitterOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter \
+	  -f VCuperSpmvOnly_SourceLaneSplitterOoo.mk \
+	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank \
+	  -f VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo.mk \
+	  VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -I$(TAPA_RTL_DIR) \
+	  --top-module CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter \
+	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/scatter \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/scatter \
+	  -f VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.mk \
+	  VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter__ALL.a
+	$(CXX) -std=c++17 -O2 -Wall -Wextra \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank \
+	  -I$(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/scatter \
+	  -I/usr/local/share/verilator/include \
+	  -I/usr/local/share/verilator/include/vltstd \
+	  -DVERILATOR=1 -DUSE_TAPA_GENERATED_SCATTER=1 \
+	  csrc/sim_tapa_splitter_bank_scatter.cpp \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter__ALL.a \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter/verilated.o \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter/verilated_threads.o \
+	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter/verilated_timing.o \
+	  -pthread -lpthread -latomic \
+	  -o $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/sim_tapa_splitter_bank_generated_scatter
+	$(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/sim_tapa_splitter_bank_generated_scatter
+
+tapa-scatter-only-cpp-sim: | $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/tapa_scatter_cpp_obj
+	$(VERILATOR) -cc --exe --build --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel \
+	  -Mdir $(BUILD_DIR)/tapa_scatter_cpp_obj \
+	  tapa/CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.v \
+	  csrc/sim_tapa_scatter_pipeline.cpp
+	$(BUILD_DIR)/tapa_scatter_cpp_obj/VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel
+
+tapa-scatter-only-sim: | $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/tapa_scatter_only_obj
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module tb_tapa_scatter_pipeline \
+	  -Mdir $(BUILD_DIR)/tapa_scatter_only_obj \
+	  tapa/CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.v \
+	  vsrc/tb_tapa_scatter_pipeline.sv
+	$(BUILD_DIR)/tapa_scatter_only_obj/Vtb_tapa_scatter_pipeline
+
+tapa-scatter-only-rtl-sim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v"
+	mkdir -p $(BUILD_DIR)/tapa_scatter_only_obj
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Wno-SHORTREAL \
+	  -DTAPA_SCATTER_MODULE=CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter \
+	  -Itapa -I$(TAPA_RTL_DIR) \
+	  --top-module tb_tapa_scatter_pipeline \
+	  -Mdir $(BUILD_DIR)/tapa_scatter_only_obj \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v \
+	  vsrc/tb_tapa_scatter_pipeline.sv
+	$(BUILD_DIR)/tapa_scatter_only_obj/Vtb_tapa_scatter_pipeline
+
+tapa-scatter-sim: | $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/tapa_scatter_obj
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Wno-SHORTREAL \
+	  -Itapa \
+	  --top-module tb_tapa_owner_bank_to_scatter \
+	  -Mdir $(BUILD_DIR)/tapa_scatter_obj \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v \
+	  tapa/CuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel.v \
+	  vsrc/tb_tapa_owner_bank_to_scatter.sv
+	$(BUILD_DIR)/tapa_scatter_obj/Vtb_tapa_owner_bank_to_scatter
+
+tapa-scatter-rtl-sim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v"
+	mkdir -p $(BUILD_DIR)/tapa_scatter_obj
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Wno-SHORTREAL \
+	  -DTAPA_SCATTER_MODULE=CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter \
+	  -Itapa -I$(TAPA_RTL_DIR) \
+	  --top-module tb_tapa_owner_bank_to_scatter \
+	  -Mdir $(BUILD_DIR)/tapa_scatter_obj \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v \
+	  vsrc/tb_tapa_owner_bank_to_scatter.sv
+	$(BUILD_DIR)/tapa_scatter_obj/Vtb_tapa_owner_bank_to_scatter
+
+tapa-corestrip-xsim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_CoreStrip.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1_ip.tcl"
+	mkdir -p $(BUILD_DIR)/xsim_corestrip
+	TAPA_RTL_DIR="$(abspath $(TAPA_RTL_DIR))" \
+	XSIM_BUILD_DIR="$(abspath $(BUILD_DIR)/xsim_corestrip)" \
+	VIVADO_PART="$(VIVADO_PART)" \
+	$(VIVADO) -mode batch -source scripts/run_tapa_corestrip_xsim.tcl
+
+tapa-backend-dataset-xsim: backend-xsim-vectors
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+	test -f "$(TAPA_RTL_DIR)/CuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter.v"
+	mkdir -p $(BUILD_DIR)/xsim_backend_dataset
+	. $(BACKEND_XSIM_DIR)/meta.env; \
+	TAPA_RTL_DIR="$(abspath $(TAPA_RTL_DIR))" \
+	XSIM_BUILD_DIR="$(abspath $(BUILD_DIR)/xsim_backend_dataset)" \
+	XSIM_DATA_DIR="$(abspath $(BACKEND_XSIM_DIR))" \
+	XSIM_ROWS="$$ROWS" \
+	XSIM_ITERATION_NUM="$$ITERATION_NUM" \
+	XSIM_TAGGED_PAIRS_TOTAL="$$TAGGED_PAIRS_TOTAL" \
+	XSIM_SCALAR_WRITES_TOTAL="$$SCALAR_WRITES_TOTAL" \
+	XSIM_TIMEOUT_CYCLES="$(or $(BACKEND_XSIM_TIMEOUT_CYCLES),300000)" \
+	VIVADO_PART="$(VIVADO_PART)" \
+	$(VIVADO) -mode batch -source scripts/run_tapa_backend_dataset_xsim.tcl
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -9,6 +9,8 @@
 - `build_host.sh`：用 CMake 编译 `cuper_jacobi_host`
 - `build_xo_u55c.sh`：用 `tapa compile` 生成 `CuperJacobiIteration.xo`；可用
   `JACOBI_TOP=CuperJacobiMmapProbeOnly` 切到 mmap-only micro top
+- `pack_hotpatch_xo_u55c.sh`：复用已有 `tapa_<top>` 工作目录，覆盖或保留手改 RTL
+  后直接 `tapa pack` 生成新 `.xo`
 - `link_xclbin_u55c.sh`：用 `v++ --link` 生成 xclbin；micro top 支持 same-bank 与
   split-bank connectivity
 - `run_hw.sh`：设置 `BITFILE` 后运行 host
@@ -27,6 +29,17 @@ make regression-sw MODE=quick
 scripts/build_xo_u55c.sh
 scripts/link_xclbin_u55c.sh
 scripts/run_hw.sh data/matrices/cant.mtx
+```
+
+已有 TAPA `WORK_DIR` 时，可以跳过 HLS，直接热修 RTL 后重新 pack：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+scripts/pack_hotpatch_xo_u55c.sh
+
+# 或让 build_xo_u55c.sh 走同一路径：
+JACOBI_TAPA_PACK_ONLY=1 scripts/build_xo_u55c.sh
 ```
 
 `run-sw` 不需要 `BITFILE`。它会运行 TAPA software simulation，并把 kernel 输出和

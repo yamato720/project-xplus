@@ -131,6 +131,10 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 *(["export JACOBI_SPMV_LANE_STATIC_REAL=1"] if os.environ.get("JACOBI_SPMV_LANE_STATIC_REAL") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE_RTL=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE_RTL") not in {None, "", "0"} else []),
+                *(["export JACOBI_TAPA_PACK_ONLY=1"] if os.environ.get("JACOBI_TAPA_PACK_ONLY") not in {None, "", "0"} else []),
+                *(["export JACOBI_TAPA_HOTPATCH_RTL_DIR=" + shell_quote(os.environ["JACOBI_TAPA_HOTPATCH_RTL_DIR"])] if os.environ.get("JACOBI_TAPA_HOTPATCH_RTL_DIR") else []),
+                *(["export CUSTOM_RTL_DIR=" + shell_quote(os.environ["CUSTOM_RTL_DIR"])] if os.environ.get("CUSTOM_RTL_DIR") else []),
+                *(["export WORK_DIR=" + shell_quote(os.environ["WORK_DIR"])] if os.environ.get("WORK_DIR") else []),
                 *(["export JOBS=" + shell_quote(os.environ["JOBS"])] if os.environ.get("JOBS") else []),
                 *(["export JACOBI_MMAP_PROBE_SPLIT=1"] if os.environ.get("JACOBI_MMAP_PROBE_SPLIT") not in {None, "", "0"} else []),
                 f"exec > >(tee {shell_quote(log_path)}) 2>&1",
@@ -241,6 +245,7 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("list", help="List matrix datasets.")
     subparsers.add_parser("build-host", help="Build build/cuper_jacobi_host.")
     subparsers.add_parser("build-xo", help="Build CuperJacobiIteration.xo.")
+    subparsers.add_parser("pack-hotpatch-xo", help="Repack an existing TAPA work dir after RTL hotpatch.")
     subparsers.add_parser("link-xclbin", help="Link CuperJacobiIteration.xclbin from CuperJacobiIteration.xo.")
 
     hw_tmux = subparsers.add_parser("hw-tmux", help="Build host, XO, and xclbin in a tmux session.")
@@ -267,6 +272,8 @@ def main() -> int:
         return run_script(root, "build_host.sh")
     if args.command == "build-xo":
         return run_script(root, "build_xo_u55c.sh")
+    if args.command == "pack-hotpatch-xo":
+        return run_script(root, "pack_hotpatch_xo_u55c.sh")
     if args.command == "link-xclbin":
         return run_script(root, "link_xclbin_u55c.sh")
     if args.command == "hw-tmux":

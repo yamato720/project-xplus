@@ -191,6 +191,14 @@ Jacobi full graph，也不动原版 `DLC/Cuper` 标准 `Cuper(...)`。
 `thermal2_n16` Finish 返回但输出全 0，`thermal2_n1024` 卡在
 `after ReadFromDevice before Finish`。
 
+2026-06-21 latency=12 修复版继续沿用同名 SpMV demo 槽。Vivado/xsim 使用真实
+`floating_point` IP 验证后发现 lane accumulator 的浮点加法结果相对 issue tag
+是 12 cycle；旧 RTL 按 13/14 cycle 对齐时会把加法结果写错 ping/pong bank。当前版
+把 `CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo` 的 `FADD_PIPE_LATENCY` 和
+`NUM_STAGE` 统一改为 12，并补了 Vivado/xsim 后端数据集仿真 harness，用于直接把
+TAPA 生成的 scatter RTL、真实 floating_point IP 和自定义 owner-bank RTL 接起来跑
+CSR 数据集。
+
 这版和前一版 128 owner-lane RTL 的区别：
 
 | 项 | 128 owner-lane RTL | 16 owner-bank RTL |
@@ -211,17 +219,17 @@ Jacobi full graph，也不动原版 `DLC/Cuper` 标准 `Cuper(...)`。
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/CuperSpmvServiceOnly.xclbin
-Total elapsed time: 3h 59m 28s
-UUID: e6998763-ba80-b12f-f180-5099ba926c6d
-SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
-DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
-Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Created .../cuper-tapa-spmv-ooobank16-lat12-hw-150m-20260621-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 3h 59m 3s
+UUID: 58158740-a7ef-a803-0da5-1fd8b3206253
+SHA256: 5e3f2e863cba4efca519ce18f9e9e735f05084af1242cd493e079c1844f777b3
+DATA/KERNEL/HBM clock: 150 / 500 / 445 MHz
+Timing: WNS -0.024 ns, TNS -0.086 ns, setup failing endpoints 8
 ```
 
 当前状态：
 
-- 本机 Verilator 小仿真和 TAPA software smoke 已通过；
+- Vivado/xsim 后端数据集仿真已通过到 `thermal2_n65536`；
 - bitstream 已覆盖同步到 `395bitstream/` 同名 SpMV demo 槽；
 - 还没有服务器上板性能数据，暂不更新 HTML 曲线；
 - 由于尚未确认性能提升，本轮不更新正式 `source.diff`。

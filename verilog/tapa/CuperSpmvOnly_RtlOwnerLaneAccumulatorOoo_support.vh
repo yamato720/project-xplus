@@ -1,0 +1,6 @@
+`ifndef CUPER_SPMV_ONLY_RTL_OWNER_LANE_ACCUMULATOR_OOO_SUPPORT_VH
+`define CUPER_SPMV_ONLY_RTL_OWNER_LANE_ACCUMULATOR_OOO_SUPPORT_VH
+
+`include "CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
+
+`endif

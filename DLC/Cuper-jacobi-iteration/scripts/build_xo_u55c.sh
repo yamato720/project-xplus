@@ -12,6 +12,11 @@ mkdir -p "$BUILD_DIR"
 TOP="${JACOBI_TOP:-CuperJacobiIteration}"
 OUTPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
 WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_$TOP}"
+if [[ "${JACOBI_TAPA_PACK_ONLY:-0}" != "0" && "${JACOBI_TAPA_PACK_ONLY:-}" != "" ]]; then
+  echo "JACOBI_TAPA_PACK_ONLY=1: reuse existing TAPA WORK_DIR and run hotpatch pack only."
+  "$ROOT_DIR/scripts/pack_hotpatch_xo_u55c.sh" "$OUTPUT_XO"
+  exit 0
+fi
 if [[ "${CLOCK_PERIOD:-}" == "" ]]; then
   if [[ "$TOP" == "CuperJacobiIteration" ]] &&
      { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]] ||

@@ -32,7 +32,7 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 | `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，服务器侧完整 `thermal2` 已通过并为当前 SpMV 实验最佳 |
 | `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
 | `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，服务器侧完整 `thermal2` 已通过；替代 compact16 主报告线，但性能仍慢于 strip16 |
-| `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator latency=12 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
 | `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -272,40 +272,42 @@ cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin.info
 ```
 
-版本信息：
+当前同步版本信息：
 
 ```text
 Kernel: CuperSpmvServiceOnly
-UUID: e6998763-ba80-b12f-f180-5099ba926c6d
-SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
-DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
-Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+UUID: 58158740-a7ef-a803-0da5-1fd8b3206253
+SHA256: 5e3f2e863cba4efca519ce18f9e9e735f05084af1242cd493e079c1844f777b3
+DATA/KERNEL/HBM clock: 150 / 500 / 445 MHz
+Timing: WNS -0.024 ns, TNS -0.086 ns, setup failing endpoints 8
 ```
 
 HBM 映射为：`Matrix_data_0..15` 使用 HBM[0..15]，`SpElement_list_ptr` 使用
 HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]，
-`Metrics` 使用 HBM[31]。构建目录为
-`cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/`，构建日志为
-`cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/logs/build_hw_tmux.log`，
-v++ link 总耗时 `3h 59m 28s`。
+`Metrics` 使用 HBM[31]。当前同步版构建目录为
+`cuper-tapa-spmv-ooobank16-lat12-hw-150m-20260621-build/`，构建日志为
+`cuper-tapa-spmv-ooobank16-lat12-hw-150m-20260621-build/logs/build_hw_tmux.log`，
+v++ link 总耗时 `3h 59m 3s`。
 
-资源压力：CLB LUT `25.95%`，CLB `52.49%`，BRAM Tile `65.48%`，URAM `53.33%`，
-DSP `7.70%`，Total SLLs `26740`。相比先前 128 owner-lane RTL 方案，这版通过把
+资源压力：CLB LUT `25.83%`，CLB `51.17%`，BRAM Tile `65.48%`，URAM `53.33%`，
+DSP `7.70%`，Total SLLs `24473`。相比先前 128 owner-lane RTL 方案，这版通过把
 8 条 pair-lane 收进一个 owner-bank RTL wrapper，显著降低了 BRAM/布局压力，并完成
 了 routed xclbin 生成。
 
-本机已完成 `thermal2_n16` 和 `thermal2_n1024` TAPA software smoke，均为
-`Correctness Verification: Passed`、`Error Num=0`；Verilator owner-bank 小仿真也通过：
-`cycles=69`、`real_events=40`、`outputs=16`、`cycles_per_event=1.725`。这版还没有
-服务器上板 sweep；因此当前只作为 SpMV-only demo artifact，同步用于测试，不建议
-晋级标准，也不覆盖当前有效 `source.diff`。
+本机已完成 Vivado/xsim 后端数据集仿真：`thermal2_n4096`、`thermal2_n16384` 和
+`thermal2_n65536` 均通过；`thermal2_n131072` 暂时撞到 testbench
+`MAX_ROWS=65536` 上限，不是 RTL 计算失败。`thermal2_n16` 和 `thermal2_n1024`
+此前也已通过同一路径。当前修复点是把 lane accumulator 的浮点加法 pipeline 对齐到
+Vivado floating_point IP/xsim 实测的 12 cycle。服务器上板 sweep 尚未执行；因此
+当前只作为 SpMV-only demo artifact，同步用于测试，不建议晋级标准，也不覆盖当前
+有效 `source.diff`。
 
-该同名 demo 槽上一版 UUID 为 `22b0a282-c282-cfaf-e45a-f8bebf4cc644`，SHA256 为
-`a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4`。服务器侧测试显示：
-`thermal2_n16` 能 Finish 返回但 16 个输出全 0，`thermal2_n1024` 卡在
-`after ReadFromDevice before Finish`。当前 `e699...` 版修复了 owner-bank
-`ap_done` 早于输出 token 完全写出的边界，并改为显式传递 `Owner_id` / `Pair_lane`；
-旧失败结论只对应旧 UUID，不对应当前同步文件。
+该同名 demo 槽此前有两版失败/待测历史：旧 UUID
+`22b0a282-c282-cfaf-e45a-f8bebf4cc644` 在服务器侧表现为 `thermal2_n16` 返回但
+输出全 0、`thermal2_n1024` 卡在 `after ReadFromDevice before Finish`；随后
+`e6998763-ba80-b12f-f180-5099ba926c6d` 修复了 owner-bank 输出计数闭合和 lane tag
+显式传递，但仍未包含本轮 floating_point latency=12 修复。旧结论只对应旧 UUID，
+不对应当前同步文件。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

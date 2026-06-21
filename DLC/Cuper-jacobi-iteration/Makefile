@@ -22,10 +22,10 @@ CFG_DIR := $(ROOT_DIR)/cfg
 SCRIPT_DIR := $(ROOT_DIR)/scripts
 DATA_DIR := $(ROOT_DIR)/data
 TOOL_DIR := $(ROOT_DIR)/tools
-JACOBI_DEBUG_ENV := $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") $(if $(JACOBI_TRACE_ISOTOPE),JACOBI_TRACE_ISOTOPE="$(JACOBI_TRACE_ISOTOPE)") $(if $(JACOBI_TRACE_LIGHT),JACOBI_TRACE_LIGHT="$(JACOBI_TRACE_LIGHT)") $(if $(JACOBI_WIDE_HBM),JACOBI_WIDE_HBM="$(JACOBI_WIDE_HBM)") $(if $(JACOBI_HBM_CHANNELS),JACOBI_HBM_CHANNELS="$(JACOBI_HBM_CHANNELS)") $(if $(JACOBI_TOP),JACOBI_TOP="$(JACOBI_TOP)") $(if $(JACOBI_SPMV_ONLY),JACOBI_SPMV_ONLY="$(JACOBI_SPMV_ONLY)") $(if $(JACOBI_SPMV_STRIP_PADDING),JACOBI_SPMV_STRIP_PADDING="$(JACOBI_SPMV_STRIP_PADDING)") $(if $(JACOBI_SPMV_COMPACT_PE),JACOBI_SPMV_COMPACT_PE="$(JACOBI_SPMV_COMPACT_PE)") $(if $(JACOBI_SPMV_LANE_STATIC_REAL),JACOBI_SPMV_LANE_STATIC_REAL="$(JACOBI_SPMV_LANE_STATIC_REAL)") $(if $(JACOBI_SPMV_OOO_ACCUMULATE),JACOBI_SPMV_OOO_ACCUMULATE="$(JACOBI_SPMV_OOO_ACCUMULATE)") $(if $(JACOBI_SPMV_OOO_ACCUMULATE_RTL),JACOBI_SPMV_OOO_ACCUMULATE_RTL="$(JACOBI_SPMV_OOO_ACCUMULATE_RTL)") $(if $(JACOBI_BLOCKING_ENTRY_PROBE),JACOBI_BLOCKING_ENTRY_PROBE="$(JACOBI_BLOCKING_ENTRY_PROBE)") $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(JACOBI_KERNEL_FREQUENCY),JACOBI_KERNEL_FREQUENCY="$(JACOBI_KERNEL_FREQUENCY)")
+JACOBI_DEBUG_ENV := $(if $(JACOBI_DEADLOCK_DEBUG),JACOBI_DEADLOCK_DEBUG="$(JACOBI_DEADLOCK_DEBUG)") $(if $(JACOBI_TRACE_ISOTOPE),JACOBI_TRACE_ISOTOPE="$(JACOBI_TRACE_ISOTOPE)") $(if $(JACOBI_TRACE_LIGHT),JACOBI_TRACE_LIGHT="$(JACOBI_TRACE_LIGHT)") $(if $(JACOBI_WIDE_HBM),JACOBI_WIDE_HBM="$(JACOBI_WIDE_HBM)") $(if $(JACOBI_HBM_CHANNELS),JACOBI_HBM_CHANNELS="$(JACOBI_HBM_CHANNELS)") $(if $(JACOBI_TOP),JACOBI_TOP="$(JACOBI_TOP)") $(if $(JACOBI_SPMV_ONLY),JACOBI_SPMV_ONLY="$(JACOBI_SPMV_ONLY)") $(if $(JACOBI_SPMV_STRIP_PADDING),JACOBI_SPMV_STRIP_PADDING="$(JACOBI_SPMV_STRIP_PADDING)") $(if $(JACOBI_SPMV_COMPACT_PE),JACOBI_SPMV_COMPACT_PE="$(JACOBI_SPMV_COMPACT_PE)") $(if $(JACOBI_SPMV_LANE_STATIC_REAL),JACOBI_SPMV_LANE_STATIC_REAL="$(JACOBI_SPMV_LANE_STATIC_REAL)") $(if $(JACOBI_SPMV_OOO_ACCUMULATE),JACOBI_SPMV_OOO_ACCUMULATE="$(JACOBI_SPMV_OOO_ACCUMULATE)") $(if $(JACOBI_SPMV_OOO_ACCUMULATE_RTL),JACOBI_SPMV_OOO_ACCUMULATE_RTL="$(JACOBI_SPMV_OOO_ACCUMULATE_RTL)") $(if $(JACOBI_BLOCKING_ENTRY_PROBE),JACOBI_BLOCKING_ENTRY_PROBE="$(JACOBI_BLOCKING_ENTRY_PROBE)") $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(JACOBI_KERNEL_FREQUENCY),JACOBI_KERNEL_FREQUENCY="$(JACOBI_KERNEL_FREQUENCY)") $(if $(JACOBI_TAPA_PACK_ONLY),JACOBI_TAPA_PACK_ONLY="$(JACOBI_TAPA_PACK_ONLY)") $(if $(JACOBI_TAPA_HOTPATCH_RTL_DIR),JACOBI_TAPA_HOTPATCH_RTL_DIR="$(JACOBI_TAPA_HOTPATCH_RTL_DIR)") $(if $(CUSTOM_RTL_DIR),CUSTOM_RTL_DIR="$(CUSTOM_RTL_DIR)") $(if $(WORK_DIR),WORK_DIR="$(WORK_DIR)")
 PACK_PROFILE := $(BUILD_DIR)/pack_profile
 
-.PHONY: all help tree clean launch launcher build-host build-mmap-probe-xrt-host pack-profile run-pack-profile run-sw regression-sw build-xo link-xclbin build-mmap-probe-xo link-mmap-probe-xclbin link-mmap-probe-xclbin-split hw-tmux run-hw run-mmap-probe-xrt
+.PHONY: all help tree clean launch launcher build-host build-mmap-probe-xrt-host pack-profile run-pack-profile run-sw regression-sw build-xo pack-hotpatch-xo link-xclbin build-mmap-probe-xo link-mmap-probe-xclbin link-mmap-probe-xclbin-split hw-tmux run-hw run-mmap-probe-xrt
 
 all: help
 
@@ -56,6 +56,7 @@ help:
 	@echo "  make run-sw       Run software simulation, MATRIX=<path>"
 	@echo "  make regression-sw Run compact software regression, MODE=quick|full"
 	@echo "  make build-xo     Build CuperJacobiIteration.xo"
+	@echo "  make pack-hotpatch-xo Repack existing TAPA WORK_DIR after RTL hotpatch"
 	@echo "  make link-xclbin  Link CuperJacobiIteration.xclbin"
 	@echo "  make build-mmap-probe-xo Build CuperJacobiMmapProbeOnly.xo"
 	@echo "  make link-mmap-probe-xclbin Link mmap probe xclbin, same HBM[24]"
@@ -100,6 +101,9 @@ regression-sw:
 
 build-xo:
 	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/build_xo_u55c.sh"
+
+pack-hotpatch-xo:
+	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/pack_hotpatch_xo_u55c.sh"
 
 link-xclbin:
 	BUILD_DIR="$(BUILD_DIR)" $(JACOBI_DEBUG_ENV) "$(SCRIPT_DIR)/link_xclbin_u55c.sh"

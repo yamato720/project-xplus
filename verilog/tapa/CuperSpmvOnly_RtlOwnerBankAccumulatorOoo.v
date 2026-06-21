@@ -11,6 +11,9 @@
 `ifdef VERILATOR
 `include "CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
 `else
+`ifdef CUPER_SPMV_ONLY_EXTERNAL_FADD_WRAPPER
+`include "CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+`endif
 `include "CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_support.vh"
 `endif
 
@@ -462,6 +465,7 @@ module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo (
 endmodule
 
 `ifndef VERILATOR
+`ifndef CUPER_SPMV_ONLY_EXTERNAL_FADD_WRAPPER
 module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
 #(parameter ID = 1,
   parameter NUM_STAGE = 13,
@@ -491,4 +495,5 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
         .dout(dout)
     );
 endmodule
+`endif
 `endif

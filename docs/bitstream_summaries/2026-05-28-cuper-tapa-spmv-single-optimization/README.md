@@ -170,7 +170,7 @@ logs/spmv_lanereal16_hw_sweep_20260618_233431/
 II=`2`，上板结果也支持后端 accumulator 吞吐是主要瓶颈。因此这版不建议晋级，也不
 更新正式 `source.diff`。
 
-## 2026-06-20 补充：SpMV-only RTL owner-bank 乱序 accumulator demo
+## 2026-06-21 补充：SpMV-only RTL owner-bank latency=12 demo
 
 本轮新增一个 `CuperSpmvServiceOnly` demo artifact，用于验证把 lane-static real
 路径后的 HLS accumulator 替换为自定义 RTL owner-bank accumulator 后，资源和时序是否
@@ -204,44 +204,44 @@ JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
 395bitstream/cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin.info
 ```
 
-构建目录和日志：
+当前同步版构建目录和日志：
 
 ```text
-cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/
-cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/logs/build_hw_tmux.log
+cuper-tapa-spmv-ooobank16-lat12-hw-150m-20260621-build/
+cuper-tapa-spmv-ooobank16-lat12-hw-150m-20260621-build/logs/build_hw_tmux.log
 ```
 
-版本信息：
+当前同步版本信息：
 
 ```text
 Kernel: CuperSpmvServiceOnly
-UUID: e6998763-ba80-b12f-f180-5099ba926c6d
-SHA256: c06628ed1db937c5718c814fadfce34709126a6864687529267d30c82cc35b20
-DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
-Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+UUID: 58158740-a7ef-a803-0da5-1fd8b3206253
+SHA256: 5e3f2e863cba4efca519ce18f9e9e735f05084af1242cd493e079c1844f777b3
+DATA/KERNEL/HBM clock: 150 / 500 / 445 MHz
+Timing: WNS -0.024 ns, TNS -0.086 ns, setup failing endpoints 8
 ```
 
 HBM 映射为：`Matrix_data_0..15 -> HBM[0..15]`，`SpElement_list_ptr -> HBM[16]`，
 `X -> HBM[17]`，`Y_out -> HBM[18]`，`Status -> HBM[30]`，`Metrics -> HBM[31]`。
-最终资源为 CLB LUT `25.95%`、CLB `52.49%`、BRAM Tile `65.48%`、URAM `53.33%`、
-DSP `7.70%`、Total SLLs `26740`。相比失败的 128 owner-lane RTL 实例方向，
-16 owner-bank 包装后 routed 完成，并且当前修复版 timing clean。
+最终资源为 CLB LUT `25.83%`、CLB `51.17%`、BRAM Tile `65.48%`、URAM `53.33%`、
+DSP `7.70%`、Total SLLs `24473`。相比失败的 128 owner-lane RTL 实例方向，
+16 owner-bank 包装后 routed 完成；本轮 150 MHz 版本仅有轻微 setup violation。
 
 本机验证状态：
 
-- Verilator owner-bank 小仿真通过：`cycles=69`、`real_events=40`、`outputs=16`、
-  `cycles_per_event=1.725`；
-- TAPA software smoke 通过 `thermal2_n16` 和 `thermal2_n1024`，均为
-  `Correctness Verification: Passed`、`Error Num=0`；
+- Vivado/xsim 后端数据集仿真在使用真实 Vivado floating_point IP 时通过
+  `thermal2_n4096`、`thermal2_n16384` 和 `thermal2_n65536`；
+- `thermal2_n131072` 暂时撞到 testbench `MAX_ROWS=65536` 上限，不是 RTL 计算失败；
+- `thermal2_n16` 和 `thermal2_n1024` 此前也已通过同一路径；
 - 硬件 bitstream 已生成并覆盖同步到 `395bitstream/` 同名 SpMV demo 槽；
 - 服务器上板 sweep 尚未执行，因此这版暂不写入 HTML 性能曲线，也不更新正式
   `source.diff`。
 
-该同名 demo 槽上一版 UUID 为 `22b0a282-c282-cfaf-e45a-f8bebf4cc644`，SHA256 为
-`a5ab4ba8a601bb12c3b737e318da28c29a3e4bdd2c037a9e670ac31a5a9f51b4`。服务器侧已测出
-`thermal2_n16` Finish 正常返回但输出全 0，`thermal2_n1024` 卡在 Finish。当前
-`e699...` 修复版针对该边界修正了 bank 输出计数闭合和 lane tag 显式传递；旧失败
-结论只对应旧 UUID。
+该同名 demo 槽此前有两版失败/待测历史。旧 UUID
+`22b0a282-c282-cfaf-e45a-f8bebf4cc644` 服务器侧已测出 `thermal2_n16` Finish
+正常返回但输出全 0，`thermal2_n1024` 卡在 Finish；随后
+`e6998763-ba80-b12f-f180-5099ba926c6d` 修复了 bank 输出计数闭合和 lane tag
+显式传递，但仍未包含本轮 floating_point latency=12 修复。旧结论只对应旧 UUID。
 
 ## 目标
 
