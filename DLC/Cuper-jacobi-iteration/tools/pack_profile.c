@@ -60,6 +60,11 @@ typedef struct {
   size_t real;
   size_t scheduled;
   size_t max_len;
+  size_t channel_len_sum;
+  size_t channel_len_min;
+  size_t channel_len_max;
+  size_t channel_len_ideal;
+  size_t channel_len_extra;
   size_t read_slots;
   size_t channel_read_slots;
   size_t pe_compact_read_slots;
@@ -67,6 +72,7 @@ typedef struct {
   size_t real_compact_read_slots;
   double density;
   double channel_density;
+  double channel_balance_eff;
   double pe_compact_density;
   double lane_static_real_density;
   double real_compact_density;
@@ -336,8 +342,60 @@ static int cmp_batch_padding(const void* a, const void* b) {
   return x->id - y->id;
 }
 
+static int cmp_batch_hbm_imbalance(const void* a, const void* b) {
+  const BatchStat* x = (const BatchStat*)a;
+  const BatchStat* y = (const BatchStat*)b;
+  if (x->channel_len_extra < y->channel_len_extra) return 1;
+  if (x->channel_len_extra > y->channel_len_extra) return -1;
+  if (x->channel_balance_eff < y->channel_balance_eff) return -1;
+  if (x->channel_balance_eff > y->channel_balance_eff) return 1;
+  return x->id - y->id;
+}
+
 static size_t ceil_div_size(size_t value, size_t divisor) {
   return (value + divisor - 1u) / divisor;
+}
+
+static size_t sum_size_array(const size_t* data, int n) {
+  size_t total = 0;
+  for (int i = 0; i < n; ++i) total += data[i];
+  return total;
+}
+
+static size_t min_size_array(const size_t* data, int n) {
+  size_t min_v = data[0];
+  for (int i = 1; i < n; ++i) {
+    if (data[i] < min_v) min_v = data[i];
+  }
+  return min_v;
+}
+
+static size_t max_size_array(const size_t* data, int n) {
+  size_t max_v = data[0];
+  for (int i = 1; i < n; ++i) {
+    if (data[i] > max_v) max_v = data[i];
+  }
+  return max_v;
+}
+
+static double balance_efficiency(size_t total, int lanes, size_t bottleneck) {
+  if (lanes <= 0 || bottleneck == 0) return total == 0 ? 1.0 : 0.0;
+  const long double denom = (long double)lanes * (long double)bottleneck;
+  return denom > 0.0 ? (double)((long double)total / denom) : 0.0;
+}
+
+static void print_parallel_balance(const char* label, const size_t* data, int n) {
+  const size_t total = sum_size_array(data, n);
+  const size_t min_v = min_size_array(data, n);
+  const size_t max_v = max_size_array(data, n);
+  const size_t ideal = ceil_div_size(total, (size_t)n);
+  const size_t extra = (max_v > ideal) ? max_v - ideal : 0;
+  const double eff = balance_efficiency(total, n, max_v);
+  const double idle = (eff < 1.0) ? (1.0 - eff) : 0.0;
+  const double avg = n ? (double)total / (double)n : 0.0;
+  printf("    %-24s total=%zu min=%zu max=%zu avg=%.2f ideal=%zu extra=%zu eff=%.2f%% idle=%.2f%%\n",
+         label, total, min_v, max_v, avg, ideal, extra, eff * 100.0,
+         idle * 100.0);
 }
 
 static void print_min_max_avg(const char* label, const size_t* data, int n) {
@@ -393,7 +451,14 @@ static void print_csv_header(void) {
          "balanced_compact_stream_read_slots,balanced_compact_stream_density,"
          "balanced_compact_stream_total_savings_slots,"
          "balanced_compact_stream_total_savings_pct,"
-         "balanced_compact_stream_channel_beats\n");
+         "balanced_compact_stream_channel_beats,"
+         "channel_real_balance_eff,channel_sched_balance_eff,"
+         "channel_dyn_balance_eff,pe_real_balance_eff,pe_sched_balance_eff,"
+         "pe_compact_stream_hbm_balance_eff,channel_dyn_ideal_beats,"
+         "channel_dyn_extra_beats,channel_dyn_bottleneck_beats,"
+         "lane_static_real_hbm_balance_eff,lane_static_real_hbm_beats_min,"
+         "lane_static_real_hbm_beats_max,lane_static_real_hbm_ideal_beats,"
+         "lane_static_real_hbm_extra_beats\n");
 }
 
 static void profile_one_hbm(const Meta* meta,
@@ -457,6 +522,7 @@ static void profile_one_hbm(const Meta* meta,
   size_t* channel_sched = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
   size_t* channel_dynamic_len = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
   size_t* channel_pe_compact_stream_beats = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
+  size_t* channel_lane_static_real_beats = (size_t*)xcalloc((size_t)hbm, sizeof(size_t));
   size_t* pe_real = (size_t*)xcalloc((size_t)num_pe, sizeof(size_t));
   size_t* pe_sched = (size_t*)xcalloc((size_t)num_pe, sizeof(size_t));
   Slot* dump_slots = NULL;
@@ -529,7 +595,15 @@ static void profile_one_hbm(const Meta* meta,
     size_t pe_compact_batch_beats = 0;
     size_t lane_static_real_batch_beats = 0;
     size_t real_compact_batch_beats = 0;
+    size_t channel_batch_len_min = channel_batch_len[0];
+    size_t channel_batch_len_max = channel_batch_len[0];
     for (int c = 0; c < hbm; ++c) {
+      if (channel_batch_len[c] < channel_batch_len_min) {
+        channel_batch_len_min = channel_batch_len[c];
+      }
+      if (channel_batch_len[c] > channel_batch_len_max) {
+        channel_batch_len_max = channel_batch_len[c];
+      }
       channel_dynamic_len[c] += channel_batch_len[c];
       channel_batch_read_beats += channel_batch_len[c];
       pe_compact_batch_beats += ceil_div_size(channel_batch_sched[c], (size_t)kPeNum);
@@ -540,6 +614,7 @@ static void profile_one_hbm(const Meta* meta,
         }
       }
       lane_static_real_batch_beats += channel_lane_max;
+      channel_lane_static_real_beats[c] += channel_lane_max;
       real_compact_batch_beats += ceil_div_size(channel_batch_real[c], (size_t)kPeNum);
     }
     channel_dynamic_read_beats += channel_batch_read_beats;
@@ -552,6 +627,15 @@ static void profile_one_hbm(const Meta* meta,
     batch_stats[batch].real = batch_real;
     batch_stats[batch].scheduled = batch_scheduled;
     batch_stats[batch].max_len = max_len;
+    batch_stats[batch].channel_len_sum = channel_batch_read_beats;
+    batch_stats[batch].channel_len_min = channel_batch_len_min;
+    batch_stats[batch].channel_len_max = channel_batch_len_max;
+    batch_stats[batch].channel_len_ideal =
+        ceil_div_size(channel_batch_read_beats, (size_t)hbm);
+    batch_stats[batch].channel_len_extra =
+        (channel_batch_len_max > batch_stats[batch].channel_len_ideal)
+            ? channel_batch_len_max - batch_stats[batch].channel_len_ideal
+            : 0;
     batch_stats[batch].read_slots = max_len * (size_t)num_pe;
     batch_stats[batch].channel_read_slots = channel_batch_read_beats * (size_t)kPeNum;
     batch_stats[batch].pe_compact_read_slots = pe_compact_batch_beats * (size_t)kPeNum;
@@ -567,6 +651,8 @@ static void profile_one_hbm(const Meta* meta,
         batch_stats[batch].channel_read_slots
             ? (double)batch_real / (double)batch_stats[batch].channel_read_slots
             : 0.0;
+    batch_stats[batch].channel_balance_eff =
+        balance_efficiency(channel_batch_read_beats, hbm, channel_batch_len_max);
     batch_stats[batch].pe_compact_density =
         batch_stats[batch].pe_compact_read_slots
             ? (double)batch_real / (double)batch_stats[batch].pe_compact_read_slots
@@ -673,6 +759,19 @@ static void profile_one_hbm(const Meta* meta,
       lane_static_real_stream_read_slots ? (double)real_nnz / (double)lane_static_real_stream_read_slots : 0.0;
   const double lane_static_real_stream_savings_pct =
       read_slots ? (double)lane_static_real_stream_savings_slots * 100.0 / (double)read_slots : 0.0;
+  const size_t lane_static_real_hbm_beats_min =
+      min_size_array(channel_lane_static_real_beats, hbm);
+  const size_t lane_static_real_hbm_beats_max =
+      max_size_array(channel_lane_static_real_beats, hbm);
+  const size_t lane_static_real_hbm_ideal_beats =
+      ceil_div_size(lane_static_real_batch_read_beats, (size_t)hbm);
+  const size_t lane_static_real_hbm_extra_beats =
+      (lane_static_real_hbm_beats_max > lane_static_real_hbm_ideal_beats)
+          ? lane_static_real_hbm_beats_max - lane_static_real_hbm_ideal_beats
+          : 0;
+  const double lane_static_real_hbm_balance_eff =
+      balance_efficiency(lane_static_real_batch_read_beats, hbm,
+                         lane_static_real_hbm_beats_max);
   const size_t real_compact_stream_read_slots =
       real_compact_stream_read_beats * (size_t)kPeNum;
   const size_t real_compact_stream_align_pad =
@@ -726,6 +825,12 @@ static void profile_one_hbm(const Meta* meta,
       channel_dynamic_len_max = channel_dynamic_len[i];
     }
   }
+  const size_t channel_dynamic_ideal_beats =
+      ceil_div_size(channel_dynamic_read_beats, (size_t)hbm);
+  const size_t channel_dynamic_extra_beats =
+      (channel_dynamic_len_max > channel_dynamic_ideal_beats)
+          ? channel_dynamic_len_max - channel_dynamic_ideal_beats
+          : 0;
   size_t pe_compact_stream_channel_beats_min = channel_pe_compact_stream_beats[0];
   size_t pe_compact_stream_channel_beats_max = channel_pe_compact_stream_beats[0];
   for (int i = 1; i < hbm; ++i) {
@@ -736,9 +841,22 @@ static void profile_one_hbm(const Meta* meta,
       pe_compact_stream_channel_beats_max = channel_pe_compact_stream_beats[i];
     }
   }
+  const double channel_real_balance_eff =
+      balance_efficiency(real_nnz, hbm, channel_real_max);
+  const double channel_sched_balance_eff =
+      balance_efficiency(scheduled_slots, hbm, channel_sched ? max_size_array(channel_sched, hbm) : 0);
+  const double channel_dyn_balance_eff =
+      balance_efficiency(channel_dynamic_read_beats, hbm, channel_dynamic_len_max);
+  const double pe_real_balance_eff =
+      balance_efficiency(real_nnz, num_pe, pe_real_max);
+  const double pe_sched_balance_eff =
+      balance_efficiency(scheduled_slots, num_pe, pe_sched_max);
+  const double pe_compact_stream_hbm_balance_eff =
+      balance_efficiency(pe_compact_stream_read_beats, hbm,
+                         pe_compact_stream_channel_beats_max);
 
   if (opt->csv) {
-    printf("%s,%d,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu\n",
+    printf("%s,%d,%d,%d,%d,%d,%zu,%d,%d,%d,%d,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%.2f,%zu,%.6f,%zu,%zu,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%zu,%zu,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%zu,%.2f,%zu,%zu,%.6f,%zu,%.2f,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%zu,%zu,%zu,%.6f,%zu,%zu,%zu,%zu\n",
            dataset, hbm, meta->m, meta->n, opt->drop_diag, opt->window, real_nnz,
            slice_size, batch_size, slice_width, batch_num, matrix_len,
            read_beats, read_slots, density, padding_slots, reorder_holes,
@@ -794,7 +912,21 @@ static void profile_one_hbm(const Meta* meta,
            balanced_compact_stream_density,
            balanced_compact_stream_savings_slots,
            balanced_compact_stream_savings_pct,
-           balanced_compact_stream_channel_beats);
+           balanced_compact_stream_channel_beats,
+           channel_real_balance_eff,
+           channel_sched_balance_eff,
+           channel_dyn_balance_eff,
+           pe_real_balance_eff,
+           pe_sched_balance_eff,
+           pe_compact_stream_hbm_balance_eff,
+           channel_dynamic_ideal_beats,
+           channel_dynamic_extra_beats,
+           channel_dynamic_len_max,
+           lane_static_real_hbm_balance_eff,
+           lane_static_real_hbm_beats_min,
+           lane_static_real_hbm_beats_max,
+           lane_static_real_hbm_ideal_beats,
+           lane_static_real_hbm_extra_beats);
   } else {
     printf("\nHBM=%d\n", hbm);
     printf("  slice_size=%d batch_size=%d slice_width=%d col_slices=%d batch_num=%d num_pe=%d window=%d\n",
@@ -880,6 +1012,20 @@ static void profile_one_hbm(const Meta* meta,
     print_min_max_avg("HBM compact512 beats", channel_pe_compact_stream_beats, hbm);
     print_min_max_avg("PE real nnz", pe_real, num_pe);
     print_min_max_avg("PE scheduled slots", pe_sched, num_pe);
+    printf("  load balance:\n");
+    print_parallel_balance("HBM real nnz", channel_real, hbm);
+    print_parallel_balance("HBM scheduled slots", channel_sched, hbm);
+    print_parallel_balance("HBM dynamic beats", channel_dynamic_len, hbm);
+    print_parallel_balance("HBM compact512 beats", channel_pe_compact_stream_beats, hbm);
+    print_parallel_balance("HBM lane-real beats", channel_lane_static_real_beats, hbm);
+    print_parallel_balance("PE real nnz", pe_real, num_pe);
+    print_parallel_balance("PE scheduled slots", pe_sched, num_pe);
+    printf("    strip bottleneck       total_hbm_dyn_beats=%zu ideal_per_hbm=%zu bottleneck=%zu extra=%zu eff=%.2f%%\n",
+           channel_dynamic_read_beats,
+           channel_dynamic_ideal_beats,
+           channel_dynamic_len_max,
+           channel_dynamic_extra_beats,
+           channel_dyn_balance_eff * 100.0);
 
     if (opt->top_batches > 0 && batch_num > 0) {
       BatchStat* sorted = (BatchStat*)xmalloc((size_t)batch_num * sizeof(BatchStat));
@@ -903,6 +1049,27 @@ static void profile_one_hbm(const Meta* meta,
                b->read_slots - b->channel_read_slots,
                b->read_slots - b->pe_compact_read_slots,
                b->read_slots - b->real_compact_read_slots);
+      }
+      free(sorted);
+
+      sorted = (BatchStat*)xmalloc((size_t)batch_num * sizeof(BatchStat));
+      memcpy(sorted, batch_stats, (size_t)batch_num * sizeof(BatchStat));
+      qsort(sorted, (size_t)batch_num, sizeof(BatchStat), cmp_batch_hbm_imbalance);
+      printf("  worst batches by HBM imbalance:\n");
+      printf("    batch  hbm_dyn_beats  min  max  ideal  extra  eff     real  scheduled  hbm_dyn_slots\n");
+      for (int i = 0; i < top; ++i) {
+        const BatchStat* b = &sorted[i];
+        printf("    %5d %14zu %4zu %4zu %6zu %6zu %6.2f%% %7zu %10zu %14zu\n",
+               b->id,
+               b->channel_len_sum,
+               b->channel_len_min,
+               b->channel_len_max,
+               b->channel_len_ideal,
+               b->channel_len_extra,
+               b->channel_balance_eff * 100.0,
+               b->real,
+               b->scheduled,
+               b->channel_read_slots);
       }
       free(sorted);
     }
@@ -931,6 +1098,7 @@ static void profile_one_hbm(const Meta* meta,
   free(dump_slots);
   free(pe_sched);
   free(pe_real);
+  free(channel_lane_static_real_beats);
   free(channel_pe_compact_stream_beats);
   free(channel_dynamic_len);
   free(channel_sched);

@@ -131,6 +131,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 *(["export JACOBI_SPMV_COMPACT_PE=1"] if os.environ.get("JACOBI_SPMV_COMPACT_PE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_LANE_STATIC_REAL=1"] if os.environ.get("JACOBI_SPMV_LANE_STATIC_REAL") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE") not in {None, "", "0"} else []),
+                *(["export JACOBI_SPMV_SEGMENTED_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_SEGMENTED_ACCUMULATE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE_RTL=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE_RTL") not in {None, "", "0"} else []),
                 *(["export JACOBI_TAPA_PACK_ONLY=1"] if os.environ.get("JACOBI_TAPA_PACK_ONLY") not in {None, "", "0"} else []),
                 *(["export JACOBI_TAPA_HOTPATCH_RTL_DIR=" + shell_quote(os.environ["JACOBI_TAPA_HOTPATCH_RTL_DIR"])] if os.environ.get("JACOBI_TAPA_HOTPATCH_RTL_DIR") else []),

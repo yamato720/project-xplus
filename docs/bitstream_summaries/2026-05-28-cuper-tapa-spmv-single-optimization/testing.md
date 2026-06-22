@@ -1257,3 +1257,38 @@ HTML/Markdown 记录，本轮没有重跑标准版。
   不能声明为单点性能提升；
 - 数值校验全部通过，`max_rel_diff` 均低于 `DIFF_TOL=1e-1`；
 - 本轮只更新 README/testing/HTML 测试记录，不更新正式 `source.diff`。
+
+## 2026-06-22 strip16 window 300 MHz no-progress artifacts
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin
+kernel: CuperSpmvServiceOnly
+macro: JACOBI_SPMV_STRIP_PADDING=1, JACOBI_SPMV_ACC_WINDOW={14|16}
+```
+
+构建结果：
+
+| 版本 | UUID | SHA256 | requested DATA | achieved DATA | KERNEL | HBM | WNS | TNS | setup failing endpoints |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| window14 300m no-progress | `f13edc28-7dd1-d7aa-ab66-e51c52cf31b7` | `10c7c11c2b461b8c4b376f6eb3cceeee754722ab883d32d9b6cb89b6289733d5` | 300 MHz | 202.5 MHz | 500 MHz | 450 MHz | -1.604 ns | -31426.979 ns | 74375 |
+| window16 300m no-progress | `525491e1-725b-4c9c-df09-cf555a26ba37` | `5de4d204bf28528693d13c69b5873f19877120e69d511c2ab0b771a4152298f1` | 300 MHz | 192.1 MHz | 500 MHz | 447 MHz | -1.870 ns | -32768.406 ns | 69785 |
+
+构建目录和日志：
+
+```text
+cuper-jacobi-spmv-strip16-window14-300m-noprogress-build/
+cuper-jacobi-spmv-strip16-window14-300m-noprogress-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-strip16-window16-300m-noprogress-build/
+cuper-jacobi-spmv-strip16-window16-300m-noprogress-build/logs/build_hw_tmux.log
+```
+
+关键结论：
+
+- 两版均 `impl Complete` 并生成 xclbin；
+- routed timing 明确未满足 300 MHz 目标，Vitis 对 DATA clock 做了 auto-frequency scaling；
+- 这轮还没有服务器侧上板功能/性能数据；
+- 当前仅同步到 `395bitstream/` 供服务器侧风险测试，不建议晋级标准；
+- 本轮不更新正式 `source.diff`。

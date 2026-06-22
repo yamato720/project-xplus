@@ -573,6 +573,35 @@ loader/core/destroy 常驻服务链。统一范围只限 command 构造和广播
 `395bitstream/cuper-tapa-spmv-u55c-20260528-demo.xclbin` 仍是历史 service 抽出版。
 后续 2026-05-29 已重新生成并上板测试当前 one-shot demo。
 
+## 2026-06-22 补充：strip16 window 300 MHz no-progress 实验
+
+本轮同步两份 `CuperSpmvServiceOnly` 300 MHz link 目标实验 artifact，用来确认去掉
+progress snapshot 细粒度事件后，window14/window16 在更高 DATA 目标下的构建边界。
+它们仍属于 `cuper-tapa-spmv` SpMV-only 实验线，不替代已验证的
+`20260618-strip16-demo`，也不覆盖 150 MHz timing-clean 的 window14/window16 记录。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin
+```
+
+结果口径：
+
+- window14：UUID `f13edc28-7dd1-d7aa-ab66-e51c52cf31b7`，SHA256
+  `10c7c11c2b461b8c4b376f6eb3cceeee754722ab883d32d9b6cb89b6289733d5`，
+  DATA/KERNEL/HBM clock 为 `202/500/450 MHz`，routed timing WNS `-1.604 ns`、
+  TNS `-31426.979 ns`，setup failing endpoints `74375`。
+- window16：UUID `525491e1-725b-4c9c-df09-cf555a26ba37`，SHA256
+  `5de4d204bf28528693d13c69b5873f19877120e69d511c2ab0b771a4152298f1`，
+  DATA/KERNEL/HBM clock 为 `192/500/447 MHz`，routed timing WNS `-1.870 ns`、
+  TNS `-32768.406 ns`，setup failing endpoints `69785`。
+
+两版均 `impl Complete` 并生成 xclbin，但 300 MHz timing 未收敛，Vitis 对 DATA
+clock 自动降频。它们只用于服务器侧风险测试，不建议晋级标准，正式 `source.diff`
+本轮不更新。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：

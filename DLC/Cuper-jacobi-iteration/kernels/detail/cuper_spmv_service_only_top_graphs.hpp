@@ -112,6 +112,26 @@ write_spmv_progress_metrics_resp:
     }
 }
 
+#ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
+inline void CuperSpmvOnly_WriteRtlProgressEntryHeartbeat(
+    tapa::async_mmap<INDEX_TYPE> &Status) {
+#pragma HLS inline
+    // RTL accumulator debug only: expose task entry before the heavier
+    // Status/Metrics snapshot can block on multi-word mmap responses.
+    Status.write_addr.write(8);
+    Status.write_data.write(kCuperSpmvOnlyProgressMagic);
+
+write_spmv_rtl_progress_entry_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 1;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Status.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+#endif
+
 void CuperSpmvOnly_ProgressWriter(
     const INDEX_TYPE Batch_num,
     const INDEX_TYPE Matrix_len,
@@ -128,6 +148,9 @@ void CuperSpmvOnly_ProgressWriter(
     // 这些槽位会被 host 在 Finish() 前主动 sync 读取，用来判断板上卡住时
     // kernel 到达了哪一段。
     INDEX_TYPE event_count = 1;
+#ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
+    CuperSpmvOnly_WriteRtlProgressEntryHeartbeat(Status);
+#endif
     CuperSpmvOnly_WriteProgressSnapshot(
         Status,
         Metrics,
@@ -842,6 +865,9 @@ iter:
 #ifndef PINGPONG
 #error "CuperSpmvOnly tagged accumulator currently requires PINGPONG."
 #endif
+#if defined(JACOBI_SPMV_SEGMENTED_ACCUMULATE) && defined(JACOBI_SPMV_OOO_ACCUMULATE_RTL)
+#error "JACOBI_SPMV_SEGMENTED_ACCUMULATE is a non-RTL owner-bank cache experiment; do not combine it with JACOBI_SPMV_OOO_ACCUMULATE_RTL."
+#endif
 
 struct CuperSpmvOnly_TaggedFloatV2 {
     INDEX_TYPE packet_idx;
@@ -858,6 +884,9 @@ struct CuperSpmvOnly_TaggedScalar {
 };
 
 constexpr int CUPER_SPMV_ROW_CACHE_SIZE = 4;
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+constexpr int CUPER_SPMV_ROW_SEGMENT_SIZE = 8;
+#endif
 
 inline INDEX_TYPE CuperSpmvOnly_TaggedPacketIndexFromSlot(
     const INDEX_TYPE source_core,
@@ -962,6 +991,99 @@ find_hit:
         valid[target] = true;
     }
 }
+
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+inline void CuperSpmvOnly_FlushRowSegmentEntry(
+    bool &valid,
+    ap_uint<17> &addr,
+    ap_uint<4> &segment_count,
+    VALUE_TYPE segment_value[CUPER_SPMV_ROW_SEGMENT_SIZE],
+    ap_uint<32> local_part_Y[URAM_DEPTH]) {
+#pragma HLS inline
+#pragma HLS array_partition complete variable=segment_value dim=1
+    if (valid) {
+        if (segment_count != 0) {
+            VALUE_TYPE updated = CuperSpmvOnly_ReadCachedSum(addr, local_part_Y);
+            if (segment_count > 0) updated += segment_value[0];
+            if (segment_count > 1) updated += segment_value[1];
+            if (segment_count > 2) updated += segment_value[2];
+            if (segment_count > 3) updated += segment_value[3];
+            if (segment_count > 4) updated += segment_value[4];
+            if (segment_count > 5) updated += segment_value[5];
+            if (segment_count > 6) updated += segment_value[6];
+            if (segment_count > 7) updated += segment_value[7];
+            CuperSpmvOnly_WriteCachedSum(addr, updated, local_part_Y);
+        }
+        valid = false;
+        segment_count = 0;
+    }
+}
+
+inline bool CuperSpmvOnly_TryPushRowSegmentUpdate(
+    const ap_uint<17> addr,
+    const VALUE_TYPE value,
+    bool valid[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<17> cached_addr[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<4> segment_count[CUPER_SPMV_ROW_CACHE_SIZE],
+    VALUE_TYPE segment_value[CUPER_SPMV_ROW_CACHE_SIZE][CUPER_SPMV_ROW_SEGMENT_SIZE],
+    INDEX_TYPE &victim,
+    INDEX_TYPE &flush_entry) {
+#pragma HLS inline
+#pragma HLS array_partition complete variable=valid dim=1
+#pragma HLS array_partition complete variable=cached_addr dim=1
+#pragma HLS array_partition complete variable=segment_count dim=1
+#pragma HLS array_partition complete variable=segment_value dim=0
+    bool hit = false;
+    INDEX_TYPE hit_idx = 0;
+try_segment_hit:
+    for (INDEX_TYPE entry = 0; entry < CUPER_SPMV_ROW_CACHE_SIZE; ++entry) {
+#pragma HLS unroll
+        if (valid[entry] && cached_addr[entry] == addr) {
+            hit = true;
+            hit_idx = entry;
+        }
+    }
+
+    INDEX_TYPE target = 0;
+    if (hit) {
+        target = hit_idx;
+        if (segment_count[target] == CUPER_SPMV_ROW_SEGMENT_SIZE) {
+            flush_entry = target;
+            return false;
+        }
+    } else {
+        bool found_empty = false;
+    try_segment_empty:
+        for (INDEX_TYPE entry = 0; entry < CUPER_SPMV_ROW_CACHE_SIZE; ++entry) {
+#pragma HLS unroll
+            if (!valid[entry] && !found_empty) {
+                found_empty = true;
+                target = entry;
+            }
+        }
+
+        if (!found_empty) {
+            target = victim;
+            flush_entry = target;
+            ++victim;
+            if (victim == CUPER_SPMV_ROW_CACHE_SIZE) {
+                victim = 0;
+            }
+            return false;
+        }
+
+        cached_addr[target] = addr;
+        segment_count[target] = 0;
+        valid[target] = true;
+    }
+
+    const ap_uint<4> slot = segment_count[target];
+    segment_value[target][slot] = value;
+    segment_count[target] = slot + 1;
+    return true;
+}
+
+#endif
 
 inline INDEX_TYPE CuperSpmvOnly_TaggedPacketIndex(const INDEX_TYPE channel_id,
                                                   const INDEX_TYPE local_output_idx) {
@@ -1833,6 +1955,90 @@ iter:
 inline void CuperSpmvOnly_ConsumeOwnerLaneOoo(
     tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream,
     bool &done,
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+    bool &pending_valid,
+    CuperSpmvOnly_TaggedScalar &pending_tagged,
+    bool cache_ping_valid[CUPER_SPMV_ROW_CACHE_SIZE],
+    bool cache_pong_valid[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<17> cache_ping_addr[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<17> cache_pong_addr[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<4> segment_ping_count[CUPER_SPMV_ROW_CACHE_SIZE],
+    ap_uint<4> segment_pong_count[CUPER_SPMV_ROW_CACHE_SIZE],
+    VALUE_TYPE segment_ping_value[CUPER_SPMV_ROW_CACHE_SIZE][CUPER_SPMV_ROW_SEGMENT_SIZE],
+    VALUE_TYPE segment_pong_value[CUPER_SPMV_ROW_CACHE_SIZE][CUPER_SPMV_ROW_SEGMENT_SIZE],
+    INDEX_TYPE &cache_ping_victim,
+    INDEX_TYPE &cache_pong_victim,
+    ap_uint<32> local_part_Y_ping[URAM_DEPTH],
+    ap_uint<32> local_part_Y_pong[URAM_DEPTH]) {
+#pragma HLS inline
+    if (done) {
+        return;
+    }
+
+    CuperSpmvOnly_TaggedScalar tagged;
+    bool have_tagged = pending_valid;
+    if (pending_valid) {
+        tagged = pending_tagged;
+    } else if (!Owner_Lane_Stream.empty()) {
+        Owner_Lane_Stream.try_read(tagged);
+        have_tagged = true;
+    }
+
+    if (!have_tagged) {
+        return;
+    }
+
+    if (tagged.done != 0) {
+        done = true;
+        pending_valid = false;
+        return;
+    }
+
+    const ap_uint<17> addr = tagged.packet_idx / HBM_CHANNEL_NUM;
+    INDEX_TYPE flush_entry = 0;
+    bool accepted = false;
+    if (tagged.scalar_lane == 0) {
+        accepted = CuperSpmvOnly_TryPushRowSegmentUpdate(
+            addr,
+            tagged.value,
+            cache_ping_valid,
+            cache_ping_addr,
+            segment_ping_count,
+            segment_ping_value,
+            cache_ping_victim,
+            flush_entry);
+        if (!accepted) {
+            CuperSpmvOnly_FlushRowSegmentEntry(cache_ping_valid[flush_entry],
+                                               cache_ping_addr[flush_entry],
+                                               segment_ping_count[flush_entry],
+                                               segment_ping_value[flush_entry],
+                                               local_part_Y_ping);
+        }
+    } else {
+        accepted = CuperSpmvOnly_TryPushRowSegmentUpdate(
+            addr,
+            tagged.value,
+            cache_pong_valid,
+            cache_pong_addr,
+            segment_pong_count,
+            segment_pong_value,
+            cache_pong_victim,
+            flush_entry);
+        if (!accepted) {
+            CuperSpmvOnly_FlushRowSegmentEntry(cache_pong_valid[flush_entry],
+                                               cache_pong_addr[flush_entry],
+                                               segment_pong_count[flush_entry],
+                                               segment_pong_value[flush_entry],
+                                               local_part_Y_pong);
+        }
+    }
+
+    pending_valid = !accepted;
+    if (!accepted) {
+        pending_tagged = tagged;
+    }
+}
+#else
     bool cache_ping_valid[CUPER_SPMV_ROW_CACHE_SIZE],
     bool cache_pong_valid[CUPER_SPMV_ROW_CACHE_SIZE],
     ap_uint<17> cache_ping_addr[CUPER_SPMV_ROW_CACHE_SIZE],
@@ -1868,6 +2074,7 @@ inline void CuperSpmvOnly_ConsumeOwnerLaneOoo(
         }
     }
 }
+#endif
 
 void CuperSpmvOnly_OwnerAccumulatorTransposeOoo(
     const INDEX_TYPE Iteration_num,
@@ -1910,10 +2117,25 @@ iter:
 #pragma HLS array_partition complete variable=cache_ping_addr dim=0
         ap_uint<17> cache_pong_addr[8][CUPER_SPMV_ROW_CACHE_SIZE];
 #pragma HLS array_partition complete variable=cache_pong_addr dim=0
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+        ap_uint<4> segment_ping_count[8][CUPER_SPMV_ROW_CACHE_SIZE];
+#pragma HLS array_partition complete variable=segment_ping_count dim=0
+        ap_uint<4> segment_pong_count[8][CUPER_SPMV_ROW_CACHE_SIZE];
+#pragma HLS array_partition complete variable=segment_pong_count dim=0
+        VALUE_TYPE segment_ping_value[8][CUPER_SPMV_ROW_CACHE_SIZE][CUPER_SPMV_ROW_SEGMENT_SIZE];
+#pragma HLS array_partition complete variable=segment_ping_value dim=0
+        VALUE_TYPE segment_pong_value[8][CUPER_SPMV_ROW_CACHE_SIZE][CUPER_SPMV_ROW_SEGMENT_SIZE];
+#pragma HLS array_partition complete variable=segment_pong_value dim=0
+        bool pending_valid[8];
+#pragma HLS array_partition complete variable=pending_valid dim=1
+        CuperSpmvOnly_TaggedScalar pending_tagged[8];
+#pragma HLS array_partition complete variable=pending_tagged dim=1
+#else
         VALUE_TYPE cache_ping_value[8][CUPER_SPMV_ROW_CACHE_SIZE];
 #pragma HLS array_partition complete variable=cache_ping_value dim=0
         VALUE_TYPE cache_pong_value[8][CUPER_SPMV_ROW_CACHE_SIZE];
 #pragma HLS array_partition complete variable=cache_pong_value dim=0
+#endif
         INDEX_TYPE cache_ping_victim[8];
 #pragma HLS array_partition complete variable=cache_ping_victim dim=1
         INDEX_TYPE cache_pong_victim[8];
@@ -1935,14 +2157,27 @@ iter:
 #pragma HLS unroll
             cache_ping_victim[pair_lane] = 0;
             cache_pong_victim[pair_lane] = 0;
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+            pending_valid[pair_lane] = false;
+#endif
             for (INDEX_TYPE entry = 0; entry < CUPER_SPMV_ROW_CACHE_SIZE; ++entry) {
 #pragma HLS unroll
                 cache_ping_valid[pair_lane][entry] = false;
                 cache_pong_valid[pair_lane][entry] = false;
                 cache_ping_addr[pair_lane][entry] = 0;
                 cache_pong_addr[pair_lane][entry] = 0;
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+                segment_ping_count[pair_lane][entry] = 0;
+                segment_pong_count[pair_lane][entry] = 0;
+                for (INDEX_TYPE slot = 0; slot < CUPER_SPMV_ROW_SEGMENT_SIZE; ++slot) {
+#pragma HLS unroll
+                    segment_ping_value[pair_lane][entry][slot] = 0.0f;
+                    segment_pong_value[pair_lane][entry][slot] = 0.0f;
+                }
+#else
                 cache_ping_value[pair_lane][entry] = 0.0f;
                 cache_pong_value[pair_lane][entry] = 0.0f;
+#endif
             }
         }
 
@@ -1962,120 +2197,66 @@ iter:
             // 每个 owner 仍接 8 条 pair-lane 输入，但每拍只消费一条。
             // 这样把乱序范围保留在 8 路静态分组内，同时避免 HLS 在同一个
             // consume 循环里并行展开 8 套 cache/FP 累加路径导致 II 拉高。
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+#define CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(ID, STREAM) \
+                CuperSpmvOnly_ConsumeOwnerLaneOoo((STREAM), \
+                                                  done[(ID)], \
+                                                  pending_valid[(ID)], \
+                                                  pending_tagged[(ID)], \
+                                                  cache_ping_valid[(ID)], \
+                                                  cache_pong_valid[(ID)], \
+                                                  cache_ping_addr[(ID)], \
+                                                  cache_pong_addr[(ID)], \
+                                                  segment_ping_count[(ID)], \
+                                                  segment_pong_count[(ID)], \
+                                                  segment_ping_value[(ID)], \
+                                                  segment_pong_value[(ID)], \
+                                                  cache_ping_victim[(ID)], \
+                                                  cache_pong_victim[(ID)], \
+                                                  local_part_Y_ping[(ID)], \
+                                                  local_part_Y_pong[(ID)])
+#else
+#define CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(ID, STREAM) \
+                CuperSpmvOnly_ConsumeOwnerLaneOoo((STREAM), \
+                                                  done[(ID)], \
+                                                  cache_ping_valid[(ID)], \
+                                                  cache_pong_valid[(ID)], \
+                                                  cache_ping_addr[(ID)], \
+                                                  cache_pong_addr[(ID)], \
+                                                  cache_ping_value[(ID)], \
+                                                  cache_pong_value[(ID)], \
+                                                  cache_ping_victim[(ID)], \
+                                                  cache_pong_victim[(ID)], \
+                                                  local_part_Y_ping[(ID)], \
+                                                  local_part_Y_pong[(ID)])
+#endif
             switch (lane_cursor) {
             case 0:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_0,
-                                                  done[0],
-                                                  cache_ping_valid[0],
-                                                  cache_pong_valid[0],
-                                                  cache_ping_addr[0],
-                                                  cache_pong_addr[0],
-                                                  cache_ping_value[0],
-                                                  cache_pong_value[0],
-                                                  cache_ping_victim[0],
-                                                  cache_pong_victim[0],
-                                                  local_part_Y_ping[0],
-                                                  local_part_Y_pong[0]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(0, Owner_Lane_Stream_0);
                 break;
             case 1:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_1,
-                                                  done[1],
-                                                  cache_ping_valid[1],
-                                                  cache_pong_valid[1],
-                                                  cache_ping_addr[1],
-                                                  cache_pong_addr[1],
-                                                  cache_ping_value[1],
-                                                  cache_pong_value[1],
-                                                  cache_ping_victim[1],
-                                                  cache_pong_victim[1],
-                                                  local_part_Y_ping[1],
-                                                  local_part_Y_pong[1]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(1, Owner_Lane_Stream_1);
                 break;
             case 2:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_2,
-                                                  done[2],
-                                                  cache_ping_valid[2],
-                                                  cache_pong_valid[2],
-                                                  cache_ping_addr[2],
-                                                  cache_pong_addr[2],
-                                                  cache_ping_value[2],
-                                                  cache_pong_value[2],
-                                                  cache_ping_victim[2],
-                                                  cache_pong_victim[2],
-                                                  local_part_Y_ping[2],
-                                                  local_part_Y_pong[2]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(2, Owner_Lane_Stream_2);
                 break;
             case 3:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_3,
-                                                  done[3],
-                                                  cache_ping_valid[3],
-                                                  cache_pong_valid[3],
-                                                  cache_ping_addr[3],
-                                                  cache_pong_addr[3],
-                                                  cache_ping_value[3],
-                                                  cache_pong_value[3],
-                                                  cache_ping_victim[3],
-                                                  cache_pong_victim[3],
-                                                  local_part_Y_ping[3],
-                                                  local_part_Y_pong[3]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(3, Owner_Lane_Stream_3);
                 break;
             case 4:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_4,
-                                                  done[4],
-                                                  cache_ping_valid[4],
-                                                  cache_pong_valid[4],
-                                                  cache_ping_addr[4],
-                                                  cache_pong_addr[4],
-                                                  cache_ping_value[4],
-                                                  cache_pong_value[4],
-                                                  cache_ping_victim[4],
-                                                  cache_pong_victim[4],
-                                                  local_part_Y_ping[4],
-                                                  local_part_Y_pong[4]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(4, Owner_Lane_Stream_4);
                 break;
             case 5:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_5,
-                                                  done[5],
-                                                  cache_ping_valid[5],
-                                                  cache_pong_valid[5],
-                                                  cache_ping_addr[5],
-                                                  cache_pong_addr[5],
-                                                  cache_ping_value[5],
-                                                  cache_pong_value[5],
-                                                  cache_ping_victim[5],
-                                                  cache_pong_victim[5],
-                                                  local_part_Y_ping[5],
-                                                  local_part_Y_pong[5]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(5, Owner_Lane_Stream_5);
                 break;
             case 6:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_6,
-                                                  done[6],
-                                                  cache_ping_valid[6],
-                                                  cache_pong_valid[6],
-                                                  cache_ping_addr[6],
-                                                  cache_pong_addr[6],
-                                                  cache_ping_value[6],
-                                                  cache_pong_value[6],
-                                                  cache_ping_victim[6],
-                                                  cache_pong_victim[6],
-                                                  local_part_Y_ping[6],
-                                                  local_part_Y_pong[6]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(6, Owner_Lane_Stream_6);
                 break;
             default:
-                CuperSpmvOnly_ConsumeOwnerLaneOoo(Owner_Lane_Stream_7,
-                                                  done[7],
-                                                  cache_ping_valid[7],
-                                                  cache_pong_valid[7],
-                                                  cache_ping_addr[7],
-                                                  cache_pong_addr[7],
-                                                  cache_ping_value[7],
-                                                  cache_pong_value[7],
-                                                  cache_ping_victim[7],
-                                                  cache_pong_victim[7],
-                                                  local_part_Y_ping[7],
-                                                  local_part_Y_pong[7]);
+                CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE(7, Owner_Lane_Stream_7);
                 break;
             }
+#undef CUPER_SPMV_ONLY_CONSUME_TRANSPOSE_LANE
 
             ++lane_cursor;
             if (lane_cursor == 8) {
@@ -2088,6 +2269,20 @@ iter:
 #pragma HLS unroll
             for (INDEX_TYPE entry = 0; entry < CUPER_SPMV_ROW_CACHE_SIZE; ++entry) {
 #pragma HLS unroll
+#ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
+                CuperSpmvOnly_FlushRowSegmentEntry(
+                    cache_ping_valid[pair_lane][entry],
+                    cache_ping_addr[pair_lane][entry],
+                    segment_ping_count[pair_lane][entry],
+                    segment_ping_value[pair_lane][entry],
+                    local_part_Y_ping[pair_lane]);
+                CuperSpmvOnly_FlushRowSegmentEntry(
+                    cache_pong_valid[pair_lane][entry],
+                    cache_pong_addr[pair_lane][entry],
+                    segment_pong_count[pair_lane][entry],
+                    segment_pong_value[pair_lane][entry],
+                    local_part_Y_pong[pair_lane]);
+#else
                 CuperSpmvOnly_FlushRowCacheEntry(cache_ping_valid[pair_lane][entry],
                                                  cache_ping_addr[pair_lane][entry],
                                                  cache_ping_value[pair_lane][entry],
@@ -2096,6 +2291,7 @@ iter:
                                                  cache_pong_addr[pair_lane][entry],
                                                  cache_pong_value[pair_lane][entry],
                                                  local_part_Y_pong[pair_lane]);
+#endif
             }
         }
 
@@ -2243,27 +2439,23 @@ scatter:
         Iteration_time));
 }
 
+template <int TAGGED_STREAM_NUM>
 void CuperSpmvOnly_TaggedScatterWriterOoo(
     const INDEX_TYPE Iteration_num,
     const INDEX_TYPE Row_num,
     const INDEX_TYPE Batch_num,
     const INDEX_TYPE Matrix_len,
     const INDEX_TYPE Column_num,
-    tapa::istreams<CuperSpmvOnly_TaggedFloatV2, HBM_CHANNEL_NUM> &Vector_Y_Tagged_Stream,
+    tapa::istreams<CuperSpmvOnly_TaggedFloatV2, TAGGED_STREAM_NUM> &Vector_Y_Tagged_Stream,
     tapa::async_mmap<VALUE_TYPE> &Y_out,
     tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
-    // OOO owner-bank 写回层。
-    //
-    // OOO 分支现在每个 output owner 只有一个 bank accumulator。bank 内部仍按
-    // 8 条 pair-lane 乱序累加，但对外只输出一条 tagged stream，因此这里轮询
-    // HBM_CHANNEL_NUM 条 owner-bank 输出。写回协议和普通 TaggedScatterWriter
-    // 相同：tag 直接给出最终 scalar 地址。
+    // OOO 写回层。owner-bank 方案轮询 HBM_CHANNEL_NUM 条 stream，tag 直接给出
+    // 最终 scalar 地址。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_out_packets = Cuper_NumFloatV16Packets(Row_num);
     const INDEX_TYPE tagged_pairs_per_iter = num_out_packets * 8;
     const INDEX_TYPE tagged_pairs_total = tagged_pairs_per_iter * Iteration_time;
     const INDEX_TYPE scalar_writes_total = tagged_pairs_total * 2;
-    const INDEX_TYPE tagged_stream_num = HBM_CHANNEL_NUM;
 
     INDEX_TYPE channel_cursor = 0;
     bool pending_valid = false;
@@ -2350,7 +2542,7 @@ scatter:
         }
 
         ++channel_cursor;
-        if (channel_cursor == tagged_stream_num) {
+        if (channel_cursor == TAGGED_STREAM_NUM) {
             channel_cursor = 0;
         }
     }
@@ -2397,26 +2589,12 @@ iter:
                 float_v16 tmpv16;
                 Vector_Y_Stream_Ans.try_read(tmpv16);
                 Y_out.write_data.try_write(tmpv16);
-                if (iter == 0 && i_request == 0) {
-                    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
-                        kCuperSpmvOnlyProgressScatterFirstWrite,
-                        0,
-                        num_ite_Y,
-                        Iteration_time));
-                }
                 ++i_request;
             }
 
             uint8_t num_responses = 0;
             if (Y_out.write_resp.try_read(num_responses)) {
                 i_response += int(num_responses) + 1;
-                if (iter == 0 && i_response == int(num_responses) + 1) {
-                    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
-                        kCuperSpmvOnlyProgressScatterFirstResp,
-                        i_response,
-                        int(num_responses) + 1,
-                        num_ite_Y));
-                }
             }
         }
     }
@@ -2824,6 +3002,8 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(31)
 #endif
 #else
+        // 非 RTL owner-bank accumulator。打开 JACOBI_SPMV_SEGMENTED_ACCUMULATE
+        // 时仍走这条 16 owner-bank 接线，只把 bank 内部 row cache 换成分段缓存。
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(0)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(1)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(2)
@@ -2903,7 +3083,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
 #endif
 #ifdef JACOBI_SPMV_OOO_ACCUMULATE
-        .invoke(CuperSpmvOnly_TaggedScatterWriterOoo,
+        .invoke(CuperSpmvOnly_TaggedScatterWriterOoo<HBM_CHANNEL_NUM>,
                 Iteration_num,
                 Row_num,
                 Batch_num,

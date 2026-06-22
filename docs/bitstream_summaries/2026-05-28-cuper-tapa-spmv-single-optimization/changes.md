@@ -598,6 +598,31 @@ full-PCG 验证。涉及包数、padding、对齐输出和 command/stop 的公�
 5. demo 上有效后必须补 full `CuperPcg(...)` 软件或上板 smoke，确认同一 service
    改动没有破坏 PCG。
 
+## 2026-06-22：strip16 window 300 MHz no-progress 同步
+
+本轮没有改变标准 SpMV bitstream，只同步两份 `CuperSpmvServiceOnly` 实验 artifact，
+用于服务器侧直接跑 300 MHz link 目标下的 no-progress window 版本：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin
+```
+
+相关源码/工具记录：
+
+- `CuperSpmvOnly_ProgressWriter` 在 `JACOBI_SPMV_OOO_ACCUMULATE_RTL` 下增加最小
+  entry heartbeat，只写 `Status[8]`，用于把 RTL progress writer 是否进入口暴露给 host；
+- 非 RTL 的 `JACOBI_SPMV_SEGMENTED_ACCUMULATE` 作为分段累加探索保留在宏后面，
+  但当前 HLS 结果仍不适合硬件构建；
+- `pack_profile` 增加 HBM/PE 负载均衡与瓶颈 beat 指标，用于解释 strip/window
+  padding 和负载分布；
+- `DLC/Cuper-jacobi-iteration/docs/` 增加 accumulator 优化路线与打包负载/padding
+  对比记录。
+
+两份 300 MHz artifact 均已生成 xclbin，但 routed timing 未满足 300 MHz 目标：
+window14 自动降到 DATA `202 MHz`，window16 自动降到 DATA `192 MHz`。因此这轮只适合
+服务器侧风险测试，不建议晋级标准，正式 `source.diff` 仍不更新。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：

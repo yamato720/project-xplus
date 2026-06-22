@@ -33,6 +33,8 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，服务器侧完整 `thermal2` 已通过并为当前 SpMV 实验最佳 |
 | `cuper-tapa-spmv-u55c-20260622-strip16-window16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 strip padding + accumulator window=16，Accumulator 主循环 II=1，150 MHz routed timing clean，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260622-strip16-window14-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 strip padding + accumulator window=14，最小 II=1 window，150 MHz routed timing clean，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 300 MHz no-progress 实验 artifact，impl complete 但 timing 未收敛，自动降频到 DATA 202 MHz，仅用于服务器侧风险测试 |
+| `cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 300 MHz no-progress 实验 artifact，impl complete 但 timing 未收敛，自动降频到 DATA 192 MHz，仅用于服务器侧风险测试 |
 | `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
 | `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，服务器侧完整 `thermal2` 已通过；替代 compact16 主报告线，但性能仍慢于 strip16 |
 | `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator latency=12 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
@@ -214,6 +216,53 @@ window=14:
 JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_STRIP_PADDING=1 JACOBI_SPMV_ACC_WINDOW={16|14}
 ```
+
+TAPA Cuper / SpMV-only 16 路 strip accumulator window 300 MHz no-progress 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin
+cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin
+```
+
+这两版仍基于 `CuperSpmvServiceOnly` + `JACOBI_SPMV_STRIP_PADDING=1`，用于单独测试
+去掉 progress snapshot 细粒度事件后，300 MHz link 目标下最终 xclbin 的自动降频和
+服务器侧功能边界。它们不是标准候选，也不覆盖上面 150 MHz timing-clean 的
+window14/window16 调参记录。
+
+同步版本信息：
+
+```text
+window=14, 300 MHz no-progress:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window14-300m-noprogress-demo.xclbin
+  UUID: f13edc28-7dd1-d7aa-ab66-e51c52cf31b7
+  SHA256: 10c7c11c2b461b8c4b376f6eb3cceeee754722ab883d32d9b6cb89b6289733d5
+  Requested kernel clock: 300 MHz
+  DATA/KERNEL/HBM clock: 202 / 500 / 450 MHz
+  Achieved kernel clock: 202.5 MHz
+  Routed timing: WNS -1.604 ns, TNS -31426.979 ns, setup failing endpoints 74375
+  Build log: cuper-jacobi-spmv-strip16-window14-300m-noprogress-build/logs/build_hw_tmux.log
+
+window=16, 300 MHz no-progress:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window16-300m-noprogress-demo.xclbin
+  UUID: 525491e1-725b-4c9c-df09-cf555a26ba37
+  SHA256: 5de4d204bf28528693d13c69b5873f19877120e69d511c2ab0b771a4152298f1
+  Requested kernel clock: 300 MHz
+  DATA/KERNEL/HBM clock: 192 / 500 / 447 MHz
+  Achieved kernel clock: 192.1 MHz
+  Routed timing: WNS -1.870 ns, TNS -32768.406 ns, setup failing endpoints 69785
+  Build log: cuper-jacobi-spmv-strip16-window16-300m-noprogress-build/logs/build_hw_tmux.log
+```
+
+服务器侧测试设置仍为：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_STRIP_PADDING=1 JACOBI_SPMV_ACC_WINDOW={14|16}
+```
+
+注意：这两版虽然生成了 xclbin，但 routed timing 明确未满足 300 MHz 目标，Vitis 对
+DATA clock 做了 auto-frequency scaling。它们只用于上板风险测试和确认 no-progress
+路径，不建议晋级标准，也不更新正式 `source.diff`。
 
 TAPA Cuper / SpMV-only 16 路 PE-lane compact 实验文件：
 
