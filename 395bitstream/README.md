@@ -11,10 +11,11 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 当前候选 bitstream。三个 demo 槽位分别用于 `cuper-tapa-spmv` single SpMV 候选、
 `cuper-tapa-pcg` full-PCG 候选和 `cuper-tapa-jacobi` Jacobi iteration 候选；
 新 demo 进入同一主线槽位时优先覆盖旧 demo 文件。五个标准版
-只有在用户明确确认满意后才会归档旧版并晋级替换。当前 `395bitstream/` 保留四个
-已有标准 bitstream、若干 single SpMV demo/实验 artifact、一个 full-PCG demo 槽、
-一个已板测通过的 Jacobi demo 槽，以及一个 Jacobi wide-HBM 实验 artifact；
-`cuper-tapa-jacobi` 还没有标准 bitstream。
+只有在用户明确确认满意后才会归档旧版并晋级替换。当前 `395bitstream/` 已将
+2026-06-01 以前的历史 bitstream 移入归档，只保留 6 月以来仍在对比/上板测试窗口内的
+Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitstream。
+5 月标准/旧 demo 文件归档在
+`bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/`。
 
 如果某个文件带 `legacy`，说明它不是当前五条主线的首选版本，只作为历史对照保留。
 
@@ -22,19 +23,21 @@ cuper-tapa-jacobi-u55c-YYYYMMDD.xclbin
 
 | 文件 | 主线 | PCG 主循环 | SpMV 实现 | 状态 |
 | --- | --- | --- | --- | --- |
-| `cuper-tapa-spmv-u55c-20260522.xclbin` | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 已有旧可用 bitstream |
-| `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 2026-05-26 20:31 timed-debug 版，全流程 FPGA PCG |
-| `cuper-notapa-spmv-u55c-20260524.xclbin` | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 2026-05-24 新生成 |
-| `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 当前 no-TAPA FPGA-PCG 对照版 |
+| 已归档 | TAPA Cuper / single SpMV | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `Cuper` | 原 `cuper-tapa-spmv-u55c-20260522.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
+| 已归档 | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
+| 已归档 | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 原 `cuper-notapa-spmv-u55c-20260524.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
+| 已归档 | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 原 `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
-| `cuper-tapa-spmv-u55c-20260528-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | demo 候选，未晋级标准 |
+| 已归档 | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | 原 `cuper-tapa-spmv-u55c-20260528-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-spmv-u55c-20260617-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 24 路 Cuper SpMV service-only 实验，服务器侧性能提升不足，保留为宽 HBM 边界 |
 | `cuper-tapa-spmv-u55c-20260618-strip16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 per-HBM 去 padding 实验，服务器侧完整 `thermal2` 已通过并为当前 SpMV 实验最佳 |
+| `cuper-tapa-spmv-u55c-20260622-strip16-window16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 strip padding + accumulator window=16，Accumulator 主循环 II=1，150 MHz routed timing clean，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260622-strip16-window14-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 strip padding + accumulator window=14，最小 II=1 window，150 MHz routed timing clean，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260618-compact16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 PE-lane compact 打包实验，功能通过但性能严重退步 |
 | `cuper-tapa-spmv-u55c-20260618-lanereal16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real/batch 固定 lane 协议实验，服务器侧完整 `thermal2` 已通过；替代 compact16 主报告线，但性能仍慢于 strip16 |
 | `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator latency=12 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank progress 版，fadd RTL/IP Tcl 随 hotpatch 打包，完整 xclbin 已生成并同步，等待服务器上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | packed timing demo 候选，未晋级标准 |
+| 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -167,6 +170,50 @@ software simulation：`thermal2_n1024`、`thermal2_n4096`、`thermal2_n65536` �
 和 `5.91%`。服务器侧测试必须设置
 `JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_STRIP_PADDING=1`。
+
+TAPA Cuper / SpMV-only 16 路 strip accumulator window 调参实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260622-strip16-window16-demo.xclbin
+cuper-tapa-spmv-u55c-20260622-strip16-window14-demo.xclbin
+```
+
+这两版都基于 `CuperSpmvServiceOnly` + `JACOBI_SPMV_STRIP_PADDING=1`，只改变
+`JACOBI_SPMV_ACC_WINDOW`。host Reordering 用同一个 window 拉开同 row 的累加距离，
+HLS accumulator 侧也用同一个 window 作为 `local_part_Y_ping/pong` 的 dependence
+distance，因此两版的 `cuper_acc_accumulate` 主循环都达到 II=1。它们是
+`20260618-strip16-demo` 的调参候选，不覆盖该版已板测结论。
+
+同步版本信息：
+
+```text
+window=16:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window16-demo.xclbin
+  UUID: 107f5272-85e9-2adc-609e-054870d605d9
+  SHA256: 4ef21daf80da3fff0115e0fa68483889ca7505712513736461a066e5668d2e7f
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Accumulator II: 1
+  Accumulator accumulate HLS estimate: 1.589 ns
+  Routed timing: WNS 0.000 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-strip16-window16-hw-150m-build/logs/strip16_window16_hw_20260621_223123.log
+
+window=14:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260622-strip16-window14-demo.xclbin
+  UUID: b254959a-353b-a7bd-119c-7952f2a01af3
+  SHA256: 61cf8be611421703f141422ba46f064eb899de15df54797559ca172d4ebd04bd
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Accumulator II: 1
+  Accumulator accumulate HLS estimate: 2.727 ns
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-strip16-window14-hw-150m-build/logs/strip16_window14_hw_delayed_20260621_223123.log
+```
+
+服务器侧测试设置为：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly JACOBI_SPMV_ONLY=1 JACOBI_HBM_CHANNELS=16
+JACOBI_SPMV_STRIP_PADDING=1 JACOBI_SPMV_ACC_WINDOW={16|14}
+```
 
 TAPA Cuper / SpMV-only 16 路 PE-lane compact 实验文件：
 
