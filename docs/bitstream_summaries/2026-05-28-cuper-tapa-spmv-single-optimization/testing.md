@@ -1292,3 +1292,43 @@ cuper-jacobi-spmv-strip16-window16-300m-noprogress-build/logs/build_hw_tmux.log
 - 这轮还没有服务器侧上板功能/性能数据；
 - 当前仅同步到 `395bitstream/` 供服务器侧风险测试，不建议晋级标准；
 - 本轮不更新正式 `source.diff`。
+
+## 2026-06-22 RTL owner-bank heartbeat-clean artifact
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin
+kernel: CuperSpmvServiceOnly
+macro: JACOBI_SPMV_LANE_STATIC_REAL=1,
+       JACOBI_SPMV_OOO_ACCUMULATE=1,
+       JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+```
+
+构建结果：
+
+| 版本 | UUID | SHA256 | DATA | KERNEL | HBM | WNS | TNS | setup failing endpoints |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ooobank16 heartbeat-clean | `a87434fe-0abf-57ff-a272-98407dfdf44d` | `cbb2caab1406c79cf01826639168fe0f08611ceae261d4f078bfc08a27a875f2` | 150 MHz | 500 MHz | 450 MHz | 0.003 ns | 0.000 ns | 0 |
+
+构建目录和日志：
+
+```text
+cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/
+cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/logs/build_hw_tmux.log
+```
+
+关键构建输出：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 4h 30m 55s
+```
+
+当前状态：
+
+- xclbin 和 `.info` 已同步到 `395bitstream/`；
+- routed timing clean，POST-VPL `0 errors`；
+- 服务器侧上板 sweep 尚未执行；
+- 本轮只是同步待测 artifact，不更新正式 `source.diff`。

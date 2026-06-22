@@ -602,6 +602,33 @@ progress snapshot 细粒度事件后，window14/window16 在更高 DATA 目标�
 clock 自动降频。它们只用于服务器侧风险测试，不建议晋级标准，正式 `source.diff`
 本轮不更新。
 
+## 2026-06-22 补充：RTL owner-bank heartbeat-clean demo
+
+本轮同步一份新的 `CuperSpmvServiceOnly` RTL owner-bank artifact，用于服务器侧继续
+验证 lane-static real + RTL owner-bank accumulator 路线。它仍属于
+`cuper-tapa-spmv` SpMV-only 实验线，不替代已验证的 `20260618-strip16-demo`，也不
+更新正式 `source.diff`。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin.info
+```
+
+结果口径：
+
+- Kernel：`CuperSpmvServiceOnly`
+- UUID：`a87434fe-0abf-57ff-a272-98407dfdf44d`
+- SHA256：`cbb2caab1406c79cf01826639168fe0f08611ceae261d4f078bfc08a27a875f2`
+- DATA/KERNEL/HBM clock：`150/500/450 MHz`
+- Timing：WNS `0.003 ns`，TNS `0.000 ns`，setup failing endpoints `0`
+- 构建目录：`cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/`
+- 构建日志：`cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/logs/build_hw_tmux.log`
+
+该版 `impl Complete` 并生成 xclbin，150 MHz routed timing clean。服务器侧上板
+sweep 尚未执行，因此当前只记录为待测 demo。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：

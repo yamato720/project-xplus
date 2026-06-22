@@ -623,6 +623,30 @@ full-PCG 验证。涉及包数、padding、对齐输出和 command/stop 的公�
 window14 自动降到 DATA `202 MHz`，window16 自动降到 DATA `192 MHz`。因此这轮只适合
 服务器侧风险测试，不建议晋级标准，正式 `source.diff` 仍不更新。
 
+## 2026-06-22：RTL owner-bank heartbeat-clean 同步
+
+本轮同步此前启动的 `CuperSpmvServiceOnly` RTL owner-bank heartbeat-clean 构建产物，
+用于服务器侧继续验证 RTL accumulator 路线：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin.info
+```
+
+这版沿用 lane-static real + owner-bank RTL accumulator 宏组合：
+
+```text
+JACOBI_SPMV_LANE_STATIC_REAL=1
+JACOBI_SPMV_OOO_ACCUMULATE=1
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+```
+
+构建已完成并生成 xclbin，DATA/KERNEL/HBM clock 为 `150/500/450 MHz`，routed timing
+clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
+
+这轮没有新的服务器侧上板数据，因此只是同步待测 demo，不建议晋级标准，正式
+`source.diff` 仍不更新。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：
