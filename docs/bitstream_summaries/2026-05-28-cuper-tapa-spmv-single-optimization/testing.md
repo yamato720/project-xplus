@@ -1332,3 +1332,89 @@ Total elapsed time: 4h 30m 55s
 - routed timing clean，POST-VPL `0 errors`；
 - 服务器侧上板 sweep 尚未执行；
 - 本轮只是同步待测 artifact，不更新正式 `source.diff`。
+
+## 2026-06-23 RTL issue scoreboard debug artifact
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin
+kernel: CuperSpmvServiceOnly
+macro: JACOBI_SPMV_LANE_STATIC_REAL=1,
+       JACOBI_SPMV_OOO_ACCUMULATE=1,
+       JACOBI_SPMV_OOO_SCOREBOARD_RTL=1,
+       JACOBI_SPMV_SCOREBOARD_DEBUG=1
+```
+
+构建前软件验证：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_SPMV_OOO_SCOREBOARD_RTL=1 \
+JACOBI_SPMV_SCOREBOARD_DEBUG=1 \
+make -C DLC/Cuper-jacobi-iteration build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_SPMV_OOO_SCOREBOARD_RTL=1 \
+JACOBI_SPMV_SCOREBOARD_DEBUG=1 \
+make -C DLC/Cuper-jacobi-iteration run-sw \
+  MATRIX=/home/pyx/project-x/Project-XPlus/data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+软件验证结果：
+
+```text
+thermal2_n16: Error Num=0
+thermal2_n1024: Error Num=0
+thermal2_n1024 debug counts: core=6362, issue=6362, acc=6362
+```
+
+构建命令口径：
+
+```bash
+export BUILD_DIR=/home/pyx/project-x/Project-XPlus/cuper-tapa-spmv-scoreboard-debug-build
+export JACOBI_TOP=CuperSpmvServiceOnly
+export JACOBI_SPMV_ONLY=1
+export JACOBI_SPMV_OOO_SCOREBOARD_RTL=1
+export JACOBI_SPMV_SCOREBOARD_DEBUG=1
+export JACOBI_TAPA_ENABLE_SYNTH_UTIL=0
+export CLOCK_PERIOD=4.0
+export JACOBI_KERNEL_FREQUENCY=150
+./scripts/build_host.sh
+./scripts/build_xo_u55c.sh
+./scripts/link_xclbin_u55c.sh
+```
+
+构建目录和日志：
+
+```text
+cuper-tapa-spmv-scoreboard-debug-build/
+cuper-tapa-spmv-scoreboard-debug-build/logs/build_hw_tmux.log
+```
+
+关键构建输出：
+
+```text
+TAPA post-synthesis resource reports: disabled
+generated the v++ xo file at .../CuperSpmvServiceOnly.xo
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-scoreboard-debug-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 4h 26m 42s
+tmux run finished with exit code: 0
+```
+
+构建结果：
+
+| 版本 | UUID | SHA256 | DATA | KERNEL | HBM | WNS | TNS | setup failing endpoints |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| scoreboard16 debug | `8ab0b8d1-2889-e7b2-38c0-4026db80679e` | `bbe249cfc1d974e8111584d1ef76fc64b5b084247e4cffef7453d1524cc9d8fd` | 39 MHz | 500 MHz | 450 MHz | -18.950 ns | -32059.350 ns | 28858 |
+
+当前状态：
+
+- xclbin 和 `.info` 已同步到 `395bitstream/`；
+- VPL `impl Complete`，POST-VPL `0 errors`，但 timing constraints not met；
+- Vitis 自动把 DATA clock 降到 `39 MHz`，所以该版不用于性能判断；
+- 服务器侧上板 sweep 尚未执行；
+- 本轮只是同步功能/监测边界 artifact，不更新正式 `source.diff`。

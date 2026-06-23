@@ -80,6 +80,16 @@ static constexpr INDEX_TYPE kJacobiTraceHbmWriter = kJacobiTracePackWriter + 1;
 static constexpr INDEX_TYPE kJacobiTraceSourceMax = kJacobiTraceHbmWriter;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 static constexpr INDEX_TYPE kSpmvOnlyProgressMagic = 0x53504d56;  // "SPMV"
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugMagic = 0x53424447;  // "SBDG"
+static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugWords =
+    HBM_CHANNEL_NUM == 16 ? 512 : 1024;
+static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugCoreLaneBase = 64;
+static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugIssueLaneBase =
+    kSpmvOnlyScoreboardDebugCoreLaneBase + HBM_CHANNEL_NUM * 8;
+static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugAccLaneBase =
+    kSpmvOnlyScoreboardDebugIssueLaneBase + HBM_CHANNEL_NUM * 8;
+#endif
 
 const char* SpmvOnlyProgressStageName(const INDEX_TYPE stage) {
     switch (stage) {
@@ -109,6 +119,106 @@ uint64_t DoubleBits(const double value) {
     std::memcpy(&bits, &value, sizeof(bits));
     return bits;
 }
+
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+void PrintSpmvOnlyScoreboardDebugTable(
+    const char* label,
+    const char* table_name,
+    const aligned_vector<INDEX_TYPE>& debug_data,
+    const INDEX_TYPE base) {
+    INDEX_TYPE total = 0;
+    INDEX_TYPE min_value = std::numeric_limits<INDEX_TYPE>::max();
+    INDEX_TYPE max_value = 0;
+    INDEX_TYPE nonzero = 0;
+    for (INDEX_TYPE source = 0; source < HBM_CHANNEL_NUM; ++source) {
+        for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+            const INDEX_TYPE addr = base + source * 8 + lane;
+            const INDEX_TYPE value =
+                addr < static_cast<INDEX_TYPE>(debug_data.size())
+                    ? debug_data[addr]
+                    : 0;
+            total += value;
+            min_value = std::min(min_value, value);
+            max_value = std::max(max_value, value);
+            nonzero += value != 0 ? 1 : 0;
+        }
+    }
+    if (min_value == std::numeric_limits<INDEX_TYPE>::max()) {
+        min_value = 0;
+    }
+
+    cout << "[" << label << "] " << table_name
+         << " base=" << base
+         << " total=" << total
+         << " nonzero=" << nonzero << "/" << (HBM_CHANNEL_NUM * 8)
+         << " min=" << min_value
+         << " max=" << max_value
+         << endl;
+
+    const INDEX_TYPE rows_to_print = std::min<INDEX_TYPE>(HBM_CHANNEL_NUM, 4);
+    for (INDEX_TYPE source = 0; source < rows_to_print; ++source) {
+        cout << "[" << label << "] " << table_name
+             << "[core/owner " << source << "]=";
+        for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+            if (lane != 0) {
+                cout << ",";
+            }
+            const INDEX_TYPE addr = base + source * 8 + lane;
+            cout << (addr < static_cast<INDEX_TYPE>(debug_data.size())
+                         ? debug_data[addr]
+                         : 0);
+        }
+        cout << endl;
+    }
+}
+
+void PrintSpmvOnlyScoreboardDebugSummary(
+    const char* label,
+    const aligned_vector<INDEX_TYPE>& debug_data) {
+    if (debug_data.empty()) {
+        return;
+    }
+    cout << "[" << label << "] scoreboard_debug_magic="
+         << debug_data[0]
+         << " valid="
+         << ((debug_data[0] == kSpmvOnlyScoreboardDebugMagic ||
+              (debug_data.size() > 48 &&
+               debug_data[48] == kSpmvOnlyScoreboardDebugMagic))
+                 ? 1
+                 : 0)
+         << " total_pulses=" << (debug_data.size() > 1 ? debug_data[1] : 0)
+         << " core_pulses=" << (debug_data.size() > 2 ? debug_data[2] : 0)
+         << " issue_pulses=" << (debug_data.size() > 3 ? debug_data[3] : 0)
+         << " acc_pulses=" << (debug_data.size() > 4 ? debug_data[4] : 0)
+         << " write_issue=" << (debug_data.size() > 5 ? debug_data[5] : 0)
+         << " write_resp=" << (debug_data.size() > 6 ? debug_data[6] : 0)
+         << " stop_drain=" << (debug_data.size() > 7 ? debug_data[7] : 0)
+         << " final_marker=" << (debug_data.size() > 15 ? debug_data[15] : 0)
+         << " Debug[48..55]=";
+    for (INDEX_TYPE index = 48;
+         index < 56 && index < static_cast<INDEX_TYPE>(debug_data.size());
+         ++index) {
+        if (index != 48) {
+            cout << ",";
+        }
+        cout << debug_data[index];
+    }
+    cout << endl;
+
+    PrintSpmvOnlyScoreboardDebugTable(label,
+                                      "core_lane",
+                                      debug_data,
+                                      kSpmvOnlyScoreboardDebugCoreLaneBase);
+    PrintSpmvOnlyScoreboardDebugTable(label,
+                                      "scoreboard_issue_lane",
+                                      debug_data,
+                                      kSpmvOnlyScoreboardDebugIssueLaneBase);
+    PrintSpmvOnlyScoreboardDebugTable(label,
+                                      "accumulator_consume_lane",
+                                      debug_data,
+                                      kSpmvOnlyScoreboardDebugAccLaneBase);
+}
+#endif
 
 void WriteHex32(std::ostream& output, const uint32_t value) {
     output << std::hex << std::setw(8) << std::setfill('0')
@@ -618,6 +728,9 @@ int64_t InvokeCuperSpmvServiceOnlyWithPrefinishDump(
     const vector<VALUE_TYPE>& y_ref,
     const aligned_vector<INDEX_TYPE>& status_data,
     const aligned_vector<double>& metrics_data,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    const aligned_vector<INDEX_TYPE>& debug_data,
+#endif
     const INDEX_TYPE row_num,
     Args&&... args) {
     if (bitstream.empty()) {
@@ -670,6 +783,9 @@ int64_t InvokeCuperSpmvServiceOnlyWithPrefinishDump(
                                        status_data,
                                        metrics_data,
                                        row_num);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+        PrintSpmvOnlyScoreboardDebugSummary(sample_label.c_str(), debug_data);
+#endif
         if (!status_data.empty() && status_data[0] != kJacobiStatusSentinelBase) {
             cout << "[tapa-invoke-spmv] kernel status visible before Finish, stop polling" << endl;
             break;
@@ -1157,12 +1273,20 @@ int RunSpmvServiceOnly(const std::string& bitstream,
 
     aligned_vector<INDEX_TYPE> Status_fpga_data(16, 0);
     aligned_vector<double> Metrics_fpga_data(16, 0.0);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    aligned_vector<INDEX_TYPE> Debug_fpga_data(kSpmvOnlyScoreboardDebugWords, 0);
+#endif
     for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Status_fpga_data.size()); ++index) {
         Status_fpga_data[index] = kJacobiStatusSentinelBase + index;
     }
     for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Metrics_fpga_data.size()); ++index) {
         Metrics_fpga_data[index] = kJacobiMetricsSentinelBase - static_cast<double>(index);
     }
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    for (INDEX_TYPE index = 0; index < static_cast<INDEX_TYPE>(Debug_fpga_data.size()); ++index) {
+        Debug_fpga_data[index] = kJacobiDebugSentinelBase + index;
+    }
+#endif
     cout << "  \tDone" << endl;
 
     const INDEX_TYPE SpElement_list_ptr_size =
@@ -1244,6 +1368,9 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       Y_ref,
                                       Status_fpga_data,
                                       Metrics_fpga_data,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                                      Debug_fpga_data,
+#endif
                                       m,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
@@ -1251,6 +1378,9 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       tapa::read_write_mmap<float>(Y_fpga_data),
                                       tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
                                       tapa::read_write_mmap<double>(Metrics_fpga_data),
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                                      tapa::read_write_mmap<INDEX_TYPE>(Debug_fpga_data),
+#endif
                                       SpElement_list_ptr_size,
                                       SpElement_list_ptr_max_len,
                                       m,
@@ -1263,6 +1393,9 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       Y_ref,
                                       Status_fpga_data,
                                       Metrics_fpga_data,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                                      Debug_fpga_data,
+#endif
                                       m,
                                       tapa::read_only_mmap<INDEX_TYPE>(SpElement_list_ptr_fpga),
                                       tapa::read_only_mmaps<unsigned long, HBM_CHANNEL_NUM>(Matrix_fpga_data).reinterpret<ap_uint<512>>(),
@@ -1270,6 +1403,9 @@ int RunSpmvServiceOnly(const std::string& bitstream,
                                       tapa::read_write_mmap<float>(Y_fpga_data).reinterpret<float_v16>(),
                                       tapa::read_write_mmap<INDEX_TYPE>(Status_fpga_data),
                                       tapa::read_write_mmap<double>(Metrics_fpga_data),
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                                      tapa::read_write_mmap<INDEX_TYPE>(Debug_fpga_data),
+#endif
                                       SpElement_list_ptr_size,
                                       SpElement_list_ptr_max_len,
                                       m,
@@ -1294,6 +1430,9 @@ int RunSpmvServiceOnly(const std::string& bitstream,
          << " matrix_len=" << Metrics_fpga_data[5]
          << " hbm_channels=" << Metrics_fpga_data[6]
          << " slice_width=" << Metrics_fpga_data[7] << endl;
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    PrintSpmvOnlyScoreboardDebugSummary("spmv-final", Debug_fpga_data);
+#endif
 
     cout << "[" << setw(18) << "Verification" << "] Extracting Device Data...";
     for (INDEX_TYPE i = 0; i < m; ++i) {

@@ -76,6 +76,29 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   copy_with_backup "$custom_fadd_ip_tcl" "$generated_fadd_ip_tcl" "$backup_dir"
 fi
 
+if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
+  CUSTOM_RTL_DIR="${CUSTOM_RTL_DIR:-$ROOT_DIR/../../verilog/tapa}"
+  custom_scoreboard_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerScoreboardOoo.v"
+  custom_issue_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlIssueScoreboard8.v"
+  generated_scoreboard_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerScoreboardOoo.v"
+  generated_issue_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlIssueScoreboard8.v"
+
+  if [[ ! -d "$CUSTOM_RTL_DIR" ]]; then
+    echo "CUSTOM_RTL_DIR does not exist: $CUSTOM_RTL_DIR" >&2
+    exit 1
+  fi
+  copy_with_backup "$custom_scoreboard_rtl" "$generated_scoreboard_rtl" "$backup_dir"
+  copy_with_backup "$custom_issue_rtl" "$generated_issue_rtl" "$backup_dir"
+  if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
+    if [[ ! "$JACOBI_SPMV_SCOREBOARD_DEPTH" =~ ^[1-9][0-9]*$ ]]; then
+      echo "JACOBI_SPMV_SCOREBOARD_DEPTH must be a positive integer; got '$JACOBI_SPMV_SCOREBOARD_DEPTH'." >&2
+      exit 1
+    fi
+    sed -i "s/parameter integer SCOREBOARD_DEPTH = 12;/parameter integer SCOREBOARD_DEPTH = $JACOBI_SPMV_SCOREBOARD_DEPTH;/" \
+      "$generated_scoreboard_rtl"
+  fi
+fi
+
 pack_cmd=(
   tapa -w "$WORK_DIR" pack
   -o "$OUTPUT_XO"

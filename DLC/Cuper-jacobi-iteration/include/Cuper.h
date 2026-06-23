@@ -21,6 +21,9 @@
 #define JACOBI_TRACE_FULL 1
 #endif
 
+#if defined(JACOBI_SPMV_SCOREBOARD_DEBUG) && !defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
+#error "JACOBI_SPMV_SCOREBOARD_DEBUG requires JACOBI_SPMV_OOO_SCOREBOARD_RTL."
+#endif
 
 // Cuper TAPA SpMV 的硬件结构常量。
 // 这些常量描述 SpMV 的 slice/batch/HBM 并行度，不是 Jacobi 迭代参数。
@@ -166,6 +169,9 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                          tapa::mmap<INDEX_TYPE> Debug,
+#endif
                           const INDEX_TYPE Batch_num,
                           const INDEX_TYPE Matrix_len,
                           const INDEX_TYPE Row_num,

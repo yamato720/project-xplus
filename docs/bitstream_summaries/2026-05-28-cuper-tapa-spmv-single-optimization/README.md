@@ -629,6 +629,49 @@ clock 自动降频。它们只用于服务器侧风险测试，不建议晋级�
 该版 `impl Complete` 并生成 xclbin，150 MHz routed timing clean。服务器侧上板
 sweep 尚未执行，因此当前只记录为待测 demo。
 
+## 2026-06-23 补充：RTL issue scoreboard debug demo
+
+本轮同步一份新的 `CuperSpmvServiceOnly` scoreboard-only RTL artifact，用于验证
+“RTL 只负责 owner 内 8 lane issue scoreboard，后端 accumulator 仍保留 HLS”的弱 RTL
+分支。它仍属于 `cuper-tapa-spmv` SpMV-only 实验线，不替代已验证的
+`20260618-strip16-demo`，也不更新正式 `source.diff`。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin.info
+```
+
+结果口径：
+
+- Kernel：`CuperSpmvServiceOnly`
+- UUID：`8ab0b8d1-2889-e7b2-38c0-4026db80679e`
+- SHA256：`bbe249cfc1d974e8111584d1ef76fc64b5b084247e4cffef7453d1524cc9d8fd`
+- DATA/KERNEL/HBM clock：`39/500/450 MHz`
+- Timing：WNS `-18.950 ns`，TNS `-32059.350 ns`，setup failing endpoints `28858`
+- 构建目录：`cuper-tapa-spmv-scoreboard-debug-build/`
+- 构建日志：`cuper-tapa-spmv-scoreboard-debug-build/logs/build_hw_tmux.log`
+
+这版打开：
+
+```text
+JACOBI_SPMV_LANE_STATIC_REAL=1
+JACOBI_SPMV_OOO_ACCUMULATE=1
+JACOBI_SPMV_OOO_SCOREBOARD_RTL=1
+JACOBI_SPMV_SCOREBOARD_DEBUG=1
+```
+
+它只替换 owner 内 issue scheduler/scoreboard：`verilog/tapa/CuperSpmvOnly_RtlOwnerScoreboardOoo.v`
+接 8 条 owner-lane FIFO，内部使用 `CuperSpmvOnly_RtlIssueScoreboard8.v` 避免
+同 `{lane, addr, ping/pong}` 在 scoreboard 深度内重复发射；下游
+`CuperSpmvOnly_OwnerAccumulatorScheduledOoo` 仍是 HLS，负责 FP32 加法、URAM partial
+sum 和最终 `TaggedFloatV2` 写回。
+
+构建已完成并生成 xclbin，但 routed timing 大幅未收敛，Vitis 自动把 DATA clock
+降到 `39 MHz`。该 artifact 只适合服务器侧功能/监测边界验证，不建议晋级标准，也
+不进入性能曲线。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：

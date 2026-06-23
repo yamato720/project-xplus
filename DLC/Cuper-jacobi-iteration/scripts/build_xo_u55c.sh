@@ -29,6 +29,7 @@ if [[ "${CLOCK_PERIOD:-}" == "" ]]; then
   fi
 fi
 JOBS="${JOBS:-$(nproc)}"
+ENABLE_SYNTH_UTIL="${JACOBI_TAPA_ENABLE_SYNTH_UTIL:-1}"
 
 cflags=(
   "-I$ROOT_DIR/include"
@@ -82,6 +83,7 @@ esac
 
 echo "Cuper Jacobi TAPA top: $TOP"
 echo "Cuper Matrix_data HBM channels: $HBM_CHANNELS"
+echo "TAPA post-synthesis resource reports: $([[ "$ENABLE_SYNTH_UTIL" == "0" || "$ENABLE_SYNTH_UTIL" == "" ]] && echo disabled || echo enabled)"
 
 if [[ "${JACOBI_BLOCKING_ENTRY_PROBE:-0}" != "0" && "${JACOBI_BLOCKING_ENTRY_PROBE:-}" != "" ]]; then
   cflags+=("-DJACOBI_BLOCKING_ENTRY_PROBE=1")
@@ -103,7 +105,18 @@ if [[ "${JACOBI_SPMV_COMPACT_PE:-0}" != "0" && "${JACOBI_SPMV_COMPACT_PE:-}" != 
   cflags+=("-DJACOBI_SPMV_COMPACT_PE=1")
 fi
 
+if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]] &&
+   [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
+  echo "JACOBI_SPMV_OOO_ACCUMULATE_RTL and JACOBI_SPMV_OOO_SCOREBOARD_RTL are mutually exclusive." >&2
+  exit 1
+fi
+
 if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
+  JACOBI_SPMV_LANE_STATIC_REAL=1
+  JACOBI_SPMV_OOO_ACCUMULATE=1
+fi
+
+if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
   JACOBI_SPMV_LANE_STATIC_REAL=1
   JACOBI_SPMV_OOO_ACCUMULATE=1
 fi
@@ -111,6 +124,10 @@ fi
 if [[ "${JACOBI_SPMV_SEGMENTED_ACCUMULATE:-0}" != "0" && "${JACOBI_SPMV_SEGMENTED_ACCUMULATE:-}" != "" ]]; then
   if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
     echo "JACOBI_SPMV_SEGMENTED_ACCUMULATE=1 is a non-RTL path; unset JACOBI_SPMV_OOO_ACCUMULATE_RTL." >&2
+    exit 1
+  fi
+  if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
+    echo "JACOBI_SPMV_SEGMENTED_ACCUMULATE=1 is not combined with JACOBI_SPMV_OOO_SCOREBOARD_RTL." >&2
     exit 1
   fi
   JACOBI_SPMV_LANE_STATIC_REAL=1
@@ -129,6 +146,14 @@ if [[ "${JACOBI_SPMV_SEGMENTED_ACCUMULATE:-0}" != "0" && "${JACOBI_SPMV_SEGMENTE
   cflags+=("-DJACOBI_SPMV_SEGMENTED_ACCUMULATE=1")
 fi
 
+if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
+  if [[ ! "$JACOBI_SPMV_SCOREBOARD_DEPTH" =~ ^[1-9][0-9]*$ ]]; then
+    echo "JACOBI_SPMV_SCOREBOARD_DEPTH must be a positive integer; got '$JACOBI_SPMV_SCOREBOARD_DEPTH'." >&2
+    exit 1
+  fi
+  cflags+=("-DJACOBI_SPMV_SCOREBOARD_DEPTH=$JACOBI_SPMV_SCOREBOARD_DEPTH")
+fi
+
 if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
   CUSTOM_RTL_DIR="${CUSTOM_RTL_DIR:-$ROOT_DIR/../../verilog/tapa}"
   if [[ ! -d "$CUSTOM_RTL_DIR" ]]; then
@@ -139,7 +164,27 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   echo "Cuper SpMV OOO accumulator RTL boundary: $CUSTOM_RTL_DIR"
 fi
 
-if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
+if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
+  CUSTOM_RTL_DIR="${CUSTOM_RTL_DIR:-$ROOT_DIR/../../verilog/tapa}"
+  if [[ ! -d "$CUSTOM_RTL_DIR" ]]; then
+    echo "JACOBI_SPMV_OOO_SCOREBOARD_RTL=1 but custom RTL dir does not exist: $CUSTOM_RTL_DIR" >&2
+    exit 1
+  fi
+  cflags+=("-DJACOBI_SPMV_OOO_SCOREBOARD_RTL=1")
+  echo "Cuper SpMV OOO scoreboard RTL boundary: $CUSTOM_RTL_DIR"
+fi
+
+if [[ "${JACOBI_SPMV_SCOREBOARD_DEBUG:-0}" != "0" && "${JACOBI_SPMV_SCOREBOARD_DEBUG:-}" != "" ]]; then
+  if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" == "0" || "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" == "" ]]; then
+    echo "JACOBI_SPMV_SCOREBOARD_DEBUG=1 requires JACOBI_SPMV_OOO_SCOREBOARD_RTL=1." >&2
+    exit 1
+  fi
+  cflags+=("-DJACOBI_SPMV_SCOREBOARD_DEBUG=1")
+  echo "Cuper SpMV scoreboard debug counter tables: enabled"
+fi
+
+if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]] ||
+   [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
   analyze_cmd=(
     tapa -w "$WORK_DIR" analyze
     -f "$ROOT_DIR/kernels/Cuper.cpp"
@@ -154,17 +199,11 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
     -p "$DEVICE"
     --clock-period "$CLOCK_PERIOD"
     -j "$JOBS"
-    --enable-synth-util
   )
+  if [[ "$ENABLE_SYNTH_UTIL" != "0" && "$ENABLE_SYNTH_UTIL" != "" ]]; then
+    synth_cmd+=(--enable-synth-util)
+  fi
 
-  custom_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
-  support_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
-  fadd_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
-  fadd_ip_tcl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
-  generated_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
-  generated_support_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_support.vh"
-  generated_fadd_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
-  generated_fadd_ip_tcl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
   pack_cmd=(
     tapa -w "$WORK_DIR" pack
     -o "$OUTPUT_XO"
@@ -180,34 +219,53 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   printf '\n'
   "${synth_cmd[@]}"
 
-  if [[ ! -f "$custom_rtl" ]]; then
-    echo "Missing custom RTL file: $custom_rtl" >&2
-    exit 1
+  if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
+    custom_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
+    support_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v"
+    fadd_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+    fadd_ip_tcl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
+    generated_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v"
+    generated_support_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_support.vh"
+    generated_fadd_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v"
+    generated_fadd_ip_tcl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl"
+
+    for required in "$custom_rtl" "$support_rtl" "$fadd_rtl" "$fadd_ip_tcl" "$generated_rtl"; do
+      if [[ ! -f "$required" ]]; then
+        echo "Missing required RTL file: $required" >&2
+        exit 1
+      fi
+    done
+    cp "$custom_rtl" "$generated_rtl"
+    cp "$support_rtl" "$generated_support_rtl"
+    cp "$fadd_rtl" "$generated_fadd_rtl"
+    cp "$fadd_ip_tcl" "$generated_fadd_ip_tcl"
+    echo "Replaced generated RTL wrapper with custom RTL: $generated_rtl"
+    echo "Copied owner-lane RTL support module: $generated_support_rtl"
+    echo "Copied owner-bank fadd wrapper: $generated_fadd_rtl"
+    echo "Copied owner-bank fadd IP tcl: $generated_fadd_ip_tcl"
   fi
-  if [[ ! -f "$support_rtl" ]]; then
-    echo "Missing custom RTL support file: $support_rtl" >&2
-    exit 1
+
+  if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
+    custom_scoreboard_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlOwnerScoreboardOoo.v"
+    custom_issue_rtl="$CUSTOM_RTL_DIR/CuperSpmvOnly_RtlIssueScoreboard8.v"
+    generated_scoreboard_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlOwnerScoreboardOoo.v"
+    generated_issue_rtl="$WORK_DIR/hdl/CuperSpmvOnly_RtlIssueScoreboard8.v"
+
+    for required in "$custom_scoreboard_rtl" "$custom_issue_rtl" "$generated_scoreboard_rtl"; do
+      if [[ ! -f "$required" ]]; then
+        echo "Missing required scoreboard RTL file: $required" >&2
+        exit 1
+      fi
+    done
+    cp "$custom_scoreboard_rtl" "$generated_scoreboard_rtl"
+    cp "$custom_issue_rtl" "$generated_issue_rtl"
+    if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
+      sed -i "s/parameter integer SCOREBOARD_DEPTH = 12;/parameter integer SCOREBOARD_DEPTH = $JACOBI_SPMV_SCOREBOARD_DEPTH;/" \
+        "$generated_scoreboard_rtl"
+    fi
+    echo "Replaced generated scoreboard wrapper with custom RTL: $generated_scoreboard_rtl"
+    echo "Copied scoreboard primitive: $generated_issue_rtl"
   fi
-  if [[ ! -f "$fadd_rtl" ]]; then
-    echo "Missing custom RTL fadd wrapper: $fadd_rtl" >&2
-    exit 1
-  fi
-  if [[ ! -f "$fadd_ip_tcl" ]]; then
-    echo "Missing custom RTL fadd IP tcl: $fadd_ip_tcl" >&2
-    exit 1
-  fi
-  if [[ ! -f "$generated_rtl" ]]; then
-    echo "TAPA synth did not generate expected RTL wrapper: $generated_rtl" >&2
-    exit 1
-  fi
-  cp "$custom_rtl" "$generated_rtl"
-  cp "$support_rtl" "$generated_support_rtl"
-  cp "$fadd_rtl" "$generated_fadd_rtl"
-  cp "$fadd_ip_tcl" "$generated_fadd_ip_tcl"
-  echo "Replaced generated RTL wrapper with custom RTL: $generated_rtl"
-  echo "Copied owner-lane RTL support module: $generated_support_rtl"
-  echo "Copied owner-bank fadd wrapper: $generated_fadd_rtl"
-  echo "Copied owner-bank fadd IP tcl: $generated_fadd_ip_tcl"
 
   printf 'Running pack:'
   printf ' %q' "${pack_cmd[@]}"
@@ -221,9 +279,11 @@ else
     -p "$DEVICE"
     --clock-period "$CLOCK_PERIOD"
     -j "$JOBS"
-    --enable-synth-util
     -o "$OUTPUT_XO"
   )
+  if [[ "$ENABLE_SYNTH_UTIL" != "0" && "$ENABLE_SYNTH_UTIL" != "" ]]; then
+    cmd+=(--enable-synth-util)
+  fi
   for cflag in "${cflags[@]}"; do
     cmd+=(-c "$cflag")
   done

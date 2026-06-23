@@ -21,12 +21,703 @@ static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstResp = 13;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterDone = 14;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressFinal = 15;
 
+#if defined(JACOBI_SPMV_SCOREBOARD_DEBUG) && !defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
+#error "JACOBI_SPMV_SCOREBOARD_DEBUG requires JACOBI_SPMV_OOO_SCOREBOARD_RTL."
+#endif
+
 struct CuperSpmvOnlyProgressEvent {
     INDEX_TYPE stage;
     INDEX_TYPE value0;
     INDEX_TYPE value1;
     INDEX_TYPE value2;
 };
+
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugMagic = 0x53424447;  // "SBDG"
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugFinal = 31;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugStreamCount =
+    HBM_CHANNEL_NUM * 3;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugWords =
+    HBM_CHANNEL_NUM == 16 ? 512 : 1024;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugCoreLaneBase = 64;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugIssueLaneBase =
+    kCuperSpmvOnlyScoreboardDebugCoreLaneBase + HBM_CHANNEL_NUM * 8;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugAccLaneBase =
+    kCuperSpmvOnlyScoreboardDebugIssueLaneBase + HBM_CHANNEL_NUM * 8;
+static_assert(kCuperSpmvOnlyScoreboardDebugAccLaneBase +
+                  HBM_CHANNEL_NUM * 8 <=
+              kCuperSpmvOnlyScoreboardDebugWords,
+              "SpMV scoreboard debug buffer is too small.");
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugHeartbeatMask = 0x3ffff;
+static constexpr INDEX_TYPE kCuperSpmvOnlyScoreboardDebugEmitMask = 0xff;
+
+#if 0
+struct CuperSpmvOnlyScoreboardDebugEvent {
+    INDEX_TYPE source;
+    INDEX_TYPE stage;
+    INDEX_TYPE lane;
+    INDEX_TYPE value;
+};
+
+inline CuperSpmvOnlyScoreboardDebugEvent CuperSpmvOnly_MakeScoreboardDebugEvent(
+    const INDEX_TYPE source,
+    const INDEX_TYPE stage,
+    const INDEX_TYPE lane,
+    const INDEX_TYPE value) {
+#pragma HLS inline
+    CuperSpmvOnlyScoreboardDebugEvent event;
+    event.source = source;
+    event.stage = stage;
+    event.lane = lane;
+    event.value = value;
+    return event;
+}
+
+inline INDEX_TYPE CuperSpmvOnly_PackScoreboardDebugEvent(
+    const CuperSpmvOnlyScoreboardDebugEvent &event) {
+#pragma HLS inline
+    return ((event.source & 0xff) << 24) |
+           ((event.stage & 0xff) << 16) |
+           (event.lane & 0xffff);
+}
+
+inline INDEX_TYPE CuperSpmvOnly_ScoreboardDebugCounterAddr(
+    const CuperSpmvOnlyScoreboardDebugEvent &event) {
+#pragma HLS inline
+    INDEX_TYPE base = kCuperSpmvOnlyScoreboardDebugCoreLaneBase;
+    if (event.stage == kCuperSpmvOnlyScoreboardDebugIssue ||
+        event.stage == kCuperSpmvOnlyScoreboardDebugIssueDone) {
+        base = kCuperSpmvOnlyScoreboardDebugIssueLaneBase;
+    } else if (event.stage == kCuperSpmvOnlyScoreboardDebugAccConsume ||
+               event.stage == kCuperSpmvOnlyScoreboardDebugAccDone ||
+               event.stage == kCuperSpmvOnlyScoreboardDebugFinal) {
+        base = kCuperSpmvOnlyScoreboardDebugAccLaneBase;
+    }
+    return base + event.source * 8 + (event.lane & 7);
+}
+
+inline void CuperSpmvOnly_TryWriteScoreboardDebug(
+    tapa::ostream<CuperSpmvOnlyScoreboardDebugEvent> &Debug_out,
+    const INDEX_TYPE source,
+    const INDEX_TYPE stage,
+    const INDEX_TYPE lane,
+    const INDEX_TYPE value) {
+#pragma HLS inline
+    Debug_out.try_write(
+        CuperSpmvOnly_MakeScoreboardDebugEvent(source, stage, lane, value));
+}
+
+inline bool CuperSpmvOnly_TryReadScoreboardDebugStream(
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugEvent,
+                  kCuperSpmvOnlyScoreboardDebugStreamCount> &Debug_in,
+    const INDEX_TYPE stream_index,
+    CuperSpmvOnlyScoreboardDebugEvent &event) {
+#pragma HLS inline
+    bool got = false;
+    switch (stream_index) {
+        case 0: got = Debug_in[0].try_read(event); break;
+        case 1: got = Debug_in[1].try_read(event); break;
+        case 2: got = Debug_in[2].try_read(event); break;
+        case 3: got = Debug_in[3].try_read(event); break;
+        case 4: got = Debug_in[4].try_read(event); break;
+        case 5: got = Debug_in[5].try_read(event); break;
+        case 6: got = Debug_in[6].try_read(event); break;
+        case 7: got = Debug_in[7].try_read(event); break;
+        case 8: got = Debug_in[8].try_read(event); break;
+        case 9: got = Debug_in[9].try_read(event); break;
+        case 10: got = Debug_in[10].try_read(event); break;
+        case 11: got = Debug_in[11].try_read(event); break;
+        case 12: got = Debug_in[12].try_read(event); break;
+        case 13: got = Debug_in[13].try_read(event); break;
+        case 14: got = Debug_in[14].try_read(event); break;
+        case 15: got = Debug_in[15].try_read(event); break;
+        case 16: got = Debug_in[16].try_read(event); break;
+        case 17: got = Debug_in[17].try_read(event); break;
+        case 18: got = Debug_in[18].try_read(event); break;
+        case 19: got = Debug_in[19].try_read(event); break;
+        case 20: got = Debug_in[20].try_read(event); break;
+        case 21: got = Debug_in[21].try_read(event); break;
+        case 22: got = Debug_in[22].try_read(event); break;
+        case 23: got = Debug_in[23].try_read(event); break;
+        case 24: got = Debug_in[24].try_read(event); break;
+        case 25: got = Debug_in[25].try_read(event); break;
+        case 26: got = Debug_in[26].try_read(event); break;
+        case 27: got = Debug_in[27].try_read(event); break;
+        case 28: got = Debug_in[28].try_read(event); break;
+        case 29: got = Debug_in[29].try_read(event); break;
+        case 30: got = Debug_in[30].try_read(event); break;
+        case 31: got = Debug_in[31].try_read(event); break;
+        case 32: got = Debug_in[32].try_read(event); break;
+        case 33: got = Debug_in[33].try_read(event); break;
+        case 34: got = Debug_in[34].try_read(event); break;
+        case 35: got = Debug_in[35].try_read(event); break;
+        case 36: got = Debug_in[36].try_read(event); break;
+        case 37: got = Debug_in[37].try_read(event); break;
+        case 38: got = Debug_in[38].try_read(event); break;
+        case 39: got = Debug_in[39].try_read(event); break;
+        case 40: got = Debug_in[40].try_read(event); break;
+        case 41: got = Debug_in[41].try_read(event); break;
+        case 42: got = Debug_in[42].try_read(event); break;
+        case 43: got = Debug_in[43].try_read(event); break;
+        case 44: got = Debug_in[44].try_read(event); break;
+        case 45: got = Debug_in[45].try_read(event); break;
+        case 46: got = Debug_in[46].try_read(event); break;
+        case 47: got = Debug_in[47].try_read(event); break;
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        case 48: got = Debug_in[48].try_read(event); break;
+        case 49: got = Debug_in[49].try_read(event); break;
+        case 50: got = Debug_in[50].try_read(event); break;
+        case 51: got = Debug_in[51].try_read(event); break;
+        case 52: got = Debug_in[52].try_read(event); break;
+        case 53: got = Debug_in[53].try_read(event); break;
+        case 54: got = Debug_in[54].try_read(event); break;
+        case 55: got = Debug_in[55].try_read(event); break;
+        case 56: got = Debug_in[56].try_read(event); break;
+        case 57: got = Debug_in[57].try_read(event); break;
+        case 58: got = Debug_in[58].try_read(event); break;
+        case 59: got = Debug_in[59].try_read(event); break;
+        case 60: got = Debug_in[60].try_read(event); break;
+        case 61: got = Debug_in[61].try_read(event); break;
+        case 62: got = Debug_in[62].try_read(event); break;
+        case 63: got = Debug_in[63].try_read(event); break;
+        case 64: got = Debug_in[64].try_read(event); break;
+        case 65: got = Debug_in[65].try_read(event); break;
+        case 66: got = Debug_in[66].try_read(event); break;
+        case 67: got = Debug_in[67].try_read(event); break;
+        case 68: got = Debug_in[68].try_read(event); break;
+        case 69: got = Debug_in[69].try_read(event); break;
+        case 70: got = Debug_in[70].try_read(event); break;
+        case 71: got = Debug_in[71].try_read(event); break;
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        case 72: got = Debug_in[72].try_read(event); break;
+        case 73: got = Debug_in[73].try_read(event); break;
+        case 74: got = Debug_in[74].try_read(event); break;
+        case 75: got = Debug_in[75].try_read(event); break;
+        case 76: got = Debug_in[76].try_read(event); break;
+        case 77: got = Debug_in[77].try_read(event); break;
+        case 78: got = Debug_in[78].try_read(event); break;
+        case 79: got = Debug_in[79].try_read(event); break;
+        case 80: got = Debug_in[80].try_read(event); break;
+        case 81: got = Debug_in[81].try_read(event); break;
+        case 82: got = Debug_in[82].try_read(event); break;
+        case 83: got = Debug_in[83].try_read(event); break;
+        case 84: got = Debug_in[84].try_read(event); break;
+        case 85: got = Debug_in[85].try_read(event); break;
+        case 86: got = Debug_in[86].try_read(event); break;
+        case 87: got = Debug_in[87].try_read(event); break;
+        case 88: got = Debug_in[88].try_read(event); break;
+        case 89: got = Debug_in[89].try_read(event); break;
+        case 90: got = Debug_in[90].try_read(event); break;
+        case 91: got = Debug_in[91].try_read(event); break;
+        case 92: got = Debug_in[92].try_read(event); break;
+        case 93: got = Debug_in[93].try_read(event); break;
+        case 94: got = Debug_in[94].try_read(event); break;
+        case 95: got = Debug_in[95].try_read(event); break;
+#endif
+        default: got = false; break;
+    }
+    return got;
+}
+
+inline void CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+    INDEX_TYPE pending_addr[12],
+    INDEX_TYPE pending_data[12],
+    INDEX_TYPE &pending_count,
+    const INDEX_TYPE addr,
+    const INDEX_TYPE data) {
+#pragma HLS inline
+    pending_addr[pending_count] = addr;
+    pending_data[pending_count] = data;
+    ++pending_count;
+}
+
+void CuperSpmvOnly_ScoreboardDebugMonitor(
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Matrix_len,
+    const INDEX_TYPE Row_num,
+    const INDEX_TYPE Column_num,
+    const INDEX_TYPE Iteration_num,
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugEvent,
+                  kCuperSpmvOnlyScoreboardDebugStreamCount> &Debug_in,
+    tapa::istream<INDEX_TYPE> &Debug_Stop_in,
+    tapa::async_mmap<INDEX_TYPE> &Debug) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE done_events_expected = HBM_CHANNEL_NUM * 8 * 3 * Iteration_time;
+    INDEX_TYPE heartbeat = 0;
+    INDEX_TYPE event_count = 0;
+    INDEX_TYPE done_event_count = 0;
+    INDEX_TYPE poll_index = 0;
+    INDEX_TYPE write_issue_count = 0;
+    INDEX_TYPE write_response_count = 0;
+    INDEX_TYPE stop_drain_count = 0;
+    bool stop_seen = false;
+    bool stop_marker_enqueued = false;
+    INDEX_TYPE pending_addr[12];
+    INDEX_TYPE pending_data[12];
+#pragma HLS array_partition variable=pending_addr complete
+#pragma HLS array_partition variable=pending_data complete
+    INDEX_TYPE pending_count = 0;
+    INDEX_TYPE pending_index = 0;
+
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 0,
+        kCuperSpmvOnlyScoreboardDebugMagic);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 48,
+        kCuperSpmvOnlyScoreboardDebugMagic);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 49,
+        kCuperSpmvOnlyScoreboardDebugStreamCount);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 50, Batch_num);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 51, Matrix_len);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 52, Row_num);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 53, Column_num);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 54, Iteration_time);
+    CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+        pending_addr, pending_data, pending_count, 55, done_events_expected);
+
+debug_monitor_loop:
+    for (;;) {
+#pragma HLS pipeline II=1
+        ++heartbeat;
+
+        uint8_t num_responses = 0;
+        if (Debug.write_resp.try_read(num_responses)) {
+            write_response_count += int(num_responses) + 1;
+        }
+
+        if (!stop_seen && !Debug_Stop_in.empty()) {
+            INDEX_TYPE stop = 0;
+            Debug_Stop_in.try_read(stop);
+            stop_seen = true;
+            stop_drain_count = 0;
+        }
+
+        if (stop_seen) {
+            ++stop_drain_count;
+        }
+
+        if (stop_seen && stop_drain_count >= 8192) {
+            return;
+        }
+
+        if (pending_index < pending_count) {
+            if (!Debug.write_addr.full() && !Debug.write_data.full()) {
+                Debug.write_addr.try_write(pending_addr[pending_index]);
+                Debug.write_data.try_write(pending_data[pending_index]);
+                ++pending_index;
+                ++write_issue_count;
+            }
+            continue;
+        }
+
+        pending_count = 0;
+        pending_index = 0;
+
+        if (stop_seen && !stop_marker_enqueued) {
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr,
+                pending_data,
+                pending_count,
+                15,
+                kCuperSpmvOnlyScoreboardDebugFinal);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 7, done_event_count);
+            stop_marker_enqueued = true;
+            continue;
+        }
+
+        const bool emit_heartbeat =
+            ((heartbeat & kCuperSpmvOnlyScoreboardDebugHeartbeatMask) == 0);
+        if (emit_heartbeat) {
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 0, heartbeat);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 5, write_issue_count);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 6, write_response_count);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 7, done_event_count);
+            continue;
+        }
+
+        CuperSpmvOnlyScoreboardDebugEvent event;
+        const INDEX_TYPE current_poll_index = poll_index;
+        const bool has_event =
+            CuperSpmvOnly_TryReadScoreboardDebugStream(Debug_in,
+                                                       current_poll_index,
+                                                       event);
+        poll_index =
+            (current_poll_index == kCuperSpmvOnlyScoreboardDebugStreamCount - 1)
+                ? 0
+                : current_poll_index + 1;
+
+        if (has_event) {
+            ++event_count;
+            if (event.stage == kCuperSpmvOnlyScoreboardDebugCoreDone ||
+                event.stage == kCuperSpmvOnlyScoreboardDebugIssueDone ||
+                event.stage == kCuperSpmvOnlyScoreboardDebugAccDone) {
+                ++done_event_count;
+            }
+
+            const INDEX_TYPE source = event.source & 0xff;
+            const INDEX_TYPE counter_addr =
+                CuperSpmvOnly_ScoreboardDebugCounterAddr(event);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 1, event_count);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr,
+                pending_data,
+                pending_count,
+                2,
+                CuperSpmvOnly_PackScoreboardDebugEvent(event));
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 3, event.value);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 4, event.source);
+            CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                pending_addr, pending_data, pending_count, 16 + (source & 0x1f),
+                event.value);
+            if (counter_addr < kCuperSpmvOnlyScoreboardDebugWords) {
+                CuperSpmvOnly_ScoreboardDebugEnqueueWrite(
+                    pending_addr, pending_data, pending_count, counter_addr,
+                    event.value);
+            }
+
+            (void)done_events_expected;
+        }
+    }
+}
+#endif
+#endif
+
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+using CuperSpmvOnlyScoreboardDebugPulse = ap_uint<8>;
+
+inline void CuperSpmvOnly_TryWriteScoreboardDebugPulse(
+    tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
+    const CuperSpmvOnlyScoreboardDebugPulse pulse) {
+#pragma HLS inline
+    if (pulse != 0) {
+        Debug_out.try_write(pulse);
+    }
+}
+
+inline bool CuperSpmvOnly_TryIssueScoreboardDebugWrite(
+    tapa::async_mmap<INDEX_TYPE> &Debug,
+    const INDEX_TYPE addr,
+    const INDEX_TYPE data) {
+#pragma HLS inline
+    if (!Debug.write_addr.full() && !Debug.write_data.full()) {
+        Debug.write_addr.try_write(addr);
+        Debug.write_data.try_write(data);
+        return true;
+    }
+    return false;
+}
+
+inline void CuperSpmvOnly_CountScoreboardDebugPulses(
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugPulse, HBM_CHANNEL_NUM> &Pulse_in,
+    INDEX_TYPE lane_counts[HBM_CHANNEL_NUM][8],
+    INDEX_TYPE &total_count) {
+#pragma HLS inline
+#pragma HLS array_partition variable=lane_counts complete dim=0
+read_scoreboard_debug_sources:
+    for (INDEX_TYPE source = 0; source < HBM_CHANNEL_NUM; ++source) {
+#pragma HLS unroll
+        CuperSpmvOnlyScoreboardDebugPulse pulse = 0;
+        if (Pulse_in[source].try_read(pulse)) {
+        read_scoreboard_debug_lanes:
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS unroll
+                if (pulse[lane]) {
+                    ++lane_counts[source][lane];
+                    ++total_count;
+                }
+            }
+        }
+    }
+}
+
+inline INDEX_TYPE CuperSpmvOnly_ScoreboardDebugCounterAddrFromCursor(
+    const INDEX_TYPE counter_cursor) {
+#pragma HLS inline
+    const INDEX_TYPE group_span = HBM_CHANNEL_NUM * 8;
+    INDEX_TYPE base = kCuperSpmvOnlyScoreboardDebugCoreLaneBase;
+    INDEX_TYPE rem = counter_cursor;
+    if (counter_cursor >= group_span * 2) {
+        base = kCuperSpmvOnlyScoreboardDebugAccLaneBase;
+        rem = counter_cursor - group_span * 2;
+    } else if (counter_cursor >= group_span) {
+        base = kCuperSpmvOnlyScoreboardDebugIssueLaneBase;
+        rem = counter_cursor - group_span;
+    }
+    return base + rem;
+}
+
+inline INDEX_TYPE CuperSpmvOnly_ScoreboardDebugCounterValueFromCursor(
+    const INDEX_TYPE counter_cursor,
+    INDEX_TYPE core_counts[HBM_CHANNEL_NUM][8],
+    INDEX_TYPE issue_counts[HBM_CHANNEL_NUM][8],
+    INDEX_TYPE acc_counts[HBM_CHANNEL_NUM][8]) {
+#pragma HLS inline
+#pragma HLS array_partition variable=core_counts complete dim=0
+#pragma HLS array_partition variable=issue_counts complete dim=0
+#pragma HLS array_partition variable=acc_counts complete dim=0
+    const INDEX_TYPE group_span = HBM_CHANNEL_NUM * 8;
+    INDEX_TYPE rem = counter_cursor;
+    INDEX_TYPE group = 0;
+    if (counter_cursor >= group_span * 2) {
+        group = 2;
+        rem = counter_cursor - group_span * 2;
+    } else if (counter_cursor >= group_span) {
+        group = 1;
+        rem = counter_cursor - group_span;
+    }
+    const INDEX_TYPE source = rem >> 3;
+    const INDEX_TYPE lane = rem & 7;
+    if (group == 2) {
+        return acc_counts[source][lane];
+    }
+    if (group == 1) {
+        return issue_counts[source][lane];
+    }
+    return core_counts[source][lane];
+}
+
+void CuperSpmvOnly_ScoreboardDebugPulseMonitor(
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Matrix_len,
+    const INDEX_TYPE Row_num,
+    const INDEX_TYPE Column_num,
+    const INDEX_TYPE Iteration_num,
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM> &Core_Debug_in,
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM> &Issue_Debug_in,
+    tapa::istreams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM> &Acc_Debug_in,
+    tapa::istream<INDEX_TYPE> &Debug_Stop_in,
+    tapa::async_mmap<INDEX_TYPE> &Debug) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE counter_words = HBM_CHANNEL_NUM * 8 * 3;
+    INDEX_TYPE heartbeat = 0;
+    INDEX_TYPE core_total = 0;
+    INDEX_TYPE issue_total = 0;
+    INDEX_TYPE acc_total = 0;
+    INDEX_TYPE live_counter_cursor = 0;
+    INDEX_TYPE init_cursor = 0;
+    INDEX_TYPE final_cursor = 0;
+    INDEX_TYPE write_issue_count = 0;
+    INDEX_TYPE write_response_count = 0;
+    INDEX_TYPE stop_drain_count = 0;
+    bool stop_seen = false;
+    bool final_flush = false;
+
+    INDEX_TYPE core_counts[HBM_CHANNEL_NUM][8];
+    INDEX_TYPE issue_counts[HBM_CHANNEL_NUM][8];
+    INDEX_TYPE acc_counts[HBM_CHANNEL_NUM][8];
+#pragma HLS array_partition variable=core_counts complete dim=0
+#pragma HLS array_partition variable=issue_counts complete dim=0
+#pragma HLS array_partition variable=acc_counts complete dim=0
+
+init_scoreboard_debug_counts:
+    for (INDEX_TYPE source = 0; source < HBM_CHANNEL_NUM; ++source) {
+#pragma HLS unroll
+        for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS unroll
+            core_counts[source][lane] = 0;
+            issue_counts[source][lane] = 0;
+            acc_counts[source][lane] = 0;
+        }
+    }
+
+debug_pulse_monitor_loop:
+    for (;;) {
+#pragma HLS pipeline II=1
+        ++heartbeat;
+
+        uint8_t num_responses = 0;
+        if (Debug.write_resp.try_read(num_responses)) {
+            write_response_count += int(num_responses) + 1;
+        }
+
+        CuperSpmvOnly_CountScoreboardDebugPulses(Core_Debug_in,
+                                                 core_counts,
+                                                 core_total);
+        CuperSpmvOnly_CountScoreboardDebugPulses(Issue_Debug_in,
+                                                 issue_counts,
+                                                 issue_total);
+        CuperSpmvOnly_CountScoreboardDebugPulses(Acc_Debug_in,
+                                                 acc_counts,
+                                                 acc_total);
+
+        if (!stop_seen && !Debug_Stop_in.empty()) {
+            INDEX_TYPE stop = 0;
+            Debug_Stop_in.try_read(stop);
+            stop_seen = true;
+            stop_drain_count = 0;
+        }
+
+        if (stop_seen) {
+            ++stop_drain_count;
+        }
+        if (stop_seen && stop_drain_count >= 8192) {
+            final_flush = true;
+        }
+
+        INDEX_TYPE write_addr = 0;
+        INDEX_TYPE write_data = 0;
+        bool write_valid = false;
+
+        if (init_cursor < 9) {
+            write_valid = true;
+            switch (init_cursor) {
+                case 0:
+                    write_addr = 0;
+                    write_data = kCuperSpmvOnlyScoreboardDebugMagic;
+                    break;
+                case 1:
+                    write_addr = 48;
+                    write_data = kCuperSpmvOnlyScoreboardDebugMagic;
+                    break;
+                case 2:
+                    write_addr = 49;
+                    write_data = kCuperSpmvOnlyScoreboardDebugStreamCount;
+                    break;
+                case 3:
+                    write_addr = 50;
+                    write_data = Batch_num;
+                    break;
+                case 4:
+                    write_addr = 51;
+                    write_data = Matrix_len;
+                    break;
+                case 5:
+                    write_addr = 52;
+                    write_data = Row_num;
+                    break;
+                case 6:
+                    write_addr = 53;
+                    write_data = Column_num;
+                    break;
+                case 7:
+                    write_addr = 54;
+                    write_data = Iteration_time;
+                    break;
+                default:
+                    write_addr = 55;
+                    write_data = counter_words;
+                    break;
+            }
+            if (write_valid &&
+                CuperSpmvOnly_TryIssueScoreboardDebugWrite(Debug,
+                                                           write_addr,
+                                                           write_data)) {
+                ++init_cursor;
+                ++write_issue_count;
+            }
+            continue;
+        }
+
+        if (final_flush) {
+            if (final_cursor < counter_words + 8) {
+                write_valid = true;
+                if (final_cursor < 8) {
+                    switch (final_cursor) {
+                        case 0:
+                            write_addr = 15;
+                            write_data = kCuperSpmvOnlyScoreboardDebugFinal;
+                            break;
+                        case 1:
+                            write_addr = 1;
+                            write_data = core_total + issue_total + acc_total;
+                            break;
+                        case 2:
+                            write_addr = 2;
+                            write_data = core_total;
+                            break;
+                        case 3:
+                            write_addr = 3;
+                            write_data = issue_total;
+                            break;
+                        case 4:
+                            write_addr = 4;
+                            write_data = acc_total;
+                            break;
+                        case 5:
+                            write_addr = 5;
+                            write_data = write_issue_count;
+                            break;
+                        case 6:
+                            write_addr = 6;
+                            write_data = write_response_count;
+                            break;
+                        default:
+                            write_addr = 7;
+                            write_data = stop_drain_count;
+                            break;
+                    }
+                } else {
+                    const INDEX_TYPE counter_cursor = final_cursor - 8;
+                    write_addr =
+                        CuperSpmvOnly_ScoreboardDebugCounterAddrFromCursor(
+                            counter_cursor);
+                    write_data =
+                        CuperSpmvOnly_ScoreboardDebugCounterValueFromCursor(
+                            counter_cursor,
+                            core_counts,
+                            issue_counts,
+                            acc_counts);
+                }
+
+                if (CuperSpmvOnly_TryIssueScoreboardDebugWrite(Debug,
+                                                               write_addr,
+                                                               write_data)) {
+                    ++final_cursor;
+                    ++write_issue_count;
+                }
+            } else if (write_response_count >= write_issue_count) {
+                return;
+            }
+            continue;
+        }
+
+        if ((heartbeat & kCuperSpmvOnlyScoreboardDebugHeartbeatMask) == 0) {
+            if (CuperSpmvOnly_TryIssueScoreboardDebugWrite(Debug,
+                                                           0,
+                                                           heartbeat)) {
+                ++write_issue_count;
+            }
+        } else if ((heartbeat & kCuperSpmvOnlyScoreboardDebugEmitMask) == 0) {
+            write_addr =
+                CuperSpmvOnly_ScoreboardDebugCounterAddrFromCursor(
+                    live_counter_cursor);
+            write_data =
+                CuperSpmvOnly_ScoreboardDebugCounterValueFromCursor(
+                    live_counter_cursor,
+                    core_counts,
+                    issue_counts,
+                    acc_counts);
+            if (CuperSpmvOnly_TryIssueScoreboardDebugWrite(Debug,
+                                                           write_addr,
+                                                           write_data)) {
+                ++write_issue_count;
+                ++live_counter_cursor;
+                if (live_counter_cursor == counter_words) {
+                    live_counter_cursor = 0;
+                }
+            }
+        }
+    }
+}
+#endif
 
 inline void CuperSpmvOnly_WriteStatus(tapa::async_mmap<INDEX_TYPE> &Status,
                                       const INDEX_TYPE iterations_done,
@@ -140,6 +831,9 @@ void CuperSpmvOnly_ProgressWriter(
     const INDEX_TYPE Iteration_num,
     tapa::istream<CuperSpmvOnlyProgressEvent> &Ptr_Progress_in,
     tapa::istream<CuperSpmvOnlyProgressEvent> &Writer_Progress_in,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    tapa::ostream<INDEX_TYPE> &Scoreboard_Debug_Stop_out,
+#endif
     tapa::async_mmap<INDEX_TYPE> &Status,
     tapa::async_mmap<double> &Metrics) {
     // Status/Metrics 的唯一 writer。
@@ -186,6 +880,9 @@ progress_loop:
                                Row_num,
                                Column_num,
                                Iteration_num == 0 ? 1 : Iteration_num);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    Scoreboard_Debug_Stop_out.write(1);
+#endif
 }
 
 void CuperSpmvOnly_NullProgressSource(
@@ -868,6 +1565,20 @@ iter:
 #if defined(JACOBI_SPMV_SEGMENTED_ACCUMULATE) && defined(JACOBI_SPMV_OOO_ACCUMULATE_RTL)
 #error "JACOBI_SPMV_SEGMENTED_ACCUMULATE is a non-RTL owner-bank cache experiment; do not combine it with JACOBI_SPMV_OOO_ACCUMULATE_RTL."
 #endif
+#if defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL) && defined(JACOBI_SPMV_OOO_ACCUMULATE_RTL)
+#error "JACOBI_SPMV_OOO_SCOREBOARD_RTL only replaces the scheduler; do not combine it with full JACOBI_SPMV_OOO_ACCUMULATE_RTL."
+#endif
+#if defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL) && defined(JACOBI_SPMV_SEGMENTED_ACCUMULATE)
+#error "JACOBI_SPMV_OOO_SCOREBOARD_RTL uses the scheduled HLS accumulator; do not combine it with JACOBI_SPMV_SEGMENTED_ACCUMULATE."
+#endif
+
+#ifndef JACOBI_SPMV_SCOREBOARD_DEPTH
+constexpr int CUPER_SPMV_SCOREBOARD_DEPTH = 12;
+#else
+constexpr int CUPER_SPMV_SCOREBOARD_DEPTH = JACOBI_SPMV_SCOREBOARD_DEPTH;
+#endif
+static_assert(CUPER_SPMV_SCOREBOARD_DEPTH > 0,
+              "JACOBI_SPMV_SCOREBOARD_DEPTH must be positive.");
 
 struct CuperSpmvOnly_TaggedFloatV2 {
     INDEX_TYPE packet_idx;
@@ -882,6 +1593,51 @@ struct CuperSpmvOnly_TaggedScalar {
     INDEX_TYPE scalar_lane;
     VALUE_TYPE value;
 };
+
+// RTL scoreboard branch boundary.  Keep this token bit-exact instead of using
+// a nested struct, so the custom RTL wrapper and HLS accumulator agree on bits:
+//   [0]      done
+//   [32:1]   packet_idx
+//   [64:33]  pair_lane
+//   [96:65]  scalar_lane
+//   [128:97] value bits
+//   [131:129] selected owner-lane
+//   [159:132] reserved
+using CuperSpmvOnly_ScheduledTaggedScalar = ap_uint<160>;
+
+inline CuperSpmvOnly_ScheduledTaggedScalar
+CuperSpmvOnly_PackScheduledTaggedScalar(
+    const ap_uint<3> lane,
+    const CuperSpmvOnly_TaggedScalar &tagged) {
+#pragma HLS inline
+    CuperSpmvOnly_ScheduledTaggedScalar scheduled = 0;
+    scheduled[0] = tagged.done;
+    scheduled(32, 1) = tagged.packet_idx;
+    scheduled(64, 33) = tagged.pair_lane;
+    scheduled(96, 65) = tagged.scalar_lane;
+    scheduled(128, 97) = tapa::bit_cast<ap_uint<32>>(tagged.value);
+    scheduled(131, 129) = lane;
+    return scheduled;
+}
+
+inline ap_uint<3> CuperSpmvOnly_ScheduledLane(
+    const CuperSpmvOnly_ScheduledTaggedScalar scheduled) {
+#pragma HLS inline
+    return scheduled(131, 129);
+}
+
+inline CuperSpmvOnly_TaggedScalar CuperSpmvOnly_UnpackScheduledTaggedScalar(
+    const CuperSpmvOnly_ScheduledTaggedScalar scheduled) {
+#pragma HLS inline
+    CuperSpmvOnly_TaggedScalar tagged;
+    tagged.done = scheduled[0];
+    tagged.packet_idx = scheduled(32, 1);
+    tagged.pair_lane = scheduled(64, 33);
+    tagged.scalar_lane = scheduled(96, 65);
+    ap_uint<32> value_bits = scheduled(128, 97);
+    tagged.value = tapa::bit_cast<VALUE_TYPE>(value_bits);
+    return tagged;
+}
 
 constexpr int CUPER_SPMV_ROW_CACHE_SIZE = 4;
 #ifdef JACOBI_SPMV_SEGMENTED_ACCUMULATE
@@ -1542,6 +2298,9 @@ void CuperSpmvOnly_SourceLaneSplitterOoo(
     tapa::ostream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_5,
     tapa::ostream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_6,
     tapa::ostream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_7,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
+#endif
     const INDEX_TYPE Source_id) {
     // 静态 8-lane transpose。
     //
@@ -1571,22 +2330,66 @@ iter:
 #pragma HLS loop_tripcount min=1 max=200
 #pragma HLS pipeline II=1
                 Matrix_Mult_X matmultx = Matrix_Mult_Vector_Stream.read();
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 0, matmultx,
                                                 Owner_Lane_Stream_0);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[0][17] == 0) {
+                    debug_pulse[0] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 1, matmultx,
                                                 Owner_Lane_Stream_1);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[1][17] == 0) {
+                    debug_pulse[1] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 2, matmultx,
                                                 Owner_Lane_Stream_2);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[2][17] == 0) {
+                    debug_pulse[2] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 3, matmultx,
                                                 Owner_Lane_Stream_3);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[3][17] == 0) {
+                    debug_pulse[3] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 4, matmultx,
                                                 Owner_Lane_Stream_4);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[4][17] == 0) {
+                    debug_pulse[4] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 5, matmultx,
                                                 Owner_Lane_Stream_5);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[5][17] == 0) {
+                    debug_pulse[5] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 6, matmultx,
                                                 Owner_Lane_Stream_6);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[6][17] == 0) {
+                    debug_pulse[6] = 1;
+                }
+#endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 7, matmultx,
                                                 Owner_Lane_Stream_7);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                if (matmultx.row[7][17] == 0) {
+                    debug_pulse[7] = 1;
+                }
+                CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out, debug_pulse);
+#endif
             }
             start_32 = end_32;
         }
@@ -1601,6 +2404,238 @@ iter:
         CuperSpmvOnly_WriteSplitDoneOoo(Source_id, 7, Owner_Lane_Stream_7);
     }
 }
+
+inline bool CuperSpmvOnly_ScoreboardHazard(
+    const ap_uint<3> lane,
+    const CuperSpmvOnly_TaggedScalar &tagged,
+    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH],
+    ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH],
+    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH],
+    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]) {
+#pragma HLS inline
+    bool hazard = false;
+    const ap_uint<17> addr = tagged.packet_idx / HBM_CHANNEL_NUM;
+    const bool is_pong = (tagged.scalar_lane != 0);
+scoreboard_hazard_scan:
+    for (INDEX_TYPE i = 0; i < CUPER_SPMV_SCOREBOARD_DEPTH; ++i) {
+#pragma HLS unroll
+        if (sb_valid[i] && sb_lane[i] == lane &&
+            sb_addr[i] == addr && sb_pong[i] == is_pong) {
+            hazard = true;
+        }
+    }
+    return hazard;
+}
+
+inline void CuperSpmvOnly_ScoreboardShift(
+    const bool allocate,
+    const ap_uint<3> lane,
+    const CuperSpmvOnly_TaggedScalar &tagged,
+    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH],
+    ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH],
+    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH],
+    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]) {
+#pragma HLS inline
+scoreboard_shift:
+    for (INDEX_TYPE i = CUPER_SPMV_SCOREBOARD_DEPTH - 1; i > 0; --i) {
+#pragma HLS unroll
+        sb_valid[i] = sb_valid[i - 1];
+        sb_lane[i] = sb_lane[i - 1];
+        sb_addr[i] = sb_addr[i - 1];
+        sb_pong[i] = sb_pong[i - 1];
+    }
+
+    sb_valid[0] = allocate;
+    sb_lane[0] = lane;
+    sb_addr[0] = tagged.packet_idx / HBM_CHANNEL_NUM;
+    sb_pong[0] = (tagged.scalar_lane != 0);
+}
+
+inline void CuperSpmvOnly_TryReadScoreboardHead(
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream,
+    const bool lane_done,
+    bool &head_valid,
+    CuperSpmvOnly_TaggedScalar &head) {
+#pragma HLS inline
+    if (!lane_done && !head_valid && !Owner_Lane_Stream.empty()) {
+        Owner_Lane_Stream.try_read(head);
+        head_valid = true;
+    }
+}
+
+#ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
+[[tapa::target("non_synthesizable")]]
+#endif
+void CuperSpmvOnly_RtlOwnerScoreboardOoo(
+    const INDEX_TYPE Iteration_num,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_0,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_1,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_2,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_3,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_4,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_5,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_6,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_7,
+    tapa::ostream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Owner_Stream,
+    const INDEX_TYPE Owner_id) {
+    // C++ 等价占位。硬件分支用 Verilog wrapper 替换同名 task，只保留“选 lane
+    // + 防同 lane/addr/pingpong 重叠 + 输出 scheduled token”的职责。
+    (void)Owner_id;
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+
+iter:
+    for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        bool done[8];
+#pragma HLS array_partition complete variable=done dim=1
+        bool head_valid[8];
+#pragma HLS array_partition complete variable=head_valid dim=1
+        CuperSpmvOnly_TaggedScalar head[8];
+#pragma HLS array_partition complete variable=head dim=1
+        bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH];
+#pragma HLS array_partition complete variable=sb_valid dim=1
+        ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH];
+#pragma HLS array_partition complete variable=sb_lane dim=1
+        ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH];
+#pragma HLS array_partition complete variable=sb_addr dim=1
+        bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH];
+#pragma HLS array_partition complete variable=sb_pong dim=1
+
+    init_state:
+        for (INDEX_TYPE i = 0; i < 8; ++i) {
+#pragma HLS unroll
+            done[i] = false;
+            head_valid[i] = false;
+        }
+    init_scoreboard:
+        for (INDEX_TYPE i = 0; i < CUPER_SPMV_SCOREBOARD_DEPTH; ++i) {
+#pragma HLS unroll
+            sb_valid[i] = false;
+            sb_lane[i] = 0;
+            sb_addr[i] = 0;
+            sb_pong[i] = false;
+        }
+
+        ap_uint<3> rr_lane = 0;
+    schedule:
+        for (; !(done[0] && done[1] && done[2] && done[3] &&
+                 done[4] && done[5] && done[6] && done[7]);) {
+#pragma HLS loop_tripcount min=1 max=4000000
+#pragma HLS pipeline II=1
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_0, done[0],
+                                                head_valid[0], head[0]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_1, done[1],
+                                                head_valid[1], head[1]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_2, done[2],
+                                                head_valid[2], head[2]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_3, done[3],
+                                                head_valid[3], head[3]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_4, done[4],
+                                                head_valid[4], head[4]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_5, done[5],
+                                                head_valid[5], head[5]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_6, done[6],
+                                                head_valid[6], head[6]);
+            CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_7, done[7],
+                                                head_valid[7], head[7]);
+
+            bool issue_valid = false;
+            ap_uint<3> issue_lane = rr_lane;
+        choose_lane:
+            for (INDEX_TYPE i = 0; i < 8; ++i) {
+#pragma HLS unroll
+                const ap_uint<3> candidate = rr_lane + ap_uint<3>(i);
+                if (!issue_valid && head_valid[candidate]) {
+                    const bool hazard =
+                        (head[candidate].done == 0) &&
+                        CuperSpmvOnly_ScoreboardHazard(candidate,
+                                                       head[candidate],
+                                                       sb_valid,
+                                                       sb_lane,
+                                                       sb_addr,
+                                                       sb_pong);
+                    if (!hazard) {
+                        issue_valid = true;
+                        issue_lane = candidate;
+                    }
+                }
+            }
+
+            CuperSpmvOnly_TaggedScalar issued;
+            issued.done = 1;
+            issued.packet_idx = 0;
+            issued.pair_lane = 0;
+            issued.scalar_lane = 0;
+            issued.value = 0.0f;
+            if (issue_valid) {
+                issued = head[issue_lane];
+                Scheduled_Owner_Stream.write(
+                    CuperSpmvOnly_PackScheduledTaggedScalar(issue_lane, issued));
+                head_valid[issue_lane] = false;
+                if (issued.done != 0) {
+                    done[issue_lane] = true;
+                }
+                rr_lane = issue_lane + ap_uint<3>(1);
+            }
+
+            CuperSpmvOnly_ScoreboardShift(issue_valid && issued.done == 0,
+                                          issue_lane,
+                                          issued,
+                                          sb_valid,
+                                          sb_lane,
+                                          sb_addr,
+                                          sb_pong);
+        }
+    }
+}
+
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+void CuperSpmvOnly_ScheduledDebugTapOoo(
+    const INDEX_TYPE Iteration_num,
+    tapa::istream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_In_Stream,
+    tapa::ostream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Out_Stream,
+    tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
+    const INDEX_TYPE Owner_id) {
+    (void)Owner_id;
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+
+iter:
+    for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        bool done[8];
+#pragma HLS array_partition complete variable=done dim=1
+    init_state:
+        for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS unroll
+            done[lane] = false;
+        }
+
+    tap:
+        for (; !(done[0] && done[1] && done[2] && done[3] &&
+                 done[4] && done[5] && done[6] && done[7]);) {
+#pragma HLS loop_tripcount min=1 max=4000000
+#pragma HLS pipeline II=1
+            const CuperSpmvOnly_ScheduledTaggedScalar scheduled =
+                Scheduled_In_Stream.read();
+            Scheduled_Out_Stream.write(scheduled);
+
+            const ap_uint<3> lane = CuperSpmvOnly_ScheduledLane(scheduled);
+            const CuperSpmvOnly_TaggedScalar tagged =
+                CuperSpmvOnly_UnpackScheduledTaggedScalar(scheduled);
+            if (tagged.done != 0) {
+                done[lane] = true;
+            } else {
+                CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
+                debug_pulse[lane] = 1;
+                CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
+                                                           debug_pulse);
+            }
+        }
+    }
+}
+#endif
 
 void CuperSpmvOnly_RtlOwnerLanePassThrough(
     const INDEX_TYPE Iteration_num,
@@ -1844,6 +2879,108 @@ iter:
             ++lane_cursor;
             if (lane_cursor == 8) {
                 lane_cursor = 0;
+            }
+        }
+
+    writer:
+        for (INDEX_TYPE owner_group = 0; owner_group < num_owner_groups; ++owner_group) {
+#pragma HLS loop_tripcount min=1 max=8000
+            const INDEX_TYPE packet_idx =
+                owner_group * HBM_CHANNEL_NUM + Owner_id;
+            if (packet_idx < num_out_packets) {
+            write_pairs:
+                for (INDEX_TYPE pair_lane = 0; pair_lane < 8; ++pair_lane) {
+#pragma HLS loop_tripcount min=8 max=8
+#pragma HLS pipeline II=1
+                    CuperSpmvOnly_TaggedFloatV2 tagged;
+                    tagged.packet_idx = packet_idx;
+                    tagged.pair_lane = pair_lane;
+                    tagged.value[0] = tapa::bit_cast<VALUE_TYPE>(
+                        local_part_Y_ping[pair_lane][owner_group]);
+                    tagged.value[1] = tapa::bit_cast<VALUE_TYPE>(
+                        local_part_Y_pong[pair_lane][owner_group]);
+                    Vector_Y_Tagged_Stream.write(tagged);
+                }
+            }
+        }
+    }
+}
+
+void CuperSpmvOnly_OwnerAccumulatorScheduledOoo(
+    const INDEX_TYPE Iteration_num,
+    const INDEX_TYPE Row_num,
+    tapa::istream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Owner_Stream,
+    tapa::ostream<CuperSpmvOnly_TaggedFloatV2> &Vector_Y_Tagged_Stream,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
+#endif
+    const INDEX_TYPE Owner_id) {
+    // RTL scoreboard-only 分支的 HLS 累加器。
+    //
+    // 前级 RTL 已经保证同一个 {lane, addr, ping/pong} 不会在 scoreboard 深度内
+    // 重复发射；这里保留 FP32 加法、URAM partial sum 和原 tagged writer 顺序。
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE num_out_packets = Cuper_NumFloatV16Packets(Row_num);
+    const INDEX_TYPE num_owner_groups =
+        (num_out_packets + HBM_CHANNEL_NUM - 1) / HBM_CHANNEL_NUM;
+
+    ap_uint<32> local_part_Y_ping[8][URAM_DEPTH];
+#pragma HLS bind_storage variable=local_part_Y_ping type=RAM_2P impl=URAM latency=1
+#pragma HLS array_partition complete variable=local_part_Y_ping dim=1
+    ap_uint<32> local_part_Y_pong[8][URAM_DEPTH];
+#pragma HLS bind_storage variable=local_part_Y_pong type=RAM_2P impl=URAM latency=1
+#pragma HLS array_partition complete variable=local_part_Y_pong dim=1
+
+iter:
+    for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+    init:
+        for (INDEX_TYPE i = 0; i < num_owner_groups; ++i) {
+#pragma HLS loop_tripcount min=1 max=8000
+#pragma HLS pipeline II=1
+            for (INDEX_TYPE pair_lane = 0; pair_lane < 8; ++pair_lane) {
+#pragma HLS unroll
+                local_part_Y_ping[pair_lane][i] = 0;
+                local_part_Y_pong[pair_lane][i] = 0;
+            }
+        }
+
+        bool done[8];
+#pragma HLS array_partition complete variable=done dim=1
+        for (INDEX_TYPE i = 0; i < 8; ++i) {
+#pragma HLS unroll
+            done[i] = false;
+        }
+
+    consume:
+        for (; !(done[0] && done[1] && done[2] && done[3] &&
+                 done[4] && done[5] && done[6] && done[7]);) {
+#pragma HLS loop_tripcount min=1 max=4000000
+#pragma HLS pipeline II=1
+#pragma HLS dependence true variable=local_part_Y_ping distance=CUPER_SPMV_SCOREBOARD_DEPTH
+#pragma HLS dependence true variable=local_part_Y_pong distance=CUPER_SPMV_SCOREBOARD_DEPTH
+            const CuperSpmvOnly_ScheduledTaggedScalar scheduled =
+                Scheduled_Owner_Stream.read();
+            const ap_uint<3> lane = CuperSpmvOnly_ScheduledLane(scheduled);
+            const CuperSpmvOnly_TaggedScalar tagged =
+                CuperSpmvOnly_UnpackScheduledTaggedScalar(scheduled);
+
+            if (tagged.done != 0) {
+                done[lane] = true;
+            } else {
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
+                debug_pulse[lane] = 1;
+                CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
+                                                           debug_pulse);
+#endif
+                const ap_uint<17> addr = tagged.packet_idx / HBM_CHANNEL_NUM;
+                if (tagged.scalar_lane == 0) {
+                    Adder_p(addr, tagged.value, local_part_Y_ping[lane]);
+                } else {
+                    Adder_p(addr, tagged.value, local_part_Y_pong[lane]);
+                }
             }
         }
 
@@ -2660,6 +3797,47 @@ iter:
                 Owner_Lane_Stream[(OWNER_ID) * 8 + 7], \
                 Vector_Y_Tagged_Stream[OWNER_ID], \
                 OWNER_ID)
+#elif defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
+#define CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(OWNER_ID) \
+        .invoke(CuperSpmvOnly_RtlOwnerScoreboardOoo, \
+                Iteration_num, \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 0], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 1], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 2], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 3], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 4], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 5], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 6], \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + 7], \
+                Scheduled_Owner_Stream[OWNER_ID], \
+                OWNER_ID)
+
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+#define CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(OWNER_ID) \
+        .invoke(CuperSpmvOnly_ScheduledDebugTapOoo, \
+                Iteration_num, \
+                Scheduled_Owner_Stream[OWNER_ID], \
+                Scheduled_Owner_DebugTap_Stream[OWNER_ID], \
+                Scoreboard_Issue_Debug_Stream[OWNER_ID], \
+                OWNER_ID)
+
+#define CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(OWNER_ID) \
+        .invoke(CuperSpmvOnly_OwnerAccumulatorScheduledOoo, \
+                Iteration_num, \
+                Row_num, \
+                Scheduled_Owner_DebugTap_Stream[OWNER_ID], \
+                Vector_Y_Tagged_Stream[OWNER_ID], \
+                Scoreboard_Acc_Debug_Stream[OWNER_ID], \
+                OWNER_ID)
+#else
+#define CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(OWNER_ID) \
+        .invoke(CuperSpmvOnly_OwnerAccumulatorScheduledOoo, \
+                Iteration_num, \
+                Row_num, \
+                Scheduled_Owner_Stream[OWNER_ID], \
+                Vector_Y_Tagged_Stream[OWNER_ID], \
+                OWNER_ID)
+#endif
 #else
 #define CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(OWNER_ID) \
         .invoke(CuperSpmvOnly_OwnerAccumulatorTransposeOoo, \
@@ -2681,6 +3859,13 @@ iter:
         ((((LANE_ID) * HBM_CHANNEL_NUM_DIV_8) + ((SOURCE_ID) % HBM_CHANNEL_NUM_DIV_8)) * 8 + \
          ((SOURCE_ID) / HBM_CHANNEL_NUM_DIV_8))
 
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+#define IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG(SOURCE_ID) \
+                Scoreboard_Core_Debug_Stream[SOURCE_ID],
+#else
+#define IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG(SOURCE_ID)
+#endif
+
 #define CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(SOURCE_ID) \
         .invoke(CuperSpmvOnly_SourceLaneSplitterOoo, \
                 Vector_Y_Param[SOURCE_ID], \
@@ -2693,6 +3878,7 @@ iter:
                 Owner_Lane_Stream[CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, 5)], \
                 Owner_Lane_Stream[CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, 6)], \
                 Owner_Lane_Stream[CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, 7)], \
+                IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG(SOURCE_ID) \
                 SOURCE_ID)
 
 void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
@@ -2705,6 +3891,9 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
                           tapa::mmap<INDEX_TYPE> Status,
                           tapa::mmap<double> Metrics,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                          tapa::mmap<INDEX_TYPE> Debug,
+#endif
                           const INDEX_TYPE Batch_num,
                           const INDEX_TYPE Matrix_len,
                           const INDEX_TYPE Row_num,
@@ -2724,6 +3913,24 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                                                  Vector_Y_Tagged_Stream("Vector_Y_Tagged_Stream");
     tapa::streams<CuperSpmvOnly_TaggedScalar, HBM_CHANNEL_NUM * 8, 64>
                                                                  Owner_Lane_Stream("Owner_Lane_Stream");
+#ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
+    tapa::streams<CuperSpmvOnly_ScheduledTaggedScalar, HBM_CHANNEL_NUM, 64>
+                                                                 Scheduled_Owner_Stream("Scheduled_Owner_Stream");
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+    tapa::streams<CuperSpmvOnly_ScheduledTaggedScalar, HBM_CHANNEL_NUM, 64>
+                                                                 Scheduled_Owner_DebugTap_Stream("Scheduled_Owner_DebugTap_Stream");
+    tapa::streams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM,
+                  1024>                                          Scoreboard_Core_Debug_Stream("Scoreboard_Core_Debug_Stream");
+    tapa::streams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM,
+                  1024>                                          Scoreboard_Issue_Debug_Stream("Scoreboard_Issue_Debug_Stream");
+    tapa::streams<CuperSpmvOnlyScoreboardDebugPulse,
+                  HBM_CHANNEL_NUM,
+                  1024>                                          Scoreboard_Acc_Debug_Stream("Scoreboard_Acc_Debug_Stream");
+    tapa::stream<INDEX_TYPE, 2>                                  Scoreboard_Debug_Stop_Stream("Scoreboard_Debug_Stop_Stream");
+#endif
+#endif
 #else
     tapa::streams<CuperSpmvOnly_TaggedFloatV2, HBM_CHANNEL_NUM, 1024>
                                                                  Vector_Y_Tagged_Stream("Vector_Y_Tagged_Stream");
@@ -2752,8 +3959,24 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Iteration_num,
                 Ptr_Progress_Stream,
                 Writer_Progress_Stream,
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                Scoreboard_Debug_Stop_Stream,
+#endif
                 Status,
                 Metrics)
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+        .invoke(CuperSpmvOnly_ScoreboardDebugPulseMonitor,
+                Batch_num,
+                Matrix_len,
+                Row_num,
+                Column_num,
+                Iteration_num,
+                Scoreboard_Core_Debug_Stream,
+                Scoreboard_Issue_Debug_Stream,
+                Scoreboard_Acc_Debug_Stream,
+                Scoreboard_Debug_Stop_Stream,
+                Debug)
+#endif
 #if defined(JACOBI_SPMV_STRIP_PADDING) || \
     defined(JACOBI_SPMV_COMPACT_PE) || \
     defined(JACOBI_SPMV_LANE_STATIC_REAL)
@@ -3001,6 +4224,119 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(30)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(31)
 #endif
+#elif defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
+        // 弱 RTL 分支：只把 8 条 owner-lane 的选择和 RAW scoreboard 交给 RTL；
+        // FP32 加法、URAM partial sum 和 tagged writer 仍留在 HLS。
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(0)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(1)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(2)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(3)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(4)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(5)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(6)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(7)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(8)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(9)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(10)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(11)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(12)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(13)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(14)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(15)
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(16)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(17)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(18)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(19)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(20)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(21)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(22)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(24)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(25)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(26)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(27)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(28)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(29)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(30)
+        CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(31)
+#endif
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(0)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(1)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(2)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(3)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(4)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(5)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(6)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(7)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(8)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(9)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(10)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(11)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(12)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(13)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(14)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(15)
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(16)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(17)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(18)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(19)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(20)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(21)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(22)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(24)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(25)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(26)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(27)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(28)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(29)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(30)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(31)
+#endif
+#endif
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(0)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(1)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(2)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(3)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(4)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(5)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(6)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(7)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(8)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(9)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(10)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(11)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(12)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(13)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(14)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(15)
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(16)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(17)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(18)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(19)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(20)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(21)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(22)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(24)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(25)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(26)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(27)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(28)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(29)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(30)
+        CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(31)
+#endif
 #else
         // 非 RTL owner-bank accumulator。打开 JACOBI_SPMV_SEGMENTED_ACCUMULATE
         // 时仍走这条 16 owner-bank 接线，只把 bank 内部 row cache 换成分段缓存。
@@ -3144,7 +4480,20 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #undef CUPER_SPMV_ONLY_INVOKE_CORE_STRIP
 #undef CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE
 #undef CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC
+#ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
 #undef CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC
+#endif
+#ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
+#undef CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+#undef CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP
+#endif
+#undef CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC
+#endif
+#if !defined(JACOBI_SPMV_OOO_ACCUMULATE_RTL) && \
+    !defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
 #undef CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC
+#endif
 #undef CUPER_SPMV_ONLY_OWNER_LANE_INDEX
+#undef IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG
 #undef CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER

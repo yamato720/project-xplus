@@ -52,6 +52,7 @@ write_wide_connectivity_cfg() {
 write_spmv_only_connectivity_cfg() {
   local cfg_path="$1"
   local channels="$2"
+  local scoreboard_debug="$3"
   {
     echo "[connectivity]"
     echo "nk=CuperSpmvServiceOnly:1"
@@ -74,6 +75,9 @@ write_spmv_only_connectivity_cfg() {
       echo "sp=CuperSpmvServiceOnly_1.Y_out:HBM[30]"
       echo "sp=CuperSpmvServiceOnly_1.Status:HBM[31]"
       echo "sp=CuperSpmvServiceOnly_1.Metrics:HBM[31]"
+      if [[ "$scoreboard_debug" == "1" ]]; then
+        echo "sp=CuperSpmvServiceOnly_1.Debug:HBM[31]"
+      fi
     else
       local ptr_bank=$channels
       local x_bank=$((channels + 1))
@@ -83,6 +87,9 @@ write_spmv_only_connectivity_cfg() {
       echo "sp=CuperSpmvServiceOnly_1.Y_out:HBM[${y_bank}]"
       echo "sp=CuperSpmvServiceOnly_1.Status:HBM[30]"
       echo "sp=CuperSpmvServiceOnly_1.Metrics:HBM[31]"
+      if [[ "$scoreboard_debug" == "1" ]]; then
+        echo "sp=CuperSpmvServiceOnly_1.Debug:HBM[31]"
+      fi
     fi
   } > "$cfg_path"
 }
@@ -107,7 +114,11 @@ esac
 if [[ "$TOP" == "CuperSpmvServiceOnly" ]]; then
   SPMV_ONLY_GRAPH=1
   CONNECTIVITY_CFG="$BUILD_DIR/connectivity_spmv_only_${HBM_CHANNELS}hbm.cfg"
-  write_spmv_only_connectivity_cfg "$CONNECTIVITY_CFG" "$HBM_CHANNELS"
+  SPMV_SCOREBOARD_DEBUG_GRAPH=0
+  if [[ "${JACOBI_SPMV_SCOREBOARD_DEBUG:-0}" != "0" && "${JACOBI_SPMV_SCOREBOARD_DEBUG:-}" != "" ]]; then
+    SPMV_SCOREBOARD_DEBUG_GRAPH=1
+  fi
+  write_spmv_only_connectivity_cfg "$CONNECTIVITY_CFG" "$HBM_CHANNELS" "$SPMV_SCOREBOARD_DEBUG_GRAPH"
 elif [[ "$TOP" == "CuperJacobiMmapProbeOnly" ]]; then
   CONNECTIVITY_CFG="$BUILD_DIR/connectivity_mmap_probe.cfg"
   {

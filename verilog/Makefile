@@ -29,10 +29,16 @@ CSR_INPUT := $(BUILD_DIR)/csr_input.tsv
 CSR_EXPECTED := $(BUILD_DIR)/csr_expected.tsv
 CSR_META := $(BUILD_DIR)/csr_meta.env
 CSR_OBJ_DIR := $(BUILD_DIR)/csr_obj
+SCOREBOARD_DATASET_OBJ_DIR := $(BUILD_DIR)/scoreboard_dataset_obj
 BACKEND_XSIM_DIR := $(BUILD_DIR)/backend_xsim_vectors
 TOP_XSIM_DIR := $(BUILD_DIR)/top_xsim_vectors
+OWNER ?= 0
+TRACE ?= 32
+SCOREBOARD_DEPTH ?= 12
+FIFO_DEPTH ?=
+CSV ?=
 
-.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
+.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-scoreboard-dataset-cpp-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
 
 all: sim
 
@@ -142,6 +148,37 @@ tapa-bank-sim: | $(BUILD_DIR)
 	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v \
 	  vsrc/tb_tapa_owner_bank_accumulator.sv
 	$(BUILD_DIR)/tapa_bank_obj/Vtb_tapa_owner_bank_accumulator
+
+tapa-scoreboard-dataset-cpp-sim: | $(BUILD_DIR)
+	mkdir -p $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard
+	$(VERILATOR) -cc -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_RtlIssueScoreboard8 \
+	  -GADDR_WIDTH=13 \
+	  -GSCOREBOARD_DEPTH=$(SCOREBOARD_DEPTH) \
+	  -Mdir $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard \
+	  tapa/CuperSpmvOnly_RtlIssueScoreboard8.v
+	$(MAKE) -C $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard \
+	  -f VCuperSpmvOnly_RtlIssueScoreboard8.mk \
+	  VCuperSpmvOnly_RtlIssueScoreboard8__ALL.a verilated.o verilated_threads.o
+	$(CXX) -std=c++17 -O2 -Wall -Wextra \
+	  -I$(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard \
+	  -I/usr/local/share/verilator/include \
+	  -I/usr/local/share/verilator/include/vltstd \
+	  -DVERILATOR=1 \
+	  csrc/sim_tapa_scoreboard_dataset.cpp \
+	  $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard/VCuperSpmvOnly_RtlIssueScoreboard8__ALL.a \
+	  $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard/verilated.o \
+	  $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard/verilated_threads.o \
+	  -pthread -lpthread -latomic \
+	  -o $(SCOREBOARD_DATASET_OBJ_DIR)/sim_tapa_scoreboard_dataset
+	$(SCOREBOARD_DATASET_OBJ_DIR)/sim_tapa_scoreboard_dataset \
+	  --matrix $(CSR_MATRIX) \
+	  --owner $(OWNER) \
+	  --trace $(TRACE) \
+	  $(if $(FIFO_DEPTH),--fifo-depth $(FIFO_DEPTH),) \
+	  $(if $(CSV),--csv $(CSV),) \
+	  --timeout-cycles $(TIMEOUT)
 
 tapa-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/tapa_bank_scatter_cpp_obj

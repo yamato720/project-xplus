@@ -40,6 +40,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260620-ooobank16-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 lane-static real + RTL owner-bank 乱序 accumulator latency=12 修复版，已同步到 SpMV demo 槽，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank progress 版，fadd RTL/IP Tcl 随 hotpatch 打包，完整 xclbin 已生成并同步，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank heartbeat-clean 版，150 MHz routed timing clean，已同步等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL issue scoreboard + HLS accumulator debug 版，impl complete 但 timing 未收敛，DATA clock 自动降到 39 MHz，仅用于服务器侧功能/监测边界验证 |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -480,6 +481,44 @@ HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]�
 `cuper-tapa-spmv-ooobank16-heartbeat-clean-hw-150m-20260622-build/logs/build_hw_tmux.log`。
 VPL implementation 和 xclbin 封装完成，POST-VPL `0 errors`，v++ link 总耗时
 `4h 30m 55s`。服务器上板 sweep 尚未执行。
+
+TAPA Cuper / SpMV-only 16 路 RTL issue scoreboard 实验文件：
+
+```text
+cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin
+```
+
+这版仍是 `CuperSpmvServiceOnly` 的 single SpMV 实验 artifact，使用
+`JACOBI_SPMV_LANE_STATIC_REAL=1`、`JACOBI_SPMV_OOO_ACCUMULATE=1` 和
+`JACOBI_SPMV_OOO_SCOREBOARD_RTL=1`。它只把 owner 内 8 条 lane FIFO 的 issue
+scoreboard 替换成 RTL，FP32 加法、URAM partial sum 和最终 tagged writer 仍由 HLS
+实现；`JACOBI_SPMV_SCOREBOARD_DEBUG=1` 打开 core/issue/acc lane pulse 计数表。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin.info
+```
+
+同步版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: 8ab0b8d1-2889-e7b2-38c0-4026db80679e
+SHA256: bbe249cfc1d974e8111584d1ef76fc64b5b084247e4cffef7453d1524cc9d8fd
+DATA/KERNEL/HBM clock: 39 / 500 / 450 MHz
+Timing: WNS -18.950 ns, TNS -32059.350 ns, setup failing endpoints 28858
+```
+
+HBM 映射为：`Matrix_data_0..15` 使用 HBM[0..15]，`SpElement_list_ptr` 使用
+HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]，
+`Metrics` 和 `Debug` 使用 HBM[31]。构建目录为
+`cuper-tapa-spmv-scoreboard-debug-build/`，构建日志为
+`cuper-tapa-spmv-scoreboard-debug-build/logs/build_hw_tmux.log`。
+VPL implementation 和 xclbin 封装完成，POST-VPL `0 errors`，v++ link 总耗时
+`4h 26m 42s`。由于 routed timing 大幅未收敛且 DATA clock 自动降到 39 MHz，该版只
+适合服务器侧功能/监测边界验证，不作为性能候选。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

@@ -647,6 +647,36 @@ clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
 这轮没有新的服务器侧上板数据，因此只是同步待测 demo，不建议晋级标准，正式
 `source.diff` 仍不更新。
 
+## 2026-06-23：RTL issue scoreboard debug 同步
+
+本轮同步 `CuperSpmvServiceOnly` scoreboard-only RTL debug 构建产物，用于服务器侧
+验证“只把冲突调度放到 RTL，累加后端继续用 HLS”的中间分支：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin.info
+```
+
+核心改动：
+
+- 新增 `JACOBI_SPMV_OOO_SCOREBOARD_RTL=1`，与全后端
+  `JACOBI_SPMV_OOO_ACCUMULATE_RTL=1` 互斥；
+- 新增 `CuperSpmvOnly_RtlOwnerScoreboardOoo` 自定义 RTL wrapper，负责从 owner 内
+  8 条 lane FIFO 选择一个安全 head 发射；
+- 新增 `CuperSpmvOnly_RtlIssueScoreboard8` RTL primitive，按
+  `{lane, addr, ping/pong}` 维护 in-flight scoreboard；
+- 新增 `CuperSpmvOnly_OwnerAccumulatorScheduledOoo` HLS 后端，接收 RTL 输出的
+  `{lane + TaggedScalar}`，继续执行 FP32 加法、URAM partial sum 和写回；
+- 新增轻量 `JACOBI_SPMV_SCOREBOARD_DEBUG=1` pulse 监测，记录 core/issue/acc 三段
+  lane 计数，避免之前宽 event stream 导致 HLS 资源报告阶段内存暴涨；
+- `build_xo_u55c.sh` 新增 `JACOBI_TAPA_ENABLE_SYNTH_UTIL=0`，本轮跳过 TAPA
+  post-synthesis resource utilization reports，避免重复的 per-task 面积统计综合。
+
+构建已完成并生成 xclbin，但 DATA clock 被工具自动降到 `39 MHz`，routed timing
+大幅未收敛：WNS `-18.950 ns`、TNS `-32059.350 ns`、setup failing endpoints
+`28858`。因此这轮只同步为功能/监测边界实验，不建议晋级标准，正式 `source.diff`
+仍不更新。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：
