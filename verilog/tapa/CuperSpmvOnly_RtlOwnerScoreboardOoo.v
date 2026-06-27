@@ -159,6 +159,8 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     reg done_pulse;
     reg [31:0] done_count;
     reg [7:0] done_seen;
+    reg [7:0] head_valid_reg;
+    reg [(8 * TAGGED_WIDTH)-1:0] head_payload_reg;
 
     wire rst = ~ap_rst_n;
     wire task_start = ap_start & ~active;
@@ -166,47 +168,63 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     wire [31:0] iteration_time =
         (Iteration_num == 32'd0) ? 32'd1 : Iteration_num;
 
-    wire [7:0] head_valid =
-        active ? ({Owner_Lane_Stream_7_s_empty_n,
-                   Owner_Lane_Stream_6_s_empty_n,
-                   Owner_Lane_Stream_5_s_empty_n,
-                   Owner_Lane_Stream_4_s_empty_n,
-                   Owner_Lane_Stream_3_s_empty_n,
-                   Owner_Lane_Stream_2_s_empty_n,
-                   Owner_Lane_Stream_1_s_empty_n,
-                   Owner_Lane_Stream_0_s_empty_n} & ~done_seen) : 8'd0;
+    wire [7:0] input_valid = {
+        Owner_Lane_Stream_7_s_empty_n,
+        Owner_Lane_Stream_6_s_empty_n,
+        Owner_Lane_Stream_5_s_empty_n,
+        Owner_Lane_Stream_4_s_empty_n,
+        Owner_Lane_Stream_3_s_empty_n,
+        Owner_Lane_Stream_2_s_empty_n,
+        Owner_Lane_Stream_1_s_empty_n,
+        Owner_Lane_Stream_0_s_empty_n
+    };
+
+    wire [(8 * TAGGED_WIDTH)-1:0] input_payload = {
+        {1'b0, Owner_Lane_Stream_7_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_6_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_5_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_4_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_3_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_2_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_1_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_0_s_dout[128:0]}
+    };
+
+    wire [7:0] fill_lane =
+        active ? (input_valid & ~done_seen & ~head_valid_reg) : 8'd0;
+    wire [7:0] head_valid = active ? (head_valid_reg & ~done_seen) : 8'd0;
 
     wire [7:0] head_done = {
-        Owner_Lane_Stream_7_s_dout[0],
-        Owner_Lane_Stream_6_s_dout[0],
-        Owner_Lane_Stream_5_s_dout[0],
-        Owner_Lane_Stream_4_s_dout[0],
-        Owner_Lane_Stream_3_s_dout[0],
-        Owner_Lane_Stream_2_s_dout[0],
-        Owner_Lane_Stream_1_s_dout[0],
-        Owner_Lane_Stream_0_s_dout[0]
+        head_payload_reg[7 * TAGGED_WIDTH],
+        head_payload_reg[6 * TAGGED_WIDTH],
+        head_payload_reg[5 * TAGGED_WIDTH],
+        head_payload_reg[4 * TAGGED_WIDTH],
+        head_payload_reg[3 * TAGGED_WIDTH],
+        head_payload_reg[2 * TAGGED_WIDTH],
+        head_payload_reg[1 * TAGGED_WIDTH],
+        head_payload_reg[0 * TAGGED_WIDTH]
     };
 
     wire [7:0] head_is_pong = {
-        |Owner_Lane_Stream_7_s_dout[96:65],
-        |Owner_Lane_Stream_6_s_dout[96:65],
-        |Owner_Lane_Stream_5_s_dout[96:65],
-        |Owner_Lane_Stream_4_s_dout[96:65],
-        |Owner_Lane_Stream_3_s_dout[96:65],
-        |Owner_Lane_Stream_2_s_dout[96:65],
-        |Owner_Lane_Stream_1_s_dout[96:65],
-        |Owner_Lane_Stream_0_s_dout[96:65]
+        |head_payload_reg[7 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[6 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[5 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[4 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[3 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[2 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[1 * TAGGED_WIDTH + 65 +: 32],
+        |head_payload_reg[0 * TAGGED_WIDTH + 65 +: 32]
     };
 
     wire [31:0] head_packet_idx [0:7];
-    assign head_packet_idx[0] = Owner_Lane_Stream_0_s_dout[32:1];
-    assign head_packet_idx[1] = Owner_Lane_Stream_1_s_dout[32:1];
-    assign head_packet_idx[2] = Owner_Lane_Stream_2_s_dout[32:1];
-    assign head_packet_idx[3] = Owner_Lane_Stream_3_s_dout[32:1];
-    assign head_packet_idx[4] = Owner_Lane_Stream_4_s_dout[32:1];
-    assign head_packet_idx[5] = Owner_Lane_Stream_5_s_dout[32:1];
-    assign head_packet_idx[6] = Owner_Lane_Stream_6_s_dout[32:1];
-    assign head_packet_idx[7] = Owner_Lane_Stream_7_s_dout[32:1];
+    assign head_packet_idx[0] = head_payload_reg[0 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[1] = head_payload_reg[1 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[2] = head_payload_reg[2 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[3] = head_payload_reg[3 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[4] = head_payload_reg[4 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[5] = head_payload_reg[5 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[6] = head_payload_reg[6 * TAGGED_WIDTH + 1 +: 32];
+    assign head_packet_idx[7] = head_payload_reg[7 * TAGGED_WIDTH + 1 +: 32];
 
     wire [31:0] head_addr_full [0:7];
     assign head_addr_full[0] = head_packet_idx[0] / HBM_CHANNEL_NUM;
@@ -239,16 +257,7 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
         head_addr_lane[0]
     };
 
-    wire [(8 * TAGGED_WIDTH)-1:0] head_payload = {
-        {1'b0, Owner_Lane_Stream_7_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_6_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_5_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_4_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_3_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_2_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_1_s_dout[128:0]},
-        {1'b0, Owner_Lane_Stream_0_s_dout[128:0]}
-    };
+    wire [(8 * TAGGED_WIDTH)-1:0] head_payload = head_payload_reg;
 
     wire issue_valid;
     wire [(8 * TAGGED_WIDTH)-1:0] issue_payload;
@@ -299,14 +308,14 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     wire all_rounds_done = round_done &&
                            ((done_count + 32'd1) >= iteration_time);
 
-    assign Owner_Lane_Stream_0_s_read = pop_lane[0];
-    assign Owner_Lane_Stream_1_s_read = pop_lane[1];
-    assign Owner_Lane_Stream_2_s_read = pop_lane[2];
-    assign Owner_Lane_Stream_3_s_read = pop_lane[3];
-    assign Owner_Lane_Stream_4_s_read = pop_lane[4];
-    assign Owner_Lane_Stream_5_s_read = pop_lane[5];
-    assign Owner_Lane_Stream_6_s_read = pop_lane[6];
-    assign Owner_Lane_Stream_7_s_read = pop_lane[7];
+    assign Owner_Lane_Stream_0_s_read = fill_lane[0];
+    assign Owner_Lane_Stream_1_s_read = fill_lane[1];
+    assign Owner_Lane_Stream_2_s_read = fill_lane[2];
+    assign Owner_Lane_Stream_3_s_read = fill_lane[3];
+    assign Owner_Lane_Stream_4_s_read = fill_lane[4];
+    assign Owner_Lane_Stream_5_s_read = fill_lane[5];
+    assign Owner_Lane_Stream_6_s_read = fill_lane[6];
+    assign Owner_Lane_Stream_7_s_read = fill_lane[7];
 
     assign Owner_Lane_Stream_0_peek_read = 1'b0;
     assign Owner_Lane_Stream_1_peek_read = 1'b0;
@@ -330,6 +339,8 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
             done_pulse <= 1'b0;
             done_count <= 32'd0;
             done_seen <= 8'd0;
+            head_valid_reg <= 8'd0;
+            head_payload_reg <= {(8 * TAGGED_WIDTH){1'b0}};
         end else begin
             done_pulse <= 1'b0;
 
@@ -338,8 +349,74 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
                     active <= 1'b1;
                     done_count <= 32'd0;
                     done_seen <= 8'd0;
+                    head_valid_reg <= 8'd0;
+                    head_payload_reg <= {(8 * TAGGED_WIDTH){1'b0}};
                 end
             end else begin
+                if (pop_lane[0]) begin
+                    head_valid_reg[0] <= 1'b0;
+                end else if (fill_lane[0]) begin
+                    head_valid_reg[0] <= 1'b1;
+                    head_payload_reg[0 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[0 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[1]) begin
+                    head_valid_reg[1] <= 1'b0;
+                end else if (fill_lane[1]) begin
+                    head_valid_reg[1] <= 1'b1;
+                    head_payload_reg[1 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[1 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[2]) begin
+                    head_valid_reg[2] <= 1'b0;
+                end else if (fill_lane[2]) begin
+                    head_valid_reg[2] <= 1'b1;
+                    head_payload_reg[2 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[2 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[3]) begin
+                    head_valid_reg[3] <= 1'b0;
+                end else if (fill_lane[3]) begin
+                    head_valid_reg[3] <= 1'b1;
+                    head_payload_reg[3 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[3 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[4]) begin
+                    head_valid_reg[4] <= 1'b0;
+                end else if (fill_lane[4]) begin
+                    head_valid_reg[4] <= 1'b1;
+                    head_payload_reg[4 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[4 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[5]) begin
+                    head_valid_reg[5] <= 1'b0;
+                end else if (fill_lane[5]) begin
+                    head_valid_reg[5] <= 1'b1;
+                    head_payload_reg[5 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[5 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[6]) begin
+                    head_valid_reg[6] <= 1'b0;
+                end else if (fill_lane[6]) begin
+                    head_valid_reg[6] <= 1'b1;
+                    head_payload_reg[6 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[6 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
+                if (pop_lane[7]) begin
+                    head_valid_reg[7] <= 1'b0;
+                end else if (fill_lane[7]) begin
+                    head_valid_reg[7] <= 1'b1;
+                    head_payload_reg[7 * TAGGED_WIDTH +: TAGGED_WIDTH] <=
+                        input_payload[7 * TAGGED_WIDTH +: TAGGED_WIDTH];
+                end
+
                 if (transfer) begin
                     done_seen <= done_seen | done_pop_lane;
                 end
@@ -353,6 +430,8 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
                     active <= 1'b0;
                     done_count <= 32'd0;
                     done_seen <= 8'd0;
+                    head_valid_reg <= 8'd0;
+                    head_payload_reg <= {(8 * TAGGED_WIDTH){1'b0}};
                     done_pulse <= 1'b1;
                 end
             end

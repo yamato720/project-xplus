@@ -716,6 +716,56 @@ clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
   边界，而不是 8-HBM 基础 connectivity；
 - 正式 `source.diff` 仍不更新。
 
+## 2026-06-27：lanereal8 scoreboard head 缓存修复
+
+针对服务器侧 `lanereal8-scoreboard` 在 `thermal2_n1024` 上 300s timeout，本轮修改
+`verilog/tapa/CuperSpmvOnly_RtlOwnerScoreboardOoo.v`，把 owner-lane FIFO head 从
+组合直连改为每 lane 本地缓存：
+
+- wrapper 新增 `head_valid_reg` / `head_payload_reg`；
+- `Owner_Lane_Stream_*_s_read` 只在对应 lane 本地 head 为空且上游非空时拉高；
+- issue scoreboard 只看本地缓存 head，RAW hazard bubble 或 downstream full 时不重复
+  读取上游 FIFO；
+- 下游成功 transfer 后只清本地缓存，下一拍再重新填充，避免 pop 同拍读到变化后的
+  `s_dout`；
+- done token 仍按普通非 padding lane 发给 downstream，并继续由 `done_seen` 统计每轮
+  8 个 owner lane 的完成。
+
+新增 Verilator wrapper smoke：
+
+```text
+make -C verilog tapa-owner-scoreboard-sim
+```
+
+该测试覆盖 cached head 在 downstream backpressure 下不 reread、RAW hazard bubble 下
+输出 padding 而不丢 head、以及 8 个 done token 后 `ap_done/ap_ready` 拉高。复测也通过：
+
+```text
+make -C verilog tapa-vector-scoreboard-sim
+make -C verilog tapa-scoreboard-dataset-cpp-sim
+```
+
+新同步 artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin.info
+```
+
+版本信息：
+
+```text
+UUID: 39eb30df-2178-51aa-3333-f1cbb9a0e389
+SHA256: 1ac7664203e0eb3b6bd8bd35a932ecd8a1afdfb81d34dedf6cc26f98663870e1
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build dir: cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/
+v++ link elapsed: 2h 59m 18s
+```
+
+这版是旧 `thermal2_n1024` timeout 的复测候选；当前还没有服务器侧上板结果，因此仍不更新
+正式 `source.diff`。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：

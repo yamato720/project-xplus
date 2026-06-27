@@ -685,6 +685,7 @@ sum 和最终 `TaggedFloatV2` 写回。
 395bitstream/cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
 ```
 
 结果口径：
@@ -694,6 +695,7 @@ sum 和最终 `TaggedFloatV2` 写回。
 | original8 | `c4fbfa69-5f20-f3d8-3e7f-c514119625e6` | `a32eeece95bf9664cb9afc4dbea20cdb46b47bfb58b5bb9f6f01e726e648c90f` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 | strip8 | `14f04872-7324-2970-12bd-135e3e8eb55b` | `d615702025dc041cd61cd858d2219660230e66f346fd16719e4a34758385aad3` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 | lanereal8-scoreboard | `9f6a0133-2169-15f9-d6ec-752ecd8eaca0` | `0268f72b8438b84a55448bd02eb9a485010e745a55fcbf65234dfd43ca473453` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
+| lanereal8-scoreboard-headreg | `39eb30df-2178-51aa-3333-f1cbb9a0e389` | `1ac7664203e0eb3b6bd8bd35a932ecd8a1afdfb81d34dedf6cc26f98663870e1` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 
 构建目录和日志：
 
@@ -701,6 +703,7 @@ sum 和最终 `TaggedFloatV2` 写回。
 cuper-jacobi-spmv-original8-hw-150m-build/logs/build_hw_tmux.log
 cuper-jacobi-spmv-strip8-hw-150m-build/logs/build_hw_tmux.log
 cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/logs/v++_CuperSpmvServiceOnly.log
 ```
 
 三版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
@@ -709,6 +712,13 @@ routed timing clean。服务器侧上板结果显示：original8 和 strip8 均�
 `thermal2_n16` 返回，`thermal2_n1024` 300s timeout。当前结论是：8-HBM 基础路径可用，
 但性能不优于 16-HBM strip；RTL issue scoreboard 分支存在功能/进度闭合问题，不进入
 性能曲线，也不更新正式 `source.diff`。
+
+`lanereal8-scoreboard-headreg` 是对旧 timeout 版本的 RTL wrapper 修正版：wrapper 先把
+每条 owner-lane FIFO 的 head 存进本地寄存器，issue scoreboard 只看缓存 head；RAW
+hazard bubble、downstream full 或 padding bubble 期间不再反复读上游 FIFO，也不会在
+pop 同拍采错变化后的 `s_dout`。该版 Verilator wrapper smoke、8-lane primitive smoke
+和 scoreboard dataset C++/Verilator smoke 均通过，xclbin 已生成并同步，等待服务器侧
+复测 `thermal2_n1024` 旧 timeout。
 
 ## 当前基线
 

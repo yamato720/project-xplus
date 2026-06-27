@@ -1551,3 +1551,60 @@ lanereal8-scoreboard:
   语义没有在真实数据上闭合；
 - 不建议继续跑 lanereal8-scoreboard 更大数据集，下一步应先回到 Verilator/xsim
   用 `thermal2_n1024` 复现 owner scoreboard 输出和 scheduled accumulator drain。
+
+## 2026-06-27：lanereal8 scoreboard headreg 修正版
+
+针对上面的 `thermal2_n1024` timeout，本轮把
+`CuperSpmvOnly_RtlOwnerScoreboardOoo` 改为每 lane 缓存 owner FIFO head，再把缓存 head
+交给 `CuperSpmvOnly_RtlIssueScoreboard8`。旧版在 downstream full 或 RAW hazard bubble
+时直接用组合 `s_empty_n/s_dout` 当 head，容易出现重复 read、head 丢失或 pop 同拍采到
+变化后 `s_dout` 的进度问题。
+
+本地 RTL/模型测试：
+
+```text
+verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY -Wno-UNDRIVEN \
+  --top-module CuperSpmvOnly_RtlOwnerScoreboardOoo \
+  verilog/tapa/CuperSpmvOnly_RtlIssueScoreboard8.v \
+  verilog/tapa/CuperSpmvOnly_RtlOwnerScoreboardOoo.v
+
+make -C verilog tapa-owner-scoreboard-sim
+make -C verilog tapa-vector-scoreboard-sim
+make -C verilog tapa-scoreboard-dataset-cpp-sim
+```
+
+结果：
+
+```text
+PASS: owner scoreboard wrapper cycles=16 nonpad=9
+PASS: vector issue scoreboard8 cycles=32 depth=4
+tapa-scoreboard-dataset-cpp-sim: thermal2_n1024 owner 0 通过，done tokens=8，
+input/issued counts match
+```
+
+新构建产物：
+
+| 版本 | UUID | SHA256 | DATA | KERNEL | HBM | WNS | TNS | setup failing endpoints |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| lanereal8-scoreboard-headreg | `39eb30df-2178-51aa-3333-f1cbb9a0e389` | `1ac7664203e0eb3b6bd8bd35a932ecd8a1afdfb81d34dedf6cc26f98663870e1` | 150 MHz | 500 MHz | 450 MHz | 0.003 ns | 0.000 ns | 0 |
+
+同步文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin.info
+```
+
+构建状态：
+
+- `v++ link` 正常完成，POST-VPL `0 errors`；
+- `CuperSpmvServiceOnly.xclbin` 写出大小约 57 MB；
+- 总 elapsed `2h 59m 18s`；
+- routed timing clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
+
+服务器侧尚未复测该 headreg artifact。下一步优先只跑旧失败边界：
+
+```text
+thermal2_n16
+thermal2_n1024
+```

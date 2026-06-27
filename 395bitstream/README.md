@@ -44,6 +44,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路原版 Cuper SpMV-only，服务器侧完整 `thermal2` 已通过，完整点 `2.74379 ms` |
 | `cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 per-HBM strip padding，服务器侧完整 `thermal2` 已通过，完整点 `2.71420 ms` |
 | `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard + HLS scheduled accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，不建议继续 sweep |
+| `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard head-register 修正版，150 MHz routed timing clean，等待服务器复测旧 timeout |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -529,14 +530,17 @@ TAPA Cuper / SpMV-only 8 路构建批次：
 cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
 cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
 cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
 ```
 
-这三版都来自 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly` 顶层，目标是把
+这些 artifact 都来自 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly` 顶层，目标是把
 Matrix_data/Core/Accumulator 缩到 8 路 HBM，先确认较窄并行度下 150 MHz 构建和
 RTL 记分板分支是否能稳定收敛。HBM 映射为：`Matrix_data_0..7` 使用 HBM[0..7]，
 `SpElement_list_ptr` 使用 HBM[8]，`X` 使用 HBM[9]，`Y_out` 使用 HBM[10]，
-`Status` 使用 HBM[30]，`Metrics` 使用 HBM[31]。三版均为 demo artifact，不替换
-已验证的 16 路 strip/lanereal 记录，也不作为标准 bitstream。
+`Status` 使用 HBM[30]，`Metrics` 使用 HBM[31]。`lanereal8-scoreboard-headreg`
+是针对旧 `lanereal8-scoreboard` timeout 的 RTL wrapper head 缓存修正版，不覆盖旧失败
+artifact。所有文件均为 demo artifact，不替换已验证的 16 路 strip/lanereal 记录，
+也不作为标准 bitstream。
 
 同步版本信息：
 
@@ -567,9 +571,20 @@ lanereal8-scoreboard:
   Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
   Build log: cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
   v++ link elapsed: 2h 52m 37s
+
+lanereal8-scoreboard-headreg:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
+  UUID: 39eb30df-2178-51aa-3333-f1cbb9a0e389
+  SHA256: 1ac7664203e0eb3b6bd8bd35a932ecd8a1afdfb81d34dedf6cc26f98663870e1
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/logs/v++_CuperSpmvServiceOnly.log
+  v++ link elapsed: 2h 59m 18s
 ```
 
-三版构建前已完成对应 8-HBM 软件 smoke，结果均为 `Error Num=0`。服务器侧上板结果：
+前三版构建前已完成对应 8-HBM 软件 smoke，结果均为 `Error Num=0`。headreg 修正版已通过
+RTL wrapper Verilator、vector primitive Verilator 和 scoreboard dataset C++/Verilator
+smoke；服务器侧尚未复测。既有三版服务器侧上板结果：
 
 | 数据集 | original8 FPGA ms | strip8 FPGA ms | lanereal8-scoreboard |
 | --- | ---: | ---: | --- |
@@ -587,6 +602,12 @@ lanereal8-scoreboard:
 `thermal2_n16` 能返回但 `thermal2_n1024` 300s timeout，失败集中在 RTL issue
 scoreboard + HLS scheduled accumulator 分支，当前不建议继续上板 sweep，也不更新正式
 `source.diff`。
+
+headreg 修正版将 owner scoreboard wrapper 改成每 lane 先缓存 FIFO head，再把缓存 head
+交给 issue scoreboard。上游 FIFO read 只发生在填充空 head 时，下游 pop 只清本地缓存，
+避免 downstream backpressure 或 RAW hazard bubble 期间重复读取、丢 head 或用组合
+`s_dout` 采到已变化数据。该版是旧 timeout 的复测候选；实际是否解决
+`thermal2_n1024` timeout 仍以服务器侧上板为准。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为
