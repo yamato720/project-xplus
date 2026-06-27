@@ -41,9 +41,9 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank progress 版，fadd RTL/IP Tcl 随 hotpatch 打包，完整 xclbin 已生成并同步，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank heartbeat-clean 版，150 MHz routed timing clean，已同步等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL issue scoreboard + HLS accumulator debug 版，impl complete 但 timing 未收敛，DATA clock 自动降到 39 MHz，仅用于服务器侧功能/监测边界验证 |
-| `cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路原版 Cuper SpMV-only 150 MHz 构建，routed timing clean，等待服务器上板 |
-| `cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 per-HBM strip padding 150 MHz 构建，routed timing clean，等待服务器上板 |
-| `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard + HLS scheduled accumulator 150 MHz 构建，routed timing clean，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路原版 Cuper SpMV-only，服务器侧完整 `thermal2` 已通过，完整点 `2.74379 ms` |
+| `cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 per-HBM strip padding，服务器侧完整 `thermal2` 已通过，完整点 `2.71420 ms` |
+| `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard + HLS scheduled accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，不建议继续 sweep |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -569,8 +569,23 @@ lanereal8-scoreboard:
   v++ link elapsed: 2h 52m 37s
 ```
 
-三版构建前已完成对应 8-HBM 软件 smoke，结果均为 `Error Num=0`。服务器侧上板 sweep
-尚未执行，因此当前只记录构建/时序状态，不写入性能曲线，也不更新正式
+三版构建前已完成对应 8-HBM 软件 smoke，结果均为 `Error Num=0`。服务器侧上板结果：
+
+| 数据集 | original8 FPGA ms | strip8 FPGA ms | lanereal8-scoreboard |
+| --- | ---: | ---: | --- |
+| `thermal2_n16` | 0.074269 | 0.079358 | 0.080481, PASS |
+| `thermal2_n1024` | 0.077615 | 0.083637 | timeout 300s |
+| `thermal2_n4096` | 0.089127 | 0.087664 | 未继续 |
+| `thermal2_n16384` | 0.109745 | 0.124493 | 未继续 |
+| `thermal2_n65536` | 0.216074 | 0.222817 | 未继续 |
+| `thermal2_n131072` | 0.345646 | 0.365984 | 未继续 |
+| `thermal2_n262144` | 0.632533 | 0.622525 | 未继续 |
+| `thermal2` | 2.74379 | 2.71420 | 未继续 |
+
+结论：8-HBM original/strip 基础路径可跑完整 `thermal2`，strip8 只在部分中大规模点略快，
+整体没有超过已验证的 16 路 strip/lanereal 线；`lanereal8-scoreboard` 在
+`thermal2_n16` 能返回但 `thermal2_n1024` 300s timeout，失败集中在 RTL issue
+scoreboard + HLS scheduled accumulator 分支，当前不建议继续上板 sweep，也不更新正式
 `source.diff`。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。

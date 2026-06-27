@@ -1523,5 +1523,31 @@ lanereal8-scoreboard:
 
 - 三份 xclbin 和 `.info` 已同步到 `395bitstream/`；
 - 三版均 VPL `impl Complete`，POST-VPL `0 errors`，routed timing clean；
-- 服务器侧上板 sweep 尚未执行；
-- 本轮只是同步待测 artifact，不更新正式 `source.diff`。
+- 服务器侧上板 sweep 已执行到 scoreboard 失败边界；
+- 本轮没有性能提升候选，scoreboard 分支还有 timeout，仍不更新正式 `source.diff`。
+
+服务器侧上板结果：
+
+| 数据集 | original8 FPGA ms | strip8 FPGA ms | lanereal8-scoreboard |
+| --- | ---: | ---: | --- |
+| `thermal2_n16` | 0.074269 | 0.079358 | 0.080481 PASS |
+| `thermal2_n1024` | 0.077615 | 0.083637 | timeout 300s |
+| `thermal2_n4096` | 0.089127 | 0.087664 | 未继续 |
+| `thermal2_n16384` | 0.109745 | 0.124493 | 未继续 |
+| `thermal2_n65536` | 0.216074 | 0.222817 | 未继续 |
+| `thermal2_n131072` | 0.345646 | 0.365984 | 未继续 |
+| `thermal2_n262144` | 0.632533 | 0.622525 | 未继续 |
+| `thermal2` | 2.74379 | 2.71420 | 未继续 |
+
+结论：
+
+- original8 和 strip8 都能跑完整 `thermal2`，说明 8-HBM SpMV-only connectivity、
+  host packing 和基础 Cuper dataflow 可用；
+- strip8 相对 original8 只在 `thermal2_n4096`、`thermal2_n262144` 和完整
+  `thermal2` 略快，整体收益很小，且完整点仍慢于既有 16-HBM strip 记录；
+- lanereal8-scoreboard 在 `thermal2_n16` 通过，但 `thermal2_n1024` 300s timeout。
+  这不是 xclbin 加载或 8-HBM bank 映射问题，更像 RTL issue scoreboard / scheduled
+  accumulator 之间的 valid-ready、padding beat、done token 或 scoreboard ageing
+  语义没有在真实数据上闭合；
+- 不建议继续跑 lanereal8-scoreboard 更大数据集，下一步应先回到 Verilator/xsim
+  用 `thermal2_n1024` 复现 owner scoreboard 输出和 scheduled accumulator drain。

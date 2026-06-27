@@ -709,7 +709,11 @@ clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
 - original8、strip8、lanereal8-scoreboard 三版均为 `150/500/450 MHz`；
 - 三版 routed timing 均 clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing
   endpoints `0`；
-- 目前尚未完成服务器侧上板 sweep，不能声明性能提升；
+- 服务器侧上板已确认 original8 和 strip8 可跑完整 `thermal2`，但完整点分别为
+  `2.74379 ms` / `2.71420 ms`，慢于既有 16-HBM strip 线；
+- `lanereal8-scoreboard` 在 `thermal2_n16` 通过，但 `thermal2_n1024` 300s timeout，
+  说明问题集中在 RTL issue scoreboard + HLS scheduled accumulator 分支的进度/排空
+  边界，而不是 8-HBM 基础 connectivity；
 - 正式 `source.diff` 仍不更新。
 
 ## source.diff 规则

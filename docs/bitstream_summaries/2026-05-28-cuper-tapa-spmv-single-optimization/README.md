@@ -704,8 +704,11 @@ cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
 ```
 
 三版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
-routed timing clean。服务器侧上板 sweep 尚未执行，因此当前只记录为待测 demo，不写
-HTML 性能曲线，也不更新正式 `source.diff`。
+routed timing clean。服务器侧上板结果显示：original8 和 strip8 均可跑完整
+`thermal2`，完整点分别为 `2.74379 ms` 和 `2.71420 ms`；lanereal8-scoreboard 只在
+`thermal2_n16` 返回，`thermal2_n1024` 300s timeout。当前结论是：8-HBM 基础路径可用，
+但性能不优于 16-HBM strip；RTL issue scoreboard 分支存在功能/进度闭合问题，不进入
+性能曲线，也不更新正式 `source.diff`。
 
 ## 当前基线
 
