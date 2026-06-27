@@ -6,17 +6,17 @@
 
 // TAPA custom RTL scoreboard scheduler for CuperSpmvServiceOnly.
 //
-// This is the weak RTL branch: it only chooses one of eight owner-lane FIFO
-// heads and guarantees no same {lane, addr, ping/pong} recurrence within the
-// downstream accumulator hazard window.  FP32 accumulation, URAM partial sums
-// and final tagged writer remain in HLS.
+// This is the weak RTL branch: it chooses a conflict-free subset from eight
+// owner-lane FIFO heads each cycle and emits a full 8-wide vector beat.  Slots
+// that cannot issue in the current cycle are marked as padding.  FP32
+// accumulation, URAM partial sums and final tagged writer remain in HLS.
 //
 // Input CuperSpmvOnly_TaggedScalar, 130 bits:
 //   {pad[129], value[128:97], scalar_lane[96:65],
 //    pair_lane[64:33], packet_idx[32:1], done[0]}
 //
-// Output CuperSpmvOnly_ScheduledTaggedScalar, 160 bits:
-//   {reserved[159:132], lane[131:129], tagged[128:0]}
+// TAPA exposes ap_uint<1040> stream data ports as [1040:0].  Bit 1040 is
+// kept zero here; bits [1039:0] carry the eight 130-bit packets.
 module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     ap_clk,
     ap_rst_n,
@@ -82,6 +82,8 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     parameter integer HBM_CHANNEL_NUM = 16;
     parameter integer ADDR_WIDTH = 13;
     parameter integer SCOREBOARD_DEPTH = 12;
+    parameter integer TAGGED_WIDTH = 130;
+    parameter integer TAGGED_PAD_BIT = 129;
 
     input ap_clk;
     input ap_rst_n;
@@ -147,10 +149,10 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     input Owner_Lane_Stream_7_peek_empty_n;
     output Owner_Lane_Stream_7_peek_read;
 
-    output [159:0] Scheduled_Owner_Stream_s_din;
+    output [(8 * TAGGED_WIDTH):0] Scheduled_Owner_Stream_s_din;
     input Scheduled_Owner_Stream_s_full_n;
     output Scheduled_Owner_Stream_s_write;
-    input [159:0] Scheduled_Owner_Stream_peek;
+    input [(8 * TAGGED_WIDTH):0] Scheduled_Owner_Stream_peek;
     input [31:0] Owner_id;
 
     reg active;
@@ -237,12 +239,20 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
         head_addr_lane[0]
     };
 
+    wire [(8 * TAGGED_WIDTH)-1:0] head_payload = {
+        {1'b0, Owner_Lane_Stream_7_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_6_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_5_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_4_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_3_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_2_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_1_s_dout[128:0]},
+        {1'b0, Owner_Lane_Stream_0_s_dout[128:0]}
+    };
+
     wire issue_valid;
-    wire [2:0] issue_lane;
-    wire issue_is_done;
-    wire [7:0] pop_lane;
+    wire [(8 * TAGGED_WIDTH)-1:0] issue_payload;
     wire [7:0] lane_hazard;
-    wire [7:0] lane_eligible;
     wire scoreboard_empty;
     wire issue_ready = active & Scheduled_Owner_Stream_s_full_n;
 
@@ -256,32 +266,36 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
         .head_addr(head_addr),
         .head_is_pong(head_is_pong),
         .head_done(head_done),
+        .head_payload(head_payload),
         .issue_ready(issue_ready),
-        .pipe_advance(issue_ready),
         .issue_valid(issue_valid),
-        .issue_lane(issue_lane),
-        .issue_is_done(issue_is_done),
-        .pop_lane(pop_lane),
+        .issue_payload(issue_payload),
         .lane_hazard(lane_hazard),
-        .lane_eligible(lane_eligible),
         .scoreboard_empty(scoreboard_empty)
     );
 
-    wire [128:0] selected_tagged =
-        (issue_lane == 3'd0) ? Owner_Lane_Stream_0_s_dout[128:0] :
-        (issue_lane == 3'd1) ? Owner_Lane_Stream_1_s_dout[128:0] :
-        (issue_lane == 3'd2) ? Owner_Lane_Stream_2_s_dout[128:0] :
-        (issue_lane == 3'd3) ? Owner_Lane_Stream_3_s_dout[128:0] :
-        (issue_lane == 3'd4) ? Owner_Lane_Stream_4_s_dout[128:0] :
-        (issue_lane == 3'd5) ? Owner_Lane_Stream_5_s_dout[128:0] :
-        (issue_lane == 3'd6) ? Owner_Lane_Stream_6_s_dout[128:0] :
-                               Owner_Lane_Stream_7_s_dout[128:0];
-
     wire transfer = active & Scheduled_Owner_Stream_s_full_n & issue_valid;
-    wire done_transfer = transfer & issue_is_done;
-    wire round_done = done_transfer &&
-                      (((done_seen | pop_lane) == 8'hff) ||
-                       ((done_seen | pop_lane) == 8'h00));
+    wire [7:0] pop_lane = {
+        transfer & ~issue_payload[7 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[6 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[5 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[4 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[3 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[2 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[1 * TAGGED_WIDTH + TAGGED_PAD_BIT],
+        transfer & ~issue_payload[0 * TAGGED_WIDTH + TAGGED_PAD_BIT]
+    };
+    wire [7:0] done_pop_lane = {
+        pop_lane[7] & issue_payload[7 * TAGGED_WIDTH],
+        pop_lane[6] & issue_payload[6 * TAGGED_WIDTH],
+        pop_lane[5] & issue_payload[5 * TAGGED_WIDTH],
+        pop_lane[4] & issue_payload[4 * TAGGED_WIDTH],
+        pop_lane[3] & issue_payload[3 * TAGGED_WIDTH],
+        pop_lane[2] & issue_payload[2 * TAGGED_WIDTH],
+        pop_lane[1] & issue_payload[1 * TAGGED_WIDTH],
+        pop_lane[0] & issue_payload[0 * TAGGED_WIDTH]
+    };
+    wire round_done = ((done_seen | done_pop_lane) == 8'hff);
     wire all_rounds_done = round_done &&
                            ((done_count + 32'd1) >= iteration_time);
 
@@ -303,8 +317,7 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
     assign Owner_Lane_Stream_6_peek_read = 1'b0;
     assign Owner_Lane_Stream_7_peek_read = 1'b0;
 
-    assign Scheduled_Owner_Stream_s_din =
-        {28'd0, issue_lane, selected_tagged};
+    assign Scheduled_Owner_Stream_s_din = {1'b0, issue_payload};
     assign Scheduled_Owner_Stream_s_write = transfer;
 
     assign ap_done = done_pulse;
@@ -327,8 +340,8 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
                     done_seen <= 8'd0;
                 end
             end else begin
-                if (done_transfer) begin
-                    done_seen <= done_seen | pop_lane;
+                if (transfer) begin
+                    done_seen <= done_seen | done_pop_lane;
                 end
 
                 if (round_done) begin
@@ -373,7 +386,6 @@ module CuperSpmvOnly_RtlOwnerScoreboardOoo (
                        Owner_Lane_Stream_7_peek_empty_n ^
                        (|Scheduled_Owner_Stream_peek) ^
                        (|lane_hazard) ^
-                       (|lane_eligible) ^
                        scoreboard_empty ^
                        unused_input_padding ^
                        unused_owner;

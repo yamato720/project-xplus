@@ -49,6 +49,33 @@ write_wide_connectivity_cfg() {
   } > "$cfg_path"
 }
 
+write_jacobi_8hbm_connectivity_cfg() {
+  local cfg_path="$1"
+  local debug_graph="$2"
+  {
+    echo "[connectivity]"
+    echo "nk=CuperJacobiIteration:1"
+    echo
+    echo "# 8-HBM Jacobi experiment:"
+    echo "#   Matrix_data_0..7 use HBM[0..7]."
+    echo "#   Aux buffers stay on the same banks as the proven 16-HBM debug ABI."
+    echo "sp=CuperJacobiIteration_1.SpElement_list_ptr:HBM[0]"
+    echo
+    for channel in $(seq 0 7); do
+      echo "sp=CuperJacobiIteration_1.Matrix_data_${channel}:HBM[${channel}]"
+    done
+    echo
+    echo "sp=CuperJacobiIteration_1.B:HBM[20]"
+    echo "sp=CuperJacobiIteration_1.Diag_inv:HBM[21]"
+    echo "sp=CuperJacobiIteration_1.X:HBM[22]"
+    echo "sp=CuperJacobiIteration_1.Status:HBM[24]"
+    echo "sp=CuperJacobiIteration_1.Metrics:HBM[25]"
+    if [[ "$debug_graph" == "1" ]]; then
+      echo "sp=CuperJacobiIteration_1.Debug:HBM[26]"
+    fi
+  } > "$cfg_path"
+}
+
 write_spmv_only_connectivity_cfg() {
   local cfg_path="$1"
   local channels="$2"
@@ -103,10 +130,10 @@ fi
 mkdir -p "$BUILD_DIR/logs" "$BUILD_DIR/reports" "$BUILD_DIR/vpp_tmp"
 
 case "$HBM_CHANNELS" in
-  16|24|32)
+  8|16|24|32)
     ;;
   *)
-    echo "Unsupported JACOBI_HBM_CHANNELS=$HBM_CHANNELS; use 16, 24, or 32." >&2
+    echo "Unsupported JACOBI_HBM_CHANNELS=$HBM_CHANNELS; use 8, 16, 24, or 32." >&2
     exit 1
     ;;
 esac
@@ -140,7 +167,10 @@ elif { [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" !
   JACOBI_DEBUG_GRAPH=1
 fi
 
-if [[ "$TOP" == "CuperJacobiIteration" && "$HBM_CHANNELS" == "24" ]]; then
+if [[ "$TOP" == "CuperJacobiIteration" && "$HBM_CHANNELS" == "8" ]]; then
+  CONNECTIVITY_CFG="$BUILD_DIR/connectivity_jacobi_8hbm.cfg"
+  write_jacobi_8hbm_connectivity_cfg "$CONNECTIVITY_CFG" "$JACOBI_DEBUG_GRAPH"
+elif [[ "$TOP" == "CuperJacobiIteration" && "$HBM_CHANNELS" == "24" ]]; then
   if [[ "${JACOBI_TRACE_ISOTOPE:-0}" != "0" && "${JACOBI_TRACE_ISOTOPE:-}" != "" ]] ||
      [[ "${JACOBI_DEADLOCK_DEBUG:-0}" != "0" && "${JACOBI_DEADLOCK_DEBUG:-}" != "" ]]; then
     echo "JACOBI_WIDE_HBM currently supports no trace or JACOBI_TRACE_LIGHT only; full isotope/deadlock trace still enumerates 16 matrix/accumulator lanes." >&2
@@ -185,6 +215,9 @@ fi
 
 if [[ "$JACOBI_WIDE_GRAPH" == "1" ]]; then
   echo "Jacobi wide HBM connectivity: Matrix_data[0..23]=HBM[0..23], aux=HBM[30], debug/time=HBM[31]"
+fi
+if [[ "$TOP" == "CuperJacobiIteration" && "$HBM_CHANNELS" == "8" ]]; then
+  echo "Jacobi 8-HBM connectivity: Matrix_data[0..7]=HBM[0..7], cfg=$CONNECTIVITY_CFG"
 fi
 if [[ "$SPMV_ONLY_GRAPH" == "1" ]]; then
   echo "SpMV-only connectivity: Matrix_data[0..$((HBM_CHANNELS - 1))]=HBM[0..$((HBM_CHANNELS - 1))], cfg=$CONNECTIVITY_CFG"

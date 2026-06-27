@@ -11,6 +11,19 @@ TOP="${JACOBI_TOP:-CuperJacobiIteration}"
 OUTPUT_XO="${1:-$BUILD_DIR/$TOP.xo}"
 WORK_DIR="${WORK_DIR:-$BUILD_DIR/tapa_$TOP}"
 HOTPATCH_RTL_DIR="${JACOBI_TAPA_HOTPATCH_RTL_DIR:-${HOTPATCH_RTL_DIR:-}}"
+HBM_CHANNELS="${JACOBI_HBM_CHANNELS:-}"
+if [[ "$HBM_CHANNELS" == "" && "${JACOBI_WIDE_HBM:-0}" != "0" && "${JACOBI_WIDE_HBM:-}" != "" ]]; then
+  HBM_CHANNELS="24"
+fi
+HBM_CHANNELS="${HBM_CHANNELS:-16}"
+case "$HBM_CHANNELS" in
+  8|16|24|32)
+    ;;
+  *)
+    echo "Unsupported JACOBI_HBM_CHANNELS=$HBM_CHANNELS; use 8, 16, 24, or 32." >&2
+    exit 1
+    ;;
+esac
 
 copy_with_backup() {
   local src="$1"
@@ -74,6 +87,8 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   copy_with_backup "$custom_lane_rtl" "$generated_lane_support" "$backup_dir"
   copy_with_backup "$custom_fadd_rtl" "$generated_fadd_rtl" "$backup_dir"
   copy_with_backup "$custom_fadd_ip_tcl" "$generated_fadd_ip_tcl" "$backup_dir"
+  sed -i "s/parameter integer HBM_CHANNEL_NUM = 16;/parameter integer HBM_CHANNEL_NUM = $HBM_CHANNELS;/" \
+    "$generated_bank_rtl" "$generated_lane_support"
 fi
 
 if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then
@@ -89,6 +104,8 @@ if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREB
   fi
   copy_with_backup "$custom_scoreboard_rtl" "$generated_scoreboard_rtl" "$backup_dir"
   copy_with_backup "$custom_issue_rtl" "$generated_issue_rtl" "$backup_dir"
+  sed -i "s/parameter integer HBM_CHANNEL_NUM = 16;/parameter integer HBM_CHANNEL_NUM = $HBM_CHANNELS;/" \
+    "$generated_scoreboard_rtl"
   if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
     if [[ ! "$JACOBI_SPMV_SCOREBOARD_DEPTH" =~ ^[1-9][0-9]*$ ]]; then
       echo "JACOBI_SPMV_SCOREBOARD_DEPTH must be a positive integer; got '$JACOBI_SPMV_SCOREBOARD_DEPTH'." >&2

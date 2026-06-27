@@ -1418,3 +1418,110 @@ tmux run finished with exit code: 0
 - Vitis 自动把 DATA clock 降到 `39 MHz`，所以该版不用于性能判断；
 - 服务器侧上板 sweep 尚未执行；
 - 本轮只是同步功能/监测边界 artifact，不更新正式 `source.diff`。
+
+## 2026-06-27 8-HBM SpMV-only artifacts
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+kernel: CuperSpmvServiceOnly
+```
+
+软件验证状态：
+
+```text
+original8: JACOBI_HBM_CHANNELS=8, Error Num=0
+strip8: JACOBI_HBM_CHANNELS=8, JACOBI_SPMV_STRIP_PADDING=1, Error Num=0
+lanereal8-scoreboard: JACOBI_HBM_CHANNELS=8, JACOBI_SPMV_LANE_STATIC_REAL=1,
+                      JACOBI_SPMV_OOO_ACCUMULATE=1,
+                      JACOBI_SPMV_OOO_SCOREBOARD_RTL=1, Error Num=0
+```
+
+构建命令口径：
+
+```bash
+export JACOBI_TOP=CuperSpmvServiceOnly
+export JACOBI_SPMV_ONLY=1
+export JACOBI_HBM_CHANNELS=8
+export CLOCK_PERIOD=4.0
+export JACOBI_KERNEL_FREQUENCY=150
+
+# original8
+export BUILD_DIR=$PWD/cuper-jacobi-spmv-original8-hw-150m-build
+./scripts/build_host.sh
+./scripts/build_xo_u55c.sh
+./scripts/link_xclbin_u55c.sh
+
+# strip8
+export BUILD_DIR=$PWD/cuper-jacobi-spmv-strip8-hw-150m-build
+export JACOBI_SPMV_STRIP_PADDING=1
+./scripts/build_host.sh
+./scripts/build_xo_u55c.sh
+./scripts/link_xclbin_u55c.sh
+
+# lanereal8-scoreboard
+export BUILD_DIR=$PWD/cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build
+export JACOBI_SPMV_STRIP_PADDING=0
+export JACOBI_SPMV_LANE_STATIC_REAL=1
+export JACOBI_SPMV_OOO_ACCUMULATE=1
+export JACOBI_SPMV_OOO_SCOREBOARD_RTL=1
+./scripts/build_host.sh
+./scripts/build_xo_u55c.sh
+./scripts/link_xclbin_u55c.sh
+```
+
+三轮按 tmux 延迟队列启动，间隔约 2.5 小时。tmux 结束状态均为：
+
+```text
+tmux run finished with exit code: 0
+```
+
+构建目录和日志：
+
+```text
+cuper-jacobi-spmv-original8-hw-150m-build/
+cuper-jacobi-spmv-original8-hw-150m-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-strip8-hw-150m-build/
+cuper-jacobi-spmv-strip8-hw-150m-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/
+cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
+```
+
+关键构建输出：
+
+```text
+original8:
+  Created .../cuper-jacobi-spmv-original8-hw-150m-build/CuperSpmvServiceOnly.xclbin
+  Total elapsed time: 2h 18m 21s
+  Completed: 2026-06-26 22:43:39 CST
+
+strip8:
+  Created .../cuper-jacobi-spmv-strip8-hw-150m-build/CuperSpmvServiceOnly.xclbin
+  Total elapsed time: 2h 35m 56s
+  Completed: 2026-06-27 01:23:21 CST
+
+lanereal8-scoreboard:
+  Replaced generated scoreboard wrapper with custom RTL
+  Copied scoreboard primitive
+  Created .../cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/CuperSpmvServiceOnly.xclbin
+  Total elapsed time: 2h 52m 37s
+  Completed: 2026-06-27 04:08:28 CST
+```
+
+构建结果：
+
+| 版本 | UUID | SHA256 | DATA | KERNEL | HBM | WNS | TNS | setup failing endpoints |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| original8 | `c4fbfa69-5f20-f3d8-3e7f-c514119625e6` | `a32eeece95bf9664cb9afc4dbea20cdb46b47bfb58b5bb9f6f01e726e648c90f` | 150 MHz | 500 MHz | 450 MHz | 0.003 ns | 0.000 ns | 0 |
+| strip8 | `14f04872-7324-2970-12bd-135e3e8eb55b` | `d615702025dc041cd61cd858d2219660230e66f346fd16719e4a34758385aad3` | 150 MHz | 500 MHz | 450 MHz | 0.003 ns | 0.000 ns | 0 |
+| lanereal8-scoreboard | `9f6a0133-2169-15f9-d6ec-752ecd8eaca0` | `0268f72b8438b84a55448bd02eb9a485010e745a55fcbf65234dfd43ca473453` | 150 MHz | 500 MHz | 450 MHz | 0.003 ns | 0.000 ns | 0 |
+
+当前状态：
+
+- 三份 xclbin 和 `.info` 已同步到 `395bitstream/`；
+- 三版均 VPL `impl Complete`，POST-VPL `0 errors`，routed timing clean；
+- 服务器侧上板 sweep 尚未执行；
+- 本轮只是同步待测 artifact，不更新正式 `source.diff`。

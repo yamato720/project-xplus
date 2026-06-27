@@ -373,7 +373,7 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
 #endif
                                  );
 }
-#else
+#elif defined(JACOBI_HBM_CHANNELS_GE_16)
 struct JacobiNegRxReader2 {
     tapa::istream<float_v2> &in0;
     tapa::istream<float_v2> &in1;
@@ -407,6 +407,47 @@ void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
 #endif
                               ) {
     JacobiNegRxReader2 reader{Neg_Rx_in_0, Neg_Rx_in_1};
+    Jacobi_UpdatePairComputeImpl(Command_in,
+                                 reader,
+                                 Coeff_in,
+                                 Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                                 ,
+                                 Debug_Event_out,
+                                 Debug_lane
+#endif
+                                 );
+}
+#else
+struct JacobiNegRxReader1 {
+    tapa::istream<float_v2> &in0;
+
+    bool ready(const INDEX_TYPE index) {
+#pragma HLS inline
+        (void)index;
+        return !in0.empty();
+    }
+
+    float_v2 read(const INDEX_TYPE index) {
+#pragma HLS inline
+        (void)index;
+        float_v2 value;
+        in0.try_read(value);
+        return value;
+    }
+};
+
+void Jacobi_UpdatePairCompute(tapa::istream<JacobiUpdateCommand> &Command_in,
+                              tapa::istream<float_v2> &Neg_Rx_in_0,
+                              tapa::istream<JacobiCoeffPair> &Coeff_in,
+                              tapa::ostream<JacobiUpdatedPair> &Updated_out
+#ifdef JACOBI_TRACE_ENABLED
+                              ,
+                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out,
+                              const INDEX_TYPE Debug_lane
+#endif
+                              ) {
+    JacobiNegRxReader1 reader{Neg_Rx_in_0};
     Jacobi_UpdatePairComputeImpl(Command_in,
                                  reader,
                                  Coeff_in,

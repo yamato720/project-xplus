@@ -636,9 +636,9 @@ void Create_SpElement_list_for_all_PEs(const INDEX_TYPE NUM_PE,
 
                     // 关键映射变换：先映射到 8 个 update pair，再映射到
                     // pair 内的 accumulator 偏移，最后映射到每组 8 个 PE。
-                    // 默认 16 路 HBM 时每个 pair 有 2 路 accumulator；打开
-                    // JACOBI_WIDE_HBM 后 24 路 HBM 对应每个 pair 3 路。
-                    // 这个顺序必须和 Jacobi_UpdatePairComputeGrouped 的消费顺序一致。
+                    // 8/16/24/32 路 HBM 时每个 pair 分别有 1/2/3/4 路
+                    // accumulator；这个顺序必须和 Jacobi_UpdatePairComputeGrouped
+                    // 的消费顺序一致。
                     INDEX_TYPE checker_id = packet_id % JACOBI_UPDATE_PAIR_NUM;
                     INDEX_TYPE acc_offset = (packet_id / JACOBI_UPDATE_PAIR_NUM) % JACOBI_ACC_GROUP_SIZE;
                     INDEX_TYPE pe_in_acc  = (packet_id / HBM_CHANNEL_NUM) % PE_NUM;
@@ -793,7 +793,7 @@ inline unsigned long PackSpElementForCuperCompactPe(const SpElement &sp,
     // compact-PE 版本把同一个 HBM channel 内 8 个 PE lane 混合压进
     // 512-bit beat，因此需要把 lane 编码给 kernel。当前 demo 使用 rowIdx
     // 的高 3 个有效位 [16:14] 保存 lane，低 14 bit 仍保存 Cuper row 编码。
-    // 对 thermal2 及当前 16/24/32 路实验规模足够；更大矩阵若超过该范围，
+    // 对 thermal2 及当前 8/16/24/32 路实验规模足够；更大矩阵若超过该范围，
     // host 直接报错，避免静默生成错误 bitstream 输入。
     if (lane < 0 || lane >= PE_NUM) {
         throw std::runtime_error("compact-PE lane is outside [0, PE_NUM)");

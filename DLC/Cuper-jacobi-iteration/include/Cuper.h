@@ -32,12 +32,14 @@
 constexpr INDEX_TYPE PE_NUM                 = 8;
 
 #if defined(JACOBI_HBM_CHANNELS_32)
+#define JACOBI_HBM_CHANNELS_GE_16 1
 #define JACOBI_HBM_CHANNELS_GE_24 1
 #define JACOBI_HBM_CHANNELS_GE_32 1
 // 实验性全 HBM 版：32 路 Matrix_data 吃满 U55C 的 32 个 HBM 伪通道。
 // 注意：SpElement ptr / X / Y / Status / Metrics 只能与部分矩阵通道共享 HBM。
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 32;
 #elif defined(JACOBI_HBM_CHANNELS_24) || defined(JACOBI_WIDE_HBM)
+#define JACOBI_HBM_CHANNELS_GE_16 1
 #define JACOBI_HBM_CHANNELS_GE_24 1
 // 实验性宽 HBM 版：把 Cuper 矩阵主通道从默认 16 路扩到 24 路。
 //
@@ -47,14 +49,20 @@ constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 32;
 // 最小低风险版本；30 路需要重新设计可变分组/拼包。
 // 24 路仍能留下 HBM[24..31] 给 ptr/X/Y/计时/状态等辅助 buffer。
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 24;
+#elif defined(JACOBI_HBM_CHANNELS_8)
+// 窄 HBM 实验版：只展开 8 路 Matrix_data/Core/Accumulator，用于降低布线压力。
+// 后端仍保留 8 个 float_v2 pair lane；每个 pair lane 只消费 1 路 accumulator。
+constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 8;
 #else
+#define JACOBI_HBM_CHANNELS_GE_16 1
 constexpr INDEX_TYPE HBM_CHANNEL_NUM        = 16;
 #endif
 
-static_assert(HBM_CHANNEL_NUM == 16 ||
+static_assert(HBM_CHANNEL_NUM == 8 ||
+              HBM_CHANNEL_NUM == 16 ||
               HBM_CHANNEL_NUM == 24 ||
               HBM_CHANNEL_NUM == 32,
-              "Cuper Jacobi experiments currently support 16/24/32 HBM channels.");
+              "Cuper Jacobi experiments currently support 8/16/24/32 HBM channels.");
 static_assert((HBM_CHANNEL_NUM % 8) == 0,
               "HBM channel count must be divisible by 8 for checker/update grouping.");
 

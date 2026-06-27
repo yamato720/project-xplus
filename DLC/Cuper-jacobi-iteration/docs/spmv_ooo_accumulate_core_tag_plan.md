@@ -47,7 +47,7 @@ struct Matrix_Mult_X_Tagged {
 };
 ```
 
-`core_id` 需要覆盖 16/24/32 路 Cuper HBM/Core 实验，所以 5 bit 足够。`row[8]` 和
+`core_id` 需要覆盖 8/16/24/32 路 Cuper HBM/Core 实验，所以 5 bit 足够。`row[8]` 和
 `val[8]` 保持现有含义，不改变 Core 的乘法逻辑：
 
 | 字段 | 含义 |

@@ -2,7 +2,7 @@
 
 // Cuper SpMV service-only 顶层。
 //
-// 这个文件用于 24/32 路 Cuper SpMV 隔离实验：只保留 Cuper 的 one-shot
+// 这个文件用于 8/16/24/32 路 Cuper SpMV 隔离实验：只保留 Cuper 的 one-shot
 // SpMV 数据通路，不接 Jacobi 的 b/diag/update/controller，也不接 PCG 控制。
 
 #include <ap_int.h>
@@ -1580,6 +1580,15 @@ constexpr int CUPER_SPMV_SCOREBOARD_DEPTH = JACOBI_SPMV_SCOREBOARD_DEPTH;
 static_assert(CUPER_SPMV_SCOREBOARD_DEPTH > 0,
               "JACOBI_SPMV_SCOREBOARD_DEPTH must be positive.");
 
+#ifndef JACOBI_SPMV_SCHEDULED_STREAM_DEPTH
+constexpr int CUPER_SPMV_SCHEDULED_STREAM_DEPTH = 16;
+#else
+constexpr int CUPER_SPMV_SCHEDULED_STREAM_DEPTH =
+    JACOBI_SPMV_SCHEDULED_STREAM_DEPTH;
+#endif
+static_assert(CUPER_SPMV_SCHEDULED_STREAM_DEPTH > 0,
+              "JACOBI_SPMV_SCHEDULED_STREAM_DEPTH must be positive.");
+
 struct CuperSpmvOnly_TaggedFloatV2 {
     INDEX_TYPE packet_idx;
     INDEX_TYPE pair_lane;
@@ -1595,46 +1604,143 @@ struct CuperSpmvOnly_TaggedScalar {
 };
 
 // RTL scoreboard branch boundary.  Keep this token bit-exact instead of using
-// a nested struct, so the custom RTL wrapper and HLS accumulator agree on bits:
-//   [0]      done
-//   [32:1]   packet_idx
-//   [64:33]  pair_lane
-//   [96:65]  scalar_lane
+// a nested struct, so the custom RTL wrapper and HLS accumulator agree on bits.
+// Each scheduled beat carries eight 130-bit per-lane packets:
+//   [129]    padding/empty slot marker
 //   [128:97] value bits
-//   [131:129] selected owner-lane
-//   [159:132] reserved
-using CuperSpmvOnly_ScheduledTaggedScalar = ap_uint<160>;
+//   [96:65]  scalar_lane
+//   [64:33]  pair_lane
+//   [32:1]   packet_idx
+//   [0]      done
+constexpr int CUPER_SPMV_SCHEDULED_LANES = 8;
+constexpr int CUPER_SPMV_TAGGED_SCALAR_BITS = 130;
+constexpr int CUPER_SPMV_TAGGED_SCALAR_PAD_BIT = 129;
+using CuperSpmvOnly_ScheduledTaggedVector =
+    ap_uint<CUPER_SPMV_SCHEDULED_LANES * CUPER_SPMV_TAGGED_SCALAR_BITS>;
 
-inline CuperSpmvOnly_ScheduledTaggedScalar
-CuperSpmvOnly_PackScheduledTaggedScalar(
-    const ap_uint<3> lane,
-    const CuperSpmvOnly_TaggedScalar &tagged) {
+inline CuperSpmvOnly_ScheduledTaggedVector
+CuperSpmvOnly_MakePaddingScheduledTaggedVector() {
 #pragma HLS inline
-    CuperSpmvOnly_ScheduledTaggedScalar scheduled = 0;
-    scheduled[0] = tagged.done;
-    scheduled(32, 1) = tagged.packet_idx;
-    scheduled(64, 33) = tagged.pair_lane;
-    scheduled(96, 65) = tagged.scalar_lane;
-    scheduled(128, 97) = tapa::bit_cast<ap_uint<32>>(tagged.value);
-    scheduled(131, 129) = lane;
+    CuperSpmvOnly_ScheduledTaggedVector scheduled = 0;
+init_padding_lanes:
+    for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+        scheduled[lane * CUPER_SPMV_TAGGED_SCALAR_BITS +
+                  CUPER_SPMV_TAGGED_SCALAR_PAD_BIT] = 1;
+    }
     return scheduled;
 }
 
-inline ap_uint<3> CuperSpmvOnly_ScheduledLane(
-    const CuperSpmvOnly_ScheduledTaggedScalar scheduled) {
+inline void CuperSpmvOnly_SetScheduledTaggedVectorLane(
+    CuperSpmvOnly_ScheduledTaggedVector &scheduled,
+    const INDEX_TYPE lane,
+    const CuperSpmvOnly_TaggedScalar &tagged) {
 #pragma HLS inline
-    return scheduled(131, 129);
+    const ap_uint<32> value_bits = tapa::bit_cast<ap_uint<32>>(tagged.value);
+#define CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(BASE)          \
+    do {                                                    \
+        scheduled[(BASE) + CUPER_SPMV_TAGGED_SCALAR_PAD_BIT] = 0; \
+        scheduled[(BASE) + 0] = tagged.done;                \
+        scheduled((BASE) + 32, (BASE) + 1) = tagged.packet_idx; \
+        scheduled((BASE) + 64, (BASE) + 33) = tagged.pair_lane; \
+        scheduled((BASE) + 96, (BASE) + 65) = tagged.scalar_lane; \
+        scheduled((BASE) + 128, (BASE) + 97) = value_bits;  \
+    } while (0)
+    switch (lane) {
+    case 0:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(0);
+        break;
+    case 1:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(130);
+        break;
+    case 2:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(260);
+        break;
+    case 3:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(390);
+        break;
+    case 4:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(520);
+        break;
+    case 5:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(650);
+        break;
+    case 6:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(780);
+        break;
+    default:
+        CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE(910);
+        break;
+    }
+#undef CUPER_SPMV_SET_SCHEDULED_VECTOR_LANE
 }
 
-inline CuperSpmvOnly_TaggedScalar CuperSpmvOnly_UnpackScheduledTaggedScalar(
-    const CuperSpmvOnly_ScheduledTaggedScalar scheduled) {
+inline bool CuperSpmvOnly_ScheduledTaggedVectorLanePadding(
+    const CuperSpmvOnly_ScheduledTaggedVector scheduled,
+    const INDEX_TYPE lane) {
+#pragma HLS inline
+    switch (lane) {
+    case 0:
+        return scheduled[129];
+    case 1:
+        return scheduled[259];
+    case 2:
+        return scheduled[389];
+    case 3:
+        return scheduled[519];
+    case 4:
+        return scheduled[649];
+    case 5:
+        return scheduled[779];
+    case 6:
+        return scheduled[909];
+    default:
+        return scheduled[1039];
+    }
+}
+
+inline CuperSpmvOnly_TaggedScalar
+CuperSpmvOnly_UnpackScheduledTaggedVectorLane(
+    const CuperSpmvOnly_ScheduledTaggedVector scheduled,
+    const INDEX_TYPE lane) {
 #pragma HLS inline
     CuperSpmvOnly_TaggedScalar tagged;
-    tagged.done = scheduled[0];
-    tagged.packet_idx = scheduled(32, 1);
-    tagged.pair_lane = scheduled(64, 33);
-    tagged.scalar_lane = scheduled(96, 65);
-    ap_uint<32> value_bits = scheduled(128, 97);
+#define CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(BASE)        \
+    do {                                                     \
+        tagged.done = scheduled[(BASE) + 0];                 \
+        tagged.packet_idx = scheduled((BASE) + 32, (BASE) + 1); \
+        tagged.pair_lane = scheduled((BASE) + 64, (BASE) + 33); \
+        tagged.scalar_lane = scheduled((BASE) + 96, (BASE) + 65); \
+        value_bits = scheduled((BASE) + 128, (BASE) + 97);   \
+    } while (0)
+    ap_uint<32> value_bits = 0;
+    switch (lane) {
+    case 0:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(0);
+        break;
+    case 1:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(130);
+        break;
+    case 2:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(260);
+        break;
+    case 3:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(390);
+        break;
+    case 4:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(520);
+        break;
+    case 5:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(650);
+        break;
+    case 6:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(780);
+        break;
+    default:
+        CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE(910);
+        break;
+    }
+#undef CUPER_SPMV_UNPACK_SCHEDULED_VECTOR_LANE
     tagged.value = tapa::bit_cast<VALUE_TYPE>(value_bits);
     return tagged;
 }
@@ -1659,7 +1765,7 @@ inline INDEX_TYPE CuperSpmvOnly_TaggedPacketIndexFromSlot(
 inline INDEX_TYPE CuperSpmvOnly_OwnerFromPacket(const INDEX_TYPE packet_idx) {
 #pragma HLS inline
     // 这一版把 partial sum 所有权绑定到最终输出 packet，而不是来源 Core。
-    // HBM_CHANNEL_NUM 为 16/24/32，均可用低位取模实现均匀分片。
+    // HBM_CHANNEL_NUM 为 8/16/24/32，均可用低位取模实现均匀分片。
     return packet_idx % HBM_CHANNEL_NUM;
 }
 
@@ -2408,10 +2514,11 @@ iter:
 inline bool CuperSpmvOnly_ScoreboardHazard(
     const ap_uint<3> lane,
     const CuperSpmvOnly_TaggedScalar &tagged,
-    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH],
-    ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH],
-    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH],
-    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]) {
+    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH][CUPER_SPMV_SCHEDULED_LANES],
+    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH]
+                          [CUPER_SPMV_SCHEDULED_LANES],
+    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]
+                 [CUPER_SPMV_SCHEDULED_LANES]) {
 #pragma HLS inline
     bool hazard = false;
     const ap_uint<17> addr = tagged.packet_idx / HBM_CHANNEL_NUM;
@@ -2419,36 +2526,46 @@ inline bool CuperSpmvOnly_ScoreboardHazard(
 scoreboard_hazard_scan:
     for (INDEX_TYPE i = 0; i < CUPER_SPMV_SCOREBOARD_DEPTH; ++i) {
 #pragma HLS unroll
-        if (sb_valid[i] && sb_lane[i] == lane &&
-            sb_addr[i] == addr && sb_pong[i] == is_pong) {
+        if (sb_valid[i][lane] && sb_addr[i][lane] == addr &&
+            sb_pong[i][lane] == is_pong) {
             hazard = true;
         }
     }
     return hazard;
 }
 
-inline void CuperSpmvOnly_ScoreboardShift(
-    const bool allocate,
-    const ap_uint<3> lane,
-    const CuperSpmvOnly_TaggedScalar &tagged,
-    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH],
-    ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH],
-    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH],
-    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]) {
+inline void CuperSpmvOnly_VectorScoreboardShift(
+    bool allocate[CUPER_SPMV_SCHEDULED_LANES],
+    CuperSpmvOnly_TaggedScalar tagged[CUPER_SPMV_SCHEDULED_LANES],
+    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH][CUPER_SPMV_SCHEDULED_LANES],
+    ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH]
+                          [CUPER_SPMV_SCHEDULED_LANES],
+    bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]
+                 [CUPER_SPMV_SCHEDULED_LANES]) {
 #pragma HLS inline
 scoreboard_shift:
     for (INDEX_TYPE i = CUPER_SPMV_SCOREBOARD_DEPTH - 1; i > 0; --i) {
 #pragma HLS unroll
-        sb_valid[i] = sb_valid[i - 1];
-        sb_lane[i] = sb_lane[i - 1];
-        sb_addr[i] = sb_addr[i - 1];
-        sb_pong[i] = sb_pong[i - 1];
+        for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+            sb_valid[i][lane] = sb_valid[i - 1][lane];
+            sb_addr[i][lane] = sb_addr[i - 1][lane];
+            sb_pong[i][lane] = sb_pong[i - 1][lane];
+        }
     }
 
-    sb_valid[0] = allocate;
-    sb_lane[0] = lane;
-    sb_addr[0] = tagged.packet_idx / HBM_CHANNEL_NUM;
-    sb_pong[0] = (tagged.scalar_lane != 0);
+update_scoreboard_head:
+    for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+        sb_valid[0][lane] = allocate[lane];
+        if (allocate[lane]) {
+            sb_addr[0][lane] = tagged[lane].packet_idx / HBM_CHANNEL_NUM;
+            sb_pong[0][lane] = (tagged[lane].scalar_lane != 0);
+        } else {
+            sb_addr[0][lane] = 0;
+            sb_pong[0][lane] = false;
+        }
+    }
 }
 
 inline void CuperSpmvOnly_TryReadScoreboardHead(
@@ -2476,10 +2593,10 @@ void CuperSpmvOnly_RtlOwnerScoreboardOoo(
     tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_5,
     tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_6,
     tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream_7,
-    tapa::ostream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Owner_Stream,
+    tapa::ostream<CuperSpmvOnly_ScheduledTaggedVector> &Scheduled_Owner_Stream,
     const INDEX_TYPE Owner_id) {
-    // C++ 等价占位。硬件分支用 Verilog wrapper 替换同名 task，只保留“选 lane
-    // + 防同 lane/addr/pingpong 重叠 + 输出 scheduled token”的职责。
+    // C++ 等价占位。硬件分支用 Verilog wrapper 替换同名 task，只保留
+    // 8-wide RAW scoreboard + 动态 padding beat 的职责。
     (void)Owner_id;
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
 
@@ -2493,14 +2610,15 @@ iter:
 #pragma HLS array_partition complete variable=head_valid dim=1
         CuperSpmvOnly_TaggedScalar head[8];
 #pragma HLS array_partition complete variable=head dim=1
-        bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH];
-#pragma HLS array_partition complete variable=sb_valid dim=1
-        ap_uint<3> sb_lane[CUPER_SPMV_SCOREBOARD_DEPTH];
-#pragma HLS array_partition complete variable=sb_lane dim=1
-        ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH];
-#pragma HLS array_partition complete variable=sb_addr dim=1
-        bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH];
-#pragma HLS array_partition complete variable=sb_pong dim=1
+        bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH]
+                     [CUPER_SPMV_SCHEDULED_LANES];
+#pragma HLS array_partition complete variable=sb_valid dim=0
+        ap_uint<17> sb_addr[CUPER_SPMV_SCOREBOARD_DEPTH]
+                              [CUPER_SPMV_SCHEDULED_LANES];
+#pragma HLS array_partition complete variable=sb_addr dim=0
+        bool sb_pong[CUPER_SPMV_SCOREBOARD_DEPTH]
+                    [CUPER_SPMV_SCHEDULED_LANES];
+#pragma HLS array_partition complete variable=sb_pong dim=0
 
     init_state:
         for (INDEX_TYPE i = 0; i < 8; ++i) {
@@ -2511,13 +2629,14 @@ iter:
     init_scoreboard:
         for (INDEX_TYPE i = 0; i < CUPER_SPMV_SCOREBOARD_DEPTH; ++i) {
 #pragma HLS unroll
-            sb_valid[i] = false;
-            sb_lane[i] = 0;
-            sb_addr[i] = 0;
-            sb_pong[i] = false;
+            for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+                sb_valid[i][lane] = false;
+                sb_addr[i][lane] = 0;
+                sb_pong[i][lane] = false;
+            }
         }
 
-        ap_uint<3> rr_lane = 0;
     schedule:
         for (; !(done[0] && done[1] && done[2] && done[3] &&
                  done[4] && done[5] && done[6] && done[7]);) {
@@ -2540,52 +2659,78 @@ iter:
             CuperSpmvOnly_TryReadScoreboardHead(Owner_Lane_Stream_7, done[7],
                                                 head_valid[7], head[7]);
 
+            bool issue_lane[8];
+#pragma HLS array_partition complete variable=issue_lane dim=1
             bool issue_valid = false;
-            ap_uint<3> issue_lane = rr_lane;
-        choose_lane:
-            for (INDEX_TYPE i = 0; i < 8; ++i) {
+            const bool any_head_valid =
+                head_valid[0] || head_valid[1] || head_valid[2] ||
+                head_valid[3] || head_valid[4] || head_valid[5] ||
+                head_valid[6] || head_valid[7];
+            CuperSpmvOnly_ScheduledTaggedVector scheduled =
+                CuperSpmvOnly_MakePaddingScheduledTaggedVector();
+        choose_lanes:
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
 #pragma HLS unroll
-                const ap_uint<3> candidate = rr_lane + ap_uint<3>(i);
-                if (!issue_valid && head_valid[candidate]) {
+                issue_lane[lane] = false;
+                if (head_valid[lane]) {
                     const bool hazard =
-                        (head[candidate].done == 0) &&
-                        CuperSpmvOnly_ScoreboardHazard(candidate,
-                                                       head[candidate],
+                        (head[lane].done == 0) &&
+                        CuperSpmvOnly_ScoreboardHazard(lane,
+                                                       head[lane],
                                                        sb_valid,
-                                                       sb_lane,
                                                        sb_addr,
                                                        sb_pong);
-                    if (!hazard) {
-                        issue_valid = true;
-                        issue_lane = candidate;
+                    issue_lane[lane] = !hazard;
+                    issue_valid |= issue_lane[lane];
+                }
+            }
+
+        pack_lanes:
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS unroll
+                if (issue_lane[lane]) {
+                    CuperSpmvOnly_SetScheduledTaggedVectorLane(scheduled,
+                                                              lane,
+                                                              head[lane]);
+                }
+            }
+
+            const bool beat_valid = issue_valid || any_head_valid;
+            if (beat_valid) {
+                Scheduled_Owner_Stream.write(scheduled);
+            }
+
+        update_lanes:
+            for (INDEX_TYPE lane = 0; lane < 8; ++lane) {
+#pragma HLS unroll
+                if (issue_lane[lane]) {
+                    head_valid[lane] = false;
+                    if (head[lane].done != 0) {
+                        done[lane] = true;
                     }
                 }
             }
 
-            CuperSpmvOnly_TaggedScalar issued;
-            issued.done = 1;
-            issued.packet_idx = 0;
-            issued.pair_lane = 0;
-            issued.scalar_lane = 0;
-            issued.value = 0.0f;
-            if (issue_valid) {
-                issued = head[issue_lane];
-                Scheduled_Owner_Stream.write(
-                    CuperSpmvOnly_PackScheduledTaggedScalar(issue_lane, issued));
-                head_valid[issue_lane] = false;
-                if (issued.done != 0) {
-                    done[issue_lane] = true;
-                }
-                rr_lane = issue_lane + ap_uint<3>(1);
+            // Match the RTL vector scoreboard: one accepted vector beat, whether
+            // it carries real lanes or only padding, advances the hazard window.
+            CuperSpmvOnly_TaggedScalar sb_head[CUPER_SPMV_SCHEDULED_LANES];
+#pragma HLS array_partition complete variable=sb_head dim=1
+            bool sb_alloc[CUPER_SPMV_SCHEDULED_LANES];
+#pragma HLS array_partition complete variable=sb_alloc dim=1
+        prepare_scoreboard_shift:
+            for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+                sb_head[lane] = head[lane];
+                sb_alloc[lane] = issue_lane[lane] && (head[lane].done == 0);
             }
 
-            CuperSpmvOnly_ScoreboardShift(issue_valid && issued.done == 0,
-                                          issue_lane,
-                                          issued,
-                                          sb_valid,
-                                          sb_lane,
-                                          sb_addr,
-                                          sb_pong);
+            if (beat_valid) {
+                CuperSpmvOnly_VectorScoreboardShift(sb_alloc,
+                                                    sb_head,
+                                                    sb_valid,
+                                                    sb_addr,
+                                                    sb_pong);
+            }
         }
     }
 }
@@ -2593,8 +2738,8 @@ iter:
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
 void CuperSpmvOnly_ScheduledDebugTapOoo(
     const INDEX_TYPE Iteration_num,
-    tapa::istream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_In_Stream,
-    tapa::ostream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Out_Stream,
+    tapa::istream<CuperSpmvOnly_ScheduledTaggedVector> &Scheduled_In_Stream,
+    tapa::ostream<CuperSpmvOnly_ScheduledTaggedVector> &Scheduled_Out_Stream,
     tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
     const INDEX_TYPE Owner_id) {
     (void)Owner_id;
@@ -2617,20 +2762,28 @@ iter:
                  done[4] && done[5] && done[6] && done[7]);) {
 #pragma HLS loop_tripcount min=1 max=4000000
 #pragma HLS pipeline II=1
-            const CuperSpmvOnly_ScheduledTaggedScalar scheduled =
+            const CuperSpmvOnly_ScheduledTaggedVector scheduled =
                 Scheduled_In_Stream.read();
             Scheduled_Out_Stream.write(scheduled);
 
-            const ap_uint<3> lane = CuperSpmvOnly_ScheduledLane(scheduled);
-            const CuperSpmvOnly_TaggedScalar tagged =
-                CuperSpmvOnly_UnpackScheduledTaggedScalar(scheduled);
-            if (tagged.done != 0) {
-                done[lane] = true;
-            } else {
-                CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
-                debug_pulse[lane] = 1;
-                CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
-                                                           debug_pulse);
+        tap_lanes:
+            for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+                if (CuperSpmvOnly_ScheduledTaggedVectorLanePadding(scheduled,
+                                                                   lane)) {
+                    continue;
+                }
+                const CuperSpmvOnly_TaggedScalar tagged =
+                    CuperSpmvOnly_UnpackScheduledTaggedVectorLane(scheduled,
+                                                                  lane);
+                if (tagged.done != 0) {
+                    done[lane] = true;
+                } else {
+                    CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
+                    debug_pulse[lane] = 1;
+                    CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
+                                                               debug_pulse);
+                }
             }
         }
     }
@@ -2909,7 +3062,7 @@ iter:
 void CuperSpmvOnly_OwnerAccumulatorScheduledOoo(
     const INDEX_TYPE Iteration_num,
     const INDEX_TYPE Row_num,
-    tapa::istream<CuperSpmvOnly_ScheduledTaggedScalar> &Scheduled_Owner_Stream,
+    tapa::istream<CuperSpmvOnly_ScheduledTaggedVector> &Scheduled_Owner_Stream,
     tapa::ostream<CuperSpmvOnly_TaggedFloatV2> &Vector_Y_Tagged_Stream,
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
     tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
@@ -2918,7 +3071,7 @@ void CuperSpmvOnly_OwnerAccumulatorScheduledOoo(
     // RTL scoreboard-only 分支的 HLS 累加器。
     //
     // 前级 RTL 已经保证同一个 {lane, addr, ping/pong} 不会在 scoreboard 深度内
-    // 重复发射；这里保留 FP32 加法、URAM partial sum 和原 tagged writer 顺序。
+    // 重复发射；这里每拍消费 8-lane vector beat，padding slot 只推进流水。
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
     const INDEX_TYPE num_out_packets = Cuper_NumFloatV16Packets(Row_num);
     const INDEX_TYPE num_owner_groups =
@@ -2960,26 +3113,35 @@ iter:
 #pragma HLS pipeline II=1
 #pragma HLS dependence true variable=local_part_Y_ping distance=CUPER_SPMV_SCOREBOARD_DEPTH
 #pragma HLS dependence true variable=local_part_Y_pong distance=CUPER_SPMV_SCOREBOARD_DEPTH
-            const CuperSpmvOnly_ScheduledTaggedScalar scheduled =
+            const CuperSpmvOnly_ScheduledTaggedVector scheduled =
                 Scheduled_Owner_Stream.read();
-            const ap_uint<3> lane = CuperSpmvOnly_ScheduledLane(scheduled);
-            const CuperSpmvOnly_TaggedScalar tagged =
-                CuperSpmvOnly_UnpackScheduledTaggedScalar(scheduled);
 
-            if (tagged.done != 0) {
-                done[lane] = true;
-            } else {
-#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
-                CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
-                debug_pulse[lane] = 1;
-                CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
-                                                           debug_pulse);
-#endif
-                const ap_uint<17> addr = tagged.packet_idx / HBM_CHANNEL_NUM;
-                if (tagged.scalar_lane == 0) {
-                    Adder_p(addr, tagged.value, local_part_Y_ping[lane]);
+        consume_lanes:
+            for (INDEX_TYPE lane = 0; lane < CUPER_SPMV_SCHEDULED_LANES; ++lane) {
+#pragma HLS unroll
+                if (CuperSpmvOnly_ScheduledTaggedVectorLanePadding(scheduled,
+                                                                   lane)) {
+                    continue;
+                }
+                const CuperSpmvOnly_TaggedScalar tagged =
+                    CuperSpmvOnly_UnpackScheduledTaggedVectorLane(scheduled,
+                                                                  lane);
+                if (tagged.done != 0) {
+                    done[lane] = true;
                 } else {
-                    Adder_p(addr, tagged.value, local_part_Y_pong[lane]);
+#ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
+                    CuperSpmvOnlyScoreboardDebugPulse debug_pulse = 0;
+                    debug_pulse[lane] = 1;
+                    CuperSpmvOnly_TryWriteScoreboardDebugPulse(Debug_out,
+                                                               debug_pulse);
+#endif
+                    const ap_uint<17> addr =
+                        tagged.packet_idx / HBM_CHANNEL_NUM;
+                    if (tagged.scalar_lane == 0) {
+                        Adder_p(addr, tagged.value, local_part_Y_ping[lane]);
+                    } else {
+                        Adder_p(addr, tagged.value, local_part_Y_pong[lane]);
+                    }
                 }
             }
         }
@@ -3914,10 +4076,12 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<CuperSpmvOnly_TaggedScalar, HBM_CHANNEL_NUM * 8, 64>
                                                                  Owner_Lane_Stream("Owner_Lane_Stream");
 #ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
-    tapa::streams<CuperSpmvOnly_ScheduledTaggedScalar, HBM_CHANNEL_NUM, 64>
+    tapa::streams<CuperSpmvOnly_ScheduledTaggedVector,
+                  HBM_CHANNEL_NUM,
+                  CUPER_SPMV_SCHEDULED_STREAM_DEPTH>
                                                                  Scheduled_Owner_Stream("Scheduled_Owner_Stream");
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
-    tapa::streams<CuperSpmvOnly_ScheduledTaggedScalar, HBM_CHANNEL_NUM, 64>
+    tapa::streams<CuperSpmvOnly_ScheduledTaggedVector, HBM_CHANNEL_NUM, 64>
                                                                  Scheduled_Owner_DebugTap_Stream("Scheduled_Owner_DebugTap_Stream");
     tapa::streams<CuperSpmvOnlyScoreboardDebugPulse,
                   HBM_CHANNEL_NUM,
@@ -3938,7 +4102,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #else
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 1024>         Vector_Y_Stream("Vector_Y_Stream");
     // 8 路 checker/sort tree 仍按 Cuper 原始输出规整逻辑工作。
-    // 对 16/24/32 路而言，每个 checker 分别消费 2/3/4 路 accumulator。
+    // 对 8/16/24/32 路而言，每个 checker 分别消费 1/2/3/4 路 accumulator。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                 Vector_Y_Stream_Aftck("Vector_Y_Stream_Aftck");
     tapa::stream<float_v16, FIFO_DEPTH>                    Vector_Y_Stream_Ans("Vector_Y_Stream_Ans");
 #endif
@@ -4026,7 +4190,8 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              Matrix_data,
                                              Matrix_A_Stream)
 #endif
-        // Core 链按当前编译通道数展开：默认 16 路，实验可编 24/32 路。
+        // Core 链按当前编译通道数展开：8 路实验只保留 Core0..7；
+        // 默认 16 路保留 Core0..15，24/32 路再追加后续 Core。
 #ifdef JACOBI_SPMV_COMPACT_PE
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(0)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(1)
@@ -4036,6 +4201,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(5)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(6)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(8)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(9)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(10)
@@ -4044,6 +4210,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(13)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(14)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(16)
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(17)
@@ -4073,6 +4240,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(5)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(6)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(8)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(9)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(10)
@@ -4081,6 +4249,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(13)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(14)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(16)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(17)
@@ -4110,6 +4279,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE(5)
         CUPER_SPMV_ONLY_INVOKE_CORE(6)
         CUPER_SPMV_ONLY_INVOKE_CORE(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_CORE(8)
         CUPER_SPMV_ONLY_INVOKE_CORE(9)
         CUPER_SPMV_ONLY_INVOKE_CORE(10)
@@ -4118,6 +4288,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE(13)
         CUPER_SPMV_ONLY_INVOKE_CORE(14)
         CUPER_SPMV_ONLY_INVOKE_CORE(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_CORE(16)
         CUPER_SPMV_ONLY_INVOKE_CORE(17)
@@ -4156,6 +4327,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(5)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(6)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(8)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(9)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(10)
@@ -4164,6 +4336,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(13)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(14)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(16)
         CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(17)
@@ -4196,6 +4369,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(5)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(6)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(8)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(9)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(10)
@@ -4204,6 +4378,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(13)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(14)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(16)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(17)
@@ -4235,6 +4410,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(5)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(6)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(8)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(9)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(10)
@@ -4243,6 +4419,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(13)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(14)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(16)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(17)
@@ -4272,6 +4449,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(5)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(6)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(8)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(9)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(10)
@@ -4280,6 +4458,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(13)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(14)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(16)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_DEBUG_TAP(17)
@@ -4309,6 +4488,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(5)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(6)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(8)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(9)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(10)
@@ -4317,6 +4497,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(13)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(14)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(16)
         CUPER_SPMV_ONLY_INVOKE_SCHEDULED_OWNER_ACC(17)
@@ -4339,7 +4520,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
 #else
         // 非 RTL owner-bank accumulator。打开 JACOBI_SPMV_SEGMENTED_ACCUMULATE
-        // 时仍走这条 16 owner-bank 接线，只把 bank 内部 row cache 换成分段缓存。
+        // 时仍走当前 HBM owner-bank 接线，只把 bank 内部 row cache 换成分段缓存。
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(0)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(1)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(2)
@@ -4348,6 +4529,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(5)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(6)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(8)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(9)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(10)
@@ -4356,6 +4538,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(13)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(14)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(16)
         CUPER_SPMV_ONLY_INVOKE_OOO_OWNER_ACC(17)
@@ -4389,6 +4572,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(5)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(6)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(8)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(9)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(10)
@@ -4397,6 +4581,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(13)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(14)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(15)
+#endif
 #ifdef JACOBI_HBM_CHANNELS_GE_24
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(16)
         CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC(17)

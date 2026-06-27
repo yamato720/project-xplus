@@ -38,7 +38,7 @@ SCOREBOARD_DEPTH ?= 12
 FIFO_DEPTH ?=
 CSV ?=
 
-.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-scoreboard-dataset-cpp-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
+.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-vector-scoreboard-sim tapa-scoreboard-dataset-cpp-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
 
 all: sim
 
@@ -148,6 +148,16 @@ tapa-bank-sim: | $(BUILD_DIR)
 	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v \
 	  vsrc/tb_tapa_owner_bank_accumulator.sv
 	$(BUILD_DIR)/tapa_bank_obj/Vtb_tapa_owner_bank_accumulator
+
+tapa-vector-scoreboard-sim: | $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/vector_scoreboard8_obj
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+	  -Itapa \
+	  --top-module tb_tapa_vector_issue_scoreboard8 \
+	  -Mdir $(BUILD_DIR)/vector_scoreboard8_obj \
+	  tapa/CuperSpmvOnly_RtlIssueScoreboard8.v \
+	  vsrc/tb_tapa_vector_issue_scoreboard8.sv
+	$(BUILD_DIR)/vector_scoreboard8_obj/Vtb_tapa_vector_issue_scoreboard8
 
 tapa-scoreboard-dataset-cpp-sim: | $(BUILD_DIR)
 	mkdir -p $(SCOREBOARD_DATASET_OBJ_DIR)/scoreboard

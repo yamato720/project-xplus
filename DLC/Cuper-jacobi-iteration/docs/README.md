@@ -20,3 +20,5 @@
   `finish_nonreturn_monitoring_points.md`
 - 2026-06-13 entry mmap probe 上板仍失败后的 debug 结论和下一版修改建议：
   `entry_mmap_probe_failure_analysis.md`
+- Cuper SpMV RTL 文件索引和两条 RTL 分支速查：
+  `../../../verilog/README.md`

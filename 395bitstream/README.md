@@ -41,6 +41,9 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260621-ooobank16-progress-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank progress 版，fadd RTL/IP Tcl 随 hotpatch 打包，完整 xclbin 已生成并同步，等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260622-ooobank16-heartbeat-clean-demo.xclbin` | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL owner-bank heartbeat-clean 版，150 MHz routed timing clean，已同步等待服务器上板 |
 | `cuper-tapa-spmv-u55c-20260623-scoreboard16-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 16 路 RTL issue scoreboard + HLS accumulator debug 版，impl complete 但 timing 未收敛，DATA clock 自动降到 39 MHz，仅用于服务器侧功能/监测边界验证 |
+| `cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路原版 Cuper SpMV-only 150 MHz 构建，routed timing clean，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 per-HBM strip padding 150 MHz 构建，routed timing clean，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard + HLS scheduled accumulator 150 MHz 构建，routed timing clean，等待服务器上板 |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -519,6 +522,56 @@ HBM[16]，`X` 使用 HBM[17]，`Y_out` 使用 HBM[18]，`Status` 使用 HBM[30]�
 VPL implementation 和 xclbin 封装完成，POST-VPL `0 errors`，v++ link 总耗时
 `4h 26m 42s`。由于 routed timing 大幅未收敛且 DATA clock 自动降到 39 MHz，该版只
 适合服务器侧功能/监测边界验证，不作为性能候选。
+
+TAPA Cuper / SpMV-only 8 路构建批次：
+
+```text
+cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
+cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
+cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+```
+
+这三版都来自 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly` 顶层，目标是把
+Matrix_data/Core/Accumulator 缩到 8 路 HBM，先确认较窄并行度下 150 MHz 构建和
+RTL 记分板分支是否能稳定收敛。HBM 映射为：`Matrix_data_0..7` 使用 HBM[0..7]，
+`SpElement_list_ptr` 使用 HBM[8]，`X` 使用 HBM[9]，`Y_out` 使用 HBM[10]，
+`Status` 使用 HBM[30]，`Metrics` 使用 HBM[31]。三版均为 demo artifact，不替换
+已验证的 16 路 strip/lanereal 记录，也不作为标准 bitstream。
+
+同步版本信息：
+
+```text
+original8:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
+  UUID: c4fbfa69-5f20-f3d8-3e7f-c514119625e6
+  SHA256: a32eeece95bf9664cb9afc4dbea20cdb46b47bfb58b5bb9f6f01e726e648c90f
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-original8-hw-150m-build/logs/build_hw_tmux.log
+  v++ link elapsed: 2h 18m 21s
+
+strip8:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
+  UUID: 14f04872-7324-2970-12bd-135e3e8eb55b
+  SHA256: d615702025dc041cd61cd858d2219660230e66f346fd16719e4a34758385aad3
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-strip8-hw-150m-build/logs/build_hw_tmux.log
+  v++ link elapsed: 2h 35m 56s
+
+lanereal8-scoreboard:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+  UUID: 9f6a0133-2169-15f9-d6ec-752ecd8eaca0
+  SHA256: 0268f72b8438b84a55448bd02eb9a485010e745a55fcbf65234dfd43ca473453
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
+  v++ link elapsed: 2h 52m 37s
+```
+
+三版构建前已完成对应 8-HBM 软件 smoke，结果均为 `Error Num=0`。服务器侧上板 sweep
+尚未执行，因此当前只记录构建/时序状态，不写入性能曲线，也不更新正式
+`source.diff`。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

@@ -27,6 +27,8 @@ constexpr int kSliceSize = kHbmChannels * 4;
 constexpr int kBatchSize = 8192 / kSliceSize;
 constexpr int kSliceWidth = kSliceSize * kBatchSize;
 constexpr int kAddrWidth = 13;
+constexpr int kTaggedWidth = 130;
+constexpr int kTaggedPadBit = 129;
 constexpr int kDefaultTimeoutCycles = 2000000;
 
 struct Csr {
@@ -346,13 +348,15 @@ bool queues_empty(const std::array<std::deque<TaggedScalar>, kPeNum>& lanes) {
   return true;
 }
 
-void clear_wide(VlWide<4>& word) {
-  for (int i = 0; i < 4; ++i) {
+template <size_t Words>
+void clear_wide(VlWide<Words>& word) {
+  for (size_t i = 0; i < Words; ++i) {
     word[i] = 0;
   }
 }
 
-void set_bits(VlWide<4>& word, int lo, int width, uint32_t value) {
+template <size_t Words>
+void set_bits(VlWide<Words>& word, int lo, int width, uint32_t value) {
   for (int bit = 0; bit < width; ++bit) {
     if ((value >> bit) & 1U) {
       const int pos = lo + bit;
@@ -361,12 +365,46 @@ void set_bits(VlWide<4>& word, int lo, int width, uint32_t value) {
   }
 }
 
+template <size_t Words>
+bool get_bit(const VlWide<Words>& word, int bit) {
+  return ((word[bit / 32] >> static_cast<unsigned>(bit % 32)) & 1U) != 0;
+}
+
+uint32_t float_to_bits(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+void pack_tagged_payload(VlWide<33>& payload, int lane,
+                         const TaggedScalar& tagged) {
+  const int base = lane * kTaggedWidth;
+  if (tagged.done) {
+    set_bits(payload, base, 1, 1);
+  }
+  set_bits(payload, base + 1, 32, tagged.packet_idx);
+  set_bits(payload, base + 33, 32, tagged.pair_lane);
+  set_bits(payload, base + 65, 32, tagged.scalar_lane);
+  set_bits(payload, base + 97, 32, float_to_bits(tagged.value));
+}
+
+uint8_t issue_real_mask(const VCuperSpmvOnly_RtlIssueScoreboard8& dut) {
+  uint8_t mask = 0;
+  for (int lane = 0; lane < kPeNum; ++lane) {
+    if (!get_bit(dut.issue_payload, lane * kTaggedWidth + kTaggedPadBit)) {
+      mask |= static_cast<uint8_t>(1U << lane);
+    }
+  }
+  return mask;
+}
+
 void drive_heads(VCuperSpmvOnly_RtlIssueScoreboard8& dut,
                  const std::array<std::deque<TaggedScalar>, kPeNum>& lanes) {
   dut.head_valid = 0;
   dut.head_is_pong = 0;
   dut.head_done = 0;
   clear_wide(dut.head_addr);
+  clear_wide(dut.head_payload);
 
   for (int lane = 0; lane < kPeNum; ++lane) {
     const auto& queue = lanes[static_cast<size_t>(lane)];
@@ -383,6 +421,7 @@ void drive_heads(VCuperSpmvOnly_RtlIssueScoreboard8& dut,
       dut.head_done |= static_cast<uint8_t>(1U << lane);
     }
     set_bits(dut.head_addr, lane * kAddrWidth, kAddrWidth, tagged.addr());
+    pack_tagged_payload(dut.head_payload, lane, tagged);
   }
 }
 
@@ -450,15 +489,6 @@ bool all_sources_done(const SourceBeats& sources,
   for (int source = 0; source < kHbmChannels; ++source) {
     if (source_pos[static_cast<size_t>(source)] <
         sources[static_cast<size_t>(source)].size()) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool all_scoreboards_empty(const Scoreboards& duts) {
-  for (const auto& dut : duts) {
-    if (!dut->scoreboard_empty) {
       return false;
     }
   }
@@ -535,14 +565,13 @@ int run_direct_owner(const Options& opt, const Csr& csr,
       return 1;
     }
     csv << "cycle,lane,done,packet_idx,addr,is_pong,pair_lane,scalar_lane,"
-           "source,slot_lane,batch,local_col,value,hazard_mask,eligible_mask\n";
+           "source,slot_lane,batch,local_col,value,hazard_mask,issue_mask\n";
   }
 
   VerilatedContext context;
   VCuperSpmvOnly_RtlIssueScoreboard8 dut;
 
   dut.issue_ready = 1;
-  dut.pipe_advance = 1;
   dut.rst = 1;
   drive_heads(dut, lanes);
   for (int i = 0; i < 3; ++i) {
@@ -552,10 +581,11 @@ int run_direct_owner(const Options& opt, const Csr& csr,
   dut.rst = 0;
 
   size_t cycles = 0;
+  size_t issue_beats = 0;
+  size_t padding_beats = 0;
   size_t issue_count = 0;
   size_t real_issue_count = 0;
   size_t done_issue_count = 0;
-  size_t blocked_cycles = 0;
   size_t bypass_cycles = 0;
   size_t issue_complete_cycle = 0;
   std::array<size_t, kPeNum> issued_per_lane{};
@@ -568,30 +598,35 @@ int run_direct_owner(const Options& opt, const Csr& csr,
     const bool any_valid = dut.head_valid != 0;
     const bool issue = dut.issue_valid && dut.issue_ready;
     const uint8_t hazard_mask = dut.lane_hazard;
-    const uint8_t eligible_mask = dut.lane_eligible;
-    if (any_valid && !issue) {
-      ++blocked_cycles;
-    }
-    if ((hazard_mask & dut.head_valid) != 0 && issue) {
+    const uint8_t real_mask = issue ? issue_real_mask(dut) : 0;
+    if (any_valid && (hazard_mask & dut.head_valid) != 0 && issue) {
       ++bypass_cycles;
     }
 
-    TaggedScalar issued;
-    int issued_lane = -1;
     if (issue) {
-      issued_lane = dut.issue_lane;
-      issued = lanes[static_cast<size_t>(issued_lane)].front();
-      ++issue_count;
-      ++issued_per_lane[static_cast<size_t>(issued_lane)];
-      if (issued.done) {
-        ++done_issue_count;
-      } else {
-        ++real_issue_count;
+      ++issue_beats;
+      if (real_mask == 0) {
+        ++padding_beats;
       }
+      for (int lane = 0; lane < kPeNum; ++lane) {
+        if (((real_mask >> lane) & 1U) == 0) {
+          continue;
+        }
 
-      if (static_cast<int>(issue_count) <= opt.trace) {
-        std::cout << "trace cycle=" << cycles
-                  << " lane=" << issued_lane
+        const TaggedScalar& issued = lanes[static_cast<size_t>(lane)].front();
+        ++issue_count;
+        ++issued_per_lane[static_cast<size_t>(lane)];
+        if (issued.done) {
+          ++done_issue_count;
+        } else {
+          ++real_issue_count;
+        }
+
+        if (static_cast<int>(issue_count) <= opt.trace) {
+          std::cout << "trace cycle=" << cycles
+                  << " mask=0x" << std::hex << static_cast<int>(real_mask)
+                  << std::dec
+                  << " lane=" << lane
                   << " done=" << issued.done
                   << " packet=" << issued.packet_idx
                   << " addr=" << issued.addr()
@@ -605,25 +640,29 @@ int run_direct_owner(const Options& opt, const Csr& csr,
                   << " value=" << issued.value
                   << " hazard=0x" << std::hex
                   << static_cast<int>(hazard_mask)
-                  << " eligible=0x" << static_cast<int>(eligible_mask)
                   << std::dec << "\n";
-      }
+        }
 
-      if (csv) {
-        csv << cycles << "," << issued_lane << "," << issued.done << ","
+        if (csv) {
+          csv << cycles << "," << lane << "," << issued.done << ","
             << issued.packet_idx << "," << issued.addr() << ","
             << issued.is_pong() << "," << issued.pair_lane << ","
             << issued.scalar_lane << "," << issued.source << ","
             << issued.slot_lane << "," << issued.batch << ","
             << issued.local_col << "," << std::setprecision(9) << issued.value
             << ",0x" << std::hex << static_cast<int>(hazard_mask)
-            << ",0x" << static_cast<int>(eligible_mask) << std::dec << "\n";
+            << ",0x" << static_cast<int>(real_mask) << std::dec << "\n";
+        }
       }
     }
 
     eval_clock(dut, context, 1);
     if (issue) {
-      lanes[static_cast<size_t>(issued_lane)].pop_front();
+      for (int lane = 0; lane < kPeNum; ++lane) {
+        if ((real_mask >> lane) & 1U) {
+          lanes[static_cast<size_t>(lane)].pop_front();
+        }
+      }
     }
 
     ++cycles;
@@ -632,16 +671,13 @@ int run_direct_owner(const Options& opt, const Csr& csr,
       issue_complete_cycle = cycles;
     }
     if (queues_empty(lanes)) {
-      drive_heads(dut, lanes);
-      eval_clock(dut, context, 0);
-      if (dut.scoreboard_empty) {
-        break;
-      }
+      break;
     }
   }
 
   if (cycles >= static_cast<size_t>(opt.timeout_cycles)) {
     std::cerr << "FAIL: timeout cycles=" << cycles
+              << " issue_beats=" << issue_beats
               << " issues=" << issue_count << "\n";
     return 1;
   }
@@ -666,13 +702,14 @@ int run_direct_owner(const Options& opt, const Csr& csr,
             << " done_tokens=" << initial_done_tokens << "\n";
   std::cout << "  issue_complete_cycle=" << issue_complete_cycle
             << " drain_complete_cycle=" << cycles
+            << " issue_beats=" << issue_beats
+            << " padding_beats=" << padding_beats
             << " issues=" << issue_count
             << " real_issues=" << real_issue_count
             << " done_issues=" << done_issue_count << "\n";
   std::cout << "  issue_rate=" << std::fixed << std::setprecision(4)
             << issue_rate << " tokens/cycle"
             << " real_rate=" << real_rate << " real/cycle"
-            << " blocked_cycles=" << blocked_cycles
             << " bypass_cycles=" << bypass_cycles << "\n";
   std::cout << "  lane_input_tokens:";
   for (size_t value : initial_lane_tokens) {
@@ -746,7 +783,7 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
     }
     csv << "cycle,event,owner,lane,done,packet_idx,addr,is_pong,pair_lane,"
            "scalar_lane,source,slot_lane,batch,local_col,value,hazard_mask,"
-           "eligible_mask,fifo_occupancy\n";
+           "issue_mask,fifo_occupancy\n";
   }
 
   VerilatedContext context;
@@ -755,7 +792,6 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
     duts[static_cast<size_t>(owner)] =
         std::make_unique<VCuperSpmvOnly_RtlIssueScoreboard8>();
     duts[static_cast<size_t>(owner)]->issue_ready = 1;
-    duts[static_cast<size_t>(owner)]->pipe_advance = 1;
     duts[static_cast<size_t>(owner)]->rst = 1;
     drive_heads(*duts[static_cast<size_t>(owner)],
                 fifos[static_cast<size_t>(owner)]);
@@ -769,10 +805,11 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
   }
 
   size_t cycles = 0;
+  size_t issue_beats = 0;
+  size_t padding_beats = 0;
   size_t issue_count = 0;
   size_t real_issue_count = 0;
   size_t done_issue_count = 0;
-  size_t scoreboard_blocked_cycles = 0;
   size_t bypass_cycles = 0;
   size_t source_stall_cycles = 0;
   size_t any_source_stall_cycles = 0;
@@ -787,52 +824,59 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
     }
     eval_all(duts, context, 0);
 
-    std::array<int, kHbmChannels> issued_lane;
-    issued_lane.fill(-1);
+    std::array<uint8_t, kHbmChannels> issued_mask{};
     std::array<uint8_t, kHbmChannels> hazard_mask{};
-    std::array<uint8_t, kHbmChannels> eligible_mask{};
 
     for (int owner = 0; owner < kHbmChannels; ++owner) {
       auto& dut = *duts[static_cast<size_t>(owner)];
       hazard_mask[static_cast<size_t>(owner)] = dut.lane_hazard;
-      eligible_mask[static_cast<size_t>(owner)] = dut.lane_eligible;
       const bool any_valid = dut.head_valid != 0;
       const bool issue = dut.issue_valid && dut.issue_ready;
-      if (any_valid && !issue) {
-        ++scoreboard_blocked_cycles;
-      }
-      if ((dut.lane_hazard & dut.head_valid) != 0 && issue) {
+      const uint8_t real_mask = issue ? issue_real_mask(dut) : 0;
+      if (any_valid && (dut.lane_hazard & dut.head_valid) != 0 && issue) {
         ++bypass_cycles;
       }
       if (issue) {
-        issued_lane[static_cast<size_t>(owner)] = dut.issue_lane;
+        ++issue_beats;
+        if (real_mask == 0) {
+          ++padding_beats;
+        }
+        issued_mask[static_cast<size_t>(owner)] = real_mask;
       }
     }
 
     eval_all(duts, context, 1);
 
     for (int owner = 0; owner < kHbmChannels; ++owner) {
-      const int lane = issued_lane[static_cast<size_t>(owner)];
-      if (lane < 0) {
+      const uint8_t real_mask = issued_mask[static_cast<size_t>(owner)];
+      if (real_mask == 0) {
         continue;
       }
 
-      auto& fifo = fifos[static_cast<size_t>(owner)][static_cast<size_t>(lane)];
-      const TaggedScalar issued = fifo.front();
-      fifo.pop_front();
+      for (int lane = 0; lane < kPeNum; ++lane) {
+        if (((real_mask >> lane) & 1U) == 0) {
+          continue;
+        }
 
-      ++issue_count;
-      ++lane_issued[static_cast<size_t>(owner)][static_cast<size_t>(lane)];
-      if (issued.done) {
-        ++done_issue_count;
-      } else {
-        ++real_issue_count;
-      }
+        auto& fifo =
+            fifos[static_cast<size_t>(owner)][static_cast<size_t>(lane)];
+        const TaggedScalar issued = fifo.front();
+        fifo.pop_front();
 
-      if (owner == opt.owner && static_cast<int>(trace_events) < opt.trace) {
-        ++trace_events;
-        std::cout << "trace cycle=" << cycles
+        ++issue_count;
+        ++lane_issued[static_cast<size_t>(owner)][static_cast<size_t>(lane)];
+        if (issued.done) {
+          ++done_issue_count;
+        } else {
+          ++real_issue_count;
+        }
+
+        if (owner == opt.owner && static_cast<int>(trace_events) < opt.trace) {
+          ++trace_events;
+          std::cout << "trace cycle=" << cycles
                   << " owner=" << owner
+                  << " mask=0x" << std::hex << static_cast<int>(real_mask)
+                  << std::dec
                   << " lane=" << lane
                   << " done=" << issued.done
                   << " packet=" << issued.packet_idx
@@ -847,14 +891,11 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
                   << " value=" << issued.value
                   << " hazard=0x" << std::hex
                   << static_cast<int>(hazard_mask[static_cast<size_t>(owner)])
-                  << " eligible=0x"
-                  << static_cast<int>(
-                         eligible_mask[static_cast<size_t>(owner)])
                   << std::dec << "\n";
-      }
+        }
 
-      if (csv) {
-        csv << cycles << ",issue," << owner << "," << lane << ","
+        if (csv) {
+          csv << cycles << ",issue," << owner << "," << lane << ","
             << issued.done << "," << issued.packet_idx << ","
             << issued.addr() << "," << issued.is_pong() << ","
             << issued.pair_lane << "," << issued.scalar_lane << ","
@@ -863,8 +904,9 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
             << std::setprecision(9) << issued.value << ",0x" << std::hex
             << static_cast<int>(hazard_mask[static_cast<size_t>(owner)])
             << ",0x"
-            << static_cast<int>(eligible_mask[static_cast<size_t>(owner)])
+            << static_cast<int>(real_mask)
             << std::dec << "," << fifo.size() << "\n";
+        }
       }
     }
 
@@ -904,19 +946,13 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
       issue_complete_cycle = cycles;
     }
     if (all_sources_done(sources, source_pos) && all_fifos_empty(fifos)) {
-      for (int owner = 0; owner < kHbmChannels; ++owner) {
-        drive_heads(*duts[static_cast<size_t>(owner)],
-                    fifos[static_cast<size_t>(owner)]);
-      }
-      eval_all(duts, context, 0);
-      if (all_scoreboards_empty(duts)) {
-        break;
-      }
+      break;
     }
   }
 
   if (cycles >= static_cast<size_t>(opt.timeout_cycles)) {
     std::cerr << "FAIL: timeout cycles=" << cycles
+              << " issue_beats=" << issue_beats
               << " issues=" << issue_count
               << " source_stall_cycles=" << source_stall_cycles << "\n";
     return 1;
@@ -996,6 +1032,8 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
             << " padding_slots=" << padding_slots << "\n";
   std::cout << "  issue_complete_cycle=" << issue_complete_cycle
             << " drain_complete_cycle=" << cycles
+            << " issue_beats=" << issue_beats
+            << " padding_beats=" << padding_beats
             << " issues=" << issue_count
             << " real_issues=" << real_issue_count
             << " done_issues=" << done_issue_count << "\n";
@@ -1004,8 +1042,7 @@ int run_fifo_splitter(const Options& opt, const Csr& csr,
             << " issue_rate_per_owner=" << issue_rate_per_owner
             << " real_rate_per_owner=" << real_rate_per_owner
             << " source_fire_rate=" << source_fire_rate << "\n";
-  std::cout << "  scoreboard_blocked_cycles=" << scoreboard_blocked_cycles
-            << " bypass_cycles=" << bypass_cycles
+  std::cout << "  bypass_cycles=" << bypass_cycles
             << " source_stall_cycles=" << source_stall_cycles
             << " any_source_stall_cycles=" << any_source_stall_cycles
             << "\n";

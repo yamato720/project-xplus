@@ -67,6 +67,9 @@ if [[ "${JACOBI_WIDE_HBM:-0}" != "0" && "${JACOBI_WIDE_HBM:-}" != "" ]]; then
 fi
 
 case "$HBM_CHANNELS" in
+  8)
+    cflags+=("-DJACOBI_HBM_CHANNELS_8=1")
+    ;;
   16)
     ;;
   24)
@@ -76,7 +79,7 @@ case "$HBM_CHANNELS" in
     cflags+=("-DJACOBI_HBM_CHANNELS_32=1")
     ;;
   *)
-    echo "Unsupported JACOBI_HBM_CHANNELS=$HBM_CHANNELS; use 16, 24, or 32." >&2
+    echo "Unsupported JACOBI_HBM_CHANNELS=$HBM_CHANNELS; use 8, 16, 24, or 32." >&2
     exit 1
     ;;
 esac
@@ -152,6 +155,14 @@ if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
     exit 1
   fi
   cflags+=("-DJACOBI_SPMV_SCOREBOARD_DEPTH=$JACOBI_SPMV_SCOREBOARD_DEPTH")
+fi
+
+if [[ "${JACOBI_SPMV_SCHEDULED_STREAM_DEPTH:-}" != "" ]]; then
+  if [[ ! "$JACOBI_SPMV_SCHEDULED_STREAM_DEPTH" =~ ^[1-9][0-9]*$ ]]; then
+    echo "JACOBI_SPMV_SCHEDULED_STREAM_DEPTH must be a positive integer; got '$JACOBI_SPMV_SCHEDULED_STREAM_DEPTH'." >&2
+    exit 1
+  fi
+  cflags+=("-DJACOBI_SPMV_SCHEDULED_STREAM_DEPTH=$JACOBI_SPMV_SCHEDULED_STREAM_DEPTH")
 fi
 
 if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
@@ -239,6 +250,8 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
     cp "$support_rtl" "$generated_support_rtl"
     cp "$fadd_rtl" "$generated_fadd_rtl"
     cp "$fadd_ip_tcl" "$generated_fadd_ip_tcl"
+    sed -i "s/parameter integer HBM_CHANNEL_NUM = 16;/parameter integer HBM_CHANNEL_NUM = $HBM_CHANNELS;/" \
+      "$generated_rtl" "$generated_support_rtl"
     echo "Replaced generated RTL wrapper with custom RTL: $generated_rtl"
     echo "Copied owner-lane RTL support module: $generated_support_rtl"
     echo "Copied owner-bank fadd wrapper: $generated_fadd_rtl"
@@ -259,6 +272,8 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
     done
     cp "$custom_scoreboard_rtl" "$generated_scoreboard_rtl"
     cp "$custom_issue_rtl" "$generated_issue_rtl"
+    sed -i "s/parameter integer HBM_CHANNEL_NUM = 16;/parameter integer HBM_CHANNEL_NUM = $HBM_CHANNELS;/" \
+      "$generated_scoreboard_rtl"
     if [[ "${JACOBI_SPMV_SCOREBOARD_DEPTH:-}" != "" ]]; then
       sed -i "s/parameter integer SCOREBOARD_DEPTH = 12;/parameter integer SCOREBOARD_DEPTH = $JACOBI_SPMV_SCOREBOARD_DEPTH;/" \
         "$generated_scoreboard_rtl"

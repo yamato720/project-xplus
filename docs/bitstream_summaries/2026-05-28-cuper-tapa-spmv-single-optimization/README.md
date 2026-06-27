@@ -672,6 +672,41 @@ sum 和最终 `TaggedFloatV2` 写回。
 降到 `39 MHz`。该 artifact 只适合服务器侧功能/监测边界验证，不建议晋级标准，也
 不进入性能曲线。
 
+## 2026-06-27 补充：SpMV-only 8-HBM 构建批次
+
+本轮同步三份 `CuperSpmvServiceOnly` 8-HBM demo artifact，用来对比 8 路原版、
+8 路 strip padding、以及 8 路 lane-static real + RTL issue scoreboard 的构建边界。
+它们仍属于 `cuper-tapa-spmv` SpMV-only 实验线，不替代已验证的
+`20260618-strip16-demo`，也不更新正式 `source.diff`。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+```
+
+结果口径：
+
+| 版本 | UUID | SHA256 | DATA/KERNEL/HBM | Timing |
+| --- | --- | --- | --- | --- |
+| original8 | `c4fbfa69-5f20-f3d8-3e7f-c514119625e6` | `a32eeece95bf9664cb9afc4dbea20cdb46b47bfb58b5bb9f6f01e726e648c90f` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
+| strip8 | `14f04872-7324-2970-12bd-135e3e8eb55b` | `d615702025dc041cd61cd858d2219660230e66f346fd16719e4a34758385aad3` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
+| lanereal8-scoreboard | `9f6a0133-2169-15f9-d6ec-752ecd8eaca0` | `0268f72b8438b84a55448bd02eb9a485010e745a55fcbf65234dfd43ca473453` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
+
+构建目录和日志：
+
+```text
+cuper-jacobi-spmv-original8-hw-150m-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-strip8-hw-150m-build/logs/build_hw_tmux.log
+cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
+```
+
+三版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
+routed timing clean。服务器侧上板 sweep 尚未执行，因此当前只记录为待测 demo，不写
+HTML 性能曲线，也不更新正式 `source.diff`。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：

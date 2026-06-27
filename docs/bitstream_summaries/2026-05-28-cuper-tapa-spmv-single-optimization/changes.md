@@ -677,6 +677,41 @@ clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
 `28858`。因此这轮只同步为功能/监测边界实验，不建议晋级标准，正式 `source.diff`
 仍不更新。
 
+## 2026-06-27：8-HBM SpMV-only 构建同步
+
+本轮按 8-HBM 目标生成并同步三份 `CuperSpmvServiceOnly` demo artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-original8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
+```
+
+核心改动：
+
+- 新增 `JACOBI_HBM_CHANNELS=8` 支持，host、TAPA/HLS cflags、XO hotpatch 和 link
+  connectivity 均能生成 8 路 `Matrix_data_0..7` graph；
+- 8-HBM SpMV-only connectivity 使用 `Matrix_data_0..7 -> HBM[0..7]`，
+  `SpElement_list_ptr -> HBM[8]`，`X -> HBM[9]`，`Y_out -> HBM[10]`，
+  `Status -> HBM[30]`，`Metrics -> HBM[31]`；
+- full Jacobi graph 的 update pair 宏也补了 8-HBM 分支，使每个 update pair 只消费
+  1 路 accumulator 输出；
+- RTL hotpatch 会按 `JACOBI_HBM_CHANNELS` 改写 custom RTL wrapper 的
+  `HBM_CHANNEL_NUM` 参数，避免 8-HBM scoreboard 构建仍使用 16 路默认参数；
+- 单记分板分支从单 lane issue token 改为 8-lane scheduled vector：RTL issue
+  scoreboard 每拍可同时发射所有无 RAW hazard 的 lane，HLS scheduled accumulator
+  继续负责 FP32 加法、URAM partial sum 和 tagged 写回；
+- `verilog/README.md` 补了 RTL 文件索引，明确“全 RTL owner-bank 后端”和
+  “单记分板 RTL 调度器 + 8-lane primitive”的区别。
+
+本轮构建结果：
+
+- original8、strip8、lanereal8-scoreboard 三版均为 `150/500/450 MHz`；
+- 三版 routed timing 均 clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing
+  endpoints `0`；
+- 目前尚未完成服务器侧上板 sweep，不能声明性能提升；
+- 正式 `source.diff` 仍不更新。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：
