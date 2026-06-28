@@ -1,0 +1,5 @@
+base_log=logs/spmv_8hbm_donedrain_hw_20260628_144700
+date=2026-06-28 14:47:00 CST
+bitfile=/home/pyx/ProjectFS/Project-X/Project-XPlus/395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
+uuid=e90660d3-9efa-9066-7517-4547fc21097f
+sha256=94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
