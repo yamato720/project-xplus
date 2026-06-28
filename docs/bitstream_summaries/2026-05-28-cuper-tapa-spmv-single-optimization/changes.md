@@ -766,6 +766,47 @@ v++ link elapsed: 2h 59m 18s
 这版是旧 `thermal2_n1024` timeout 的复测候选；当前还没有服务器侧上板结果，因此仍不更新
 正式 `source.diff`。
 
+## 2026-06-28：lanereal8 scoreboard done-drain 修复
+
+head-register 修正后，下一版把 `done` token 语义改成 per-lane drain barrier：
+
+- `CuperSpmvOnly_RtlIssueScoreboard8` 新增逐 lane scoreboard empty 检查；
+- 普通数据 token 仍按 `{lane, addr, ping/pong}` hazard 判断；
+- `done` token 不再无条件绕过 scoreboard，必须等同 lane window 全空后才 issue；
+- blocked done 或 hazard-blocked data 期间继续输出 all-padding beat 推进 scoreboard shift；
+- HLS C++ 等价占位调度器同步相同语义，保持 software/TAPA sim 与 custom RTL 一致；
+- primitive/wrapper testbench 新增 done-drain 覆盖。
+
+本地验证已通过：
+
+```text
+git diff --check
+verilator --lint-only ... CuperSpmvOnly_RtlOwnerScoreboardOoo
+make -C verilog tapa-vector-scoreboard-sim
+make -C verilog tapa-owner-scoreboard-sim
+make -C verilog tapa-scoreboard-dataset-cpp-sim
+```
+
+同步 artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin.info
+```
+
+版本信息：
+
+```text
+UUID: e90660d3-9efa-9066-7517-4547fc21097f
+SHA256: 94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build dir: cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/
+v++ link elapsed: 3h 15m 0s
+```
+
+这版仍是旧 `thermal2_n1024` timeout 的复测候选；正式 `source.diff` 继续等板上确认后再更新。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：

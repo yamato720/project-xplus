@@ -1608,3 +1608,73 @@ input/issued counts match
 thermal2_n16
 thermal2_n1024
 ```
+
+## 2026-06-28：lanereal8 scoreboard done-drain 修正版
+
+head-register 修正后，下一版继续保留 wrapper 缓存 head，不回退；本轮只改 issue
+primitive 的 done/drain 协议。`CuperSpmvOnly_RtlIssueScoreboard8` 新增 per-lane
+scoreboard empty 检查，普通数据 token 仍按 `{lane, addr, ping/pong}` RAW hazard
+判断，done token 只有在该 lane scoreboard window 全空时才能 issue。blocked done
+期间继续输出 all-padding beat，推动 scoreboard shift，直到该 lane drain 完成。
+
+同步改动：
+
+- `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`
+  的 C++ 等价占位调度器同步 done-drain 语义；
+- `tb_tapa_vector_issue_scoreboard8.sv` 覆盖 real update 后同 lane done 必须先输出
+  padding beats 再 issue；
+- `tb_tapa_owner_scoreboard_ooo.sv` 覆盖 wrapper + primitive 联合场景，验证 cached
+  done head 不 reread、不 reissue 已完成 lane，并在 drain 后最终发出 lane 0 done。
+
+本地 RTL/模型测试：
+
+```text
+git diff --check
+
+verilator --lint-only -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME \
+  -Iverilog/tapa \
+  --top-module CuperSpmvOnly_RtlOwnerScoreboardOoo \
+  verilog/tapa/CuperSpmvOnly_RtlIssueScoreboard8.v \
+  verilog/tapa/CuperSpmvOnly_RtlOwnerScoreboardOoo.v
+
+make -C verilog tapa-vector-scoreboard-sim
+make -C verilog tapa-owner-scoreboard-sim
+make -C verilog tapa-scoreboard-dataset-cpp-sim
+```
+
+结果：
+
+```text
+PASS: vector issue scoreboard8 cycles=37 depth=4
+PASS: owner scoreboard wrapper cycles=20 nonpad=9
+tapa-scoreboard-dataset-cpp-sim: thermal2_n1024 owner 0 通过，
+input_tokens=331, real_tokens=323, done_tokens=8,
+issue_complete_cycle=359, done_issues=8, lane input/issued counts match
+```
+
+新同步 artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin.info
+```
+
+版本信息：
+
+```text
+UUID: e90660d3-9efa-9066-7517-4547fc21097f
+SHA256: 94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Build dir: cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/
+Build log: cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/logs/build_hw_tmux.live.log
+v++ link elapsed: 3h 15m 0s
+POST-VPL: 0 errors
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+```
+
+这版仍是旧 `thermal2_n1024` timeout 的复测候选；服务器侧下一步先只跑：
+
+```text
+thermal2_n16
+thermal2_n1024
+```

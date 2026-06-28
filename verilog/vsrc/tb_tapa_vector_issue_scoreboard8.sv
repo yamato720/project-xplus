@@ -157,6 +157,38 @@ module tb_tapa_vector_issue_scoreboard8;
         end
     endtask
 
+    task automatic drain_done_lane_by_bubbles;
+        input integer lane;
+        input integer addr;
+        input bit is_pong;
+        integer bubble_count;
+        begin
+            bubble_count = 0;
+            clear_heads();
+            set_lane(lane, 1'b1, addr, is_pong, 1'b1);
+            while (!scoreboard_empty) begin
+                expect_vector(8'h00, 1'b1);
+                tick();
+                bubble_count = bubble_count + 1;
+                if (bubble_count > SCOREBOARD_DEPTH + 1) begin
+                    $fatal(1, "FAIL cycle=%0d done drain timed out lane=%0d addr=%0d",
+                           cycle, lane, addr);
+                end
+            end
+            if (bubble_count != SCOREBOARD_DEPTH) begin
+                $fatal(1, "FAIL cycle=%0d done drain bubbles=%0d expected=%0d",
+                       cycle, bubble_count, SCOREBOARD_DEPTH);
+            end
+            expect_vector(8'b0000_0001 << lane, 1'b0);
+            if (!issue_payload[lane * TAGGED_WIDTH]) begin
+                $fatal(1, "FAIL cycle=%0d lane=%0d issued token is not done",
+                       cycle, lane);
+            end
+            tick();
+            clear_heads();
+        end
+    endtask
+
     initial begin
         clear_heads();
         issue_ready = 1'b1;
@@ -185,7 +217,7 @@ module tb_tapa_vector_issue_scoreboard8;
             !lane_hazard[4] || lane_hazard[5]) begin
             $fatal(1, "FAIL unexpected mixed hazard vector=%b", lane_hazard);
         end
-        expect_vector(8'b0010_1110, 1'b0);
+        expect_vector(8'b0010_1010, 1'b0);
         tick();
 
         clear_heads();
@@ -263,9 +295,11 @@ module tb_tapa_vector_issue_scoreboard8;
         end
 
         clear_heads();
-        set_lane(3, 1'b1, 33, 1'b0, 1'b1);
+        set_lane(3, 1'b1, 33, 1'b0, 1'b0);
         expect_vector(8'b0000_1000, 1'b0);
         tick();
+
+        drain_done_lane_by_bubbles(3, 33, 1'b0);
 
         clear_heads();
         set_lane(3, 1'b1, 33, 1'b0, 1'b0);

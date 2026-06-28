@@ -28,6 +28,7 @@ module tb_tapa_owner_scoreboard_ooo;
     integer lane;
     integer nonpad_count = 0;
     integer hazard_bubbles = 0;
+    integer done_drain_bubbles = 0;
     reg [7:0] done_mask = 8'd0;
 
     CuperSpmvOnly_RtlOwnerScoreboardOoo #(
@@ -257,15 +258,57 @@ module tb_tapa_owner_scoreboard_ooo;
         if (!scheduled_write) begin
             $fatal(1, "FAIL cycle=%0d done tokens did not issue", cycle);
         end
-        for (lane = 0; lane < 8; lane = lane + 1) begin
+        if (!scheduled_lane_padding(0)) begin
+            $fatal(1, "FAIL cycle=%0d lane 0 done bypassed scoreboard drain",
+                   cycle);
+        end
+        for (lane = 1; lane < 8; lane = lane + 1) begin
             if (scheduled_lane_padding(lane)) begin
-                $fatal(1, "FAIL done lane %0d padded", lane);
+                $fatal(1, "FAIL done lane %0d unexpectedly padded", lane);
             end
             if (!scheduled_lane_done(lane)) begin
                 $fatal(1, "FAIL lane %0d missing done", lane);
             end
             done_mask[lane] = 1'b1;
         end
+        tick();
+
+        done_drain_bubbles = 0;
+        #1;
+        while (scheduled_write && scheduled_lane_padding(0)) begin
+            if (lane_read !== 8'd0) begin
+                $fatal(1, "FAIL cycle=%0d reread while done head cached read=%b",
+                       cycle, lane_read);
+            end
+            for (lane = 1; lane < 8; lane = lane + 1) begin
+                if (!scheduled_lane_padding(lane)) begin
+                    $fatal(1, "FAIL cycle=%0d done-seen lane %0d reissued",
+                           cycle, lane);
+                end
+            end
+            done_drain_bubbles = done_drain_bubbles + 1;
+            tick();
+            #1;
+            if (done_drain_bubbles > SCOREBOARD_DEPTH + 1) begin
+                $fatal(1, "FAIL lane 0 done drain did not age out");
+            end
+        end
+        if (done_drain_bubbles != SCOREBOARD_DEPTH - 1) begin
+            $fatal(1, "FAIL done drain bubbles=%0d expected=%0d",
+                   done_drain_bubbles, SCOREBOARD_DEPTH - 1);
+        end
+        if (!scheduled_write || scheduled_lane_padding(0)) begin
+            $fatal(1, "FAIL lane 0 done did not issue after drain");
+        end
+        if (!scheduled_lane_done(0)) begin
+            $fatal(1, "FAIL lane 0 missing delayed done");
+        end
+        for (lane = 1; lane < 8; lane = lane + 1) begin
+            if (!scheduled_lane_padding(lane)) begin
+                $fatal(1, "FAIL delayed done beat reissued lane %0d", lane);
+            end
+        end
+        done_mask[0] = 1'b1;
         tick();
 
         if (done_mask !== 8'hff) begin

@@ -2534,6 +2534,21 @@ scoreboard_hazard_scan:
     return hazard;
 }
 
+inline bool CuperSpmvOnly_ScoreboardLaneEmpty(
+    const ap_uint<3> lane,
+    bool sb_valid[CUPER_SPMV_SCOREBOARD_DEPTH][CUPER_SPMV_SCHEDULED_LANES]) {
+#pragma HLS inline
+    bool lane_empty = true;
+scoreboard_lane_empty_scan:
+    for (INDEX_TYPE i = 0; i < CUPER_SPMV_SCOREBOARD_DEPTH; ++i) {
+#pragma HLS unroll
+        if (sb_valid[i][lane]) {
+            lane_empty = false;
+        }
+    }
+    return lane_empty;
+}
+
 inline void CuperSpmvOnly_VectorScoreboardShift(
     bool allocate[CUPER_SPMV_SCHEDULED_LANES],
     CuperSpmvOnly_TaggedScalar tagged[CUPER_SPMV_SCHEDULED_LANES],
@@ -2673,14 +2688,18 @@ iter:
 #pragma HLS unroll
                 issue_lane[lane] = false;
                 if (head_valid[lane]) {
-                    const bool hazard =
-                        (head[lane].done == 0) &&
-                        CuperSpmvOnly_ScoreboardHazard(lane,
-                                                       head[lane],
-                                                       sb_valid,
-                                                       sb_addr,
-                                                       sb_pong);
-                    issue_lane[lane] = !hazard;
+                    if (head[lane].done != 0) {
+                        issue_lane[lane] =
+                            CuperSpmvOnly_ScoreboardLaneEmpty(lane, sb_valid);
+                    } else {
+                        const bool hazard =
+                            CuperSpmvOnly_ScoreboardHazard(lane,
+                                                           head[lane],
+                                                           sb_valid,
+                                                           sb_addr,
+                                                           sb_pong);
+                        issue_lane[lane] = !hazard;
+                    }
                     issue_valid |= issue_lane[lane];
                 }
             }

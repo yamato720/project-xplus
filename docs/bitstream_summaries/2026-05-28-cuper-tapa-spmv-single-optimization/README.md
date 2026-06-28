@@ -686,6 +686,7 @@ sum 和最终 `TaggedFloatV2` 写回。
 395bitstream/cuper-tapa-spmv-u55c-20260627-strip8-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
 395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
 ```
 
 结果口径：
@@ -696,6 +697,7 @@ sum 和最终 `TaggedFloatV2` 写回。
 | strip8 | `14f04872-7324-2970-12bd-135e3e8eb55b` | `d615702025dc041cd61cd858d2219660230e66f346fd16719e4a34758385aad3` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 | lanereal8-scoreboard | `9f6a0133-2169-15f9-d6ec-752ecd8eaca0` | `0268f72b8438b84a55448bd02eb9a485010e745a55fcbf65234dfd43ca473453` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 | lanereal8-scoreboard-headreg | `39eb30df-2178-51aa-3333-f1cbb9a0e389` | `1ac7664203e0eb3b6bd8bd35a932ecd8a1afdfb81d34dedf6cc26f98663870e1` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
+| lanereal8-scoreboard-donedrain | `e90660d3-9efa-9066-7517-4547fc21097f` | `94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad` | `150/500/450 MHz` | WNS `0.003 ns`, TNS `0.000 ns`, setup failing endpoints `0` |
 
 构建目录和日志：
 
@@ -704,6 +706,7 @@ cuper-jacobi-spmv-original8-hw-150m-build/logs/build_hw_tmux.log
 cuper-jacobi-spmv-strip8-hw-150m-build/logs/build_hw_tmux.log
 cuper-jacobi-spmv-lanereal8-scoreboard-hw-150m-build/logs/build_hw_tmux.log
 cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/logs/v++_CuperSpmvServiceOnly.log
+cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/logs/build_hw_tmux.live.log
 ```
 
 三版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
@@ -719,6 +722,13 @@ hazard bubble、downstream full 或 padding bubble 期间不再反复读上游 F
 pop 同拍采错变化后的 `s_dout`。该版 Verilator wrapper smoke、8-lane primitive smoke
 和 scoreboard dataset C++/Verilator smoke 均通过，xclbin 已生成并同步，等待服务器侧
 复测 `thermal2_n1024` 旧 timeout。
+
+`lanereal8-scoreboard-donedrain` 保留 head-register wrapper，并进一步把 issue primitive
+的 done token 改为 per-lane drain barrier：同 lane scoreboard window 全空后才允许发
+done，blocked done 期间继续输出 all-padding beat 让窗口老化。该版对应的 HLS C++
+占位调度器已同步语义，Verilator primitive/wrapper smoke 和 `thermal2_n1024` owner 0
+dataset C++/Verilator smoke 均通过。xclbin 已生成并同步，等待服务器侧优先复测
+`thermal2_n16` 和 `thermal2_n1024`。
 
 ## 当前基线
 

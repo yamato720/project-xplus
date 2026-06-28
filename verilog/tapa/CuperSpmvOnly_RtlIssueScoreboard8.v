@@ -49,6 +49,7 @@ module CuperSpmvOnly_RtlIssueScoreboard8
     reg sb_is_pong [0:SCOREBOARD_DEPTH-1][0:7];
 
     reg [7:0] lane_hazard_r;
+    reg [7:0] lane_scoreboard_empty_r;
     reg [7:0] lane_eligible_r;
     reg [(8 * TAGGED_WIDTH)-1:0] issue_payload_r;
 
@@ -83,10 +84,23 @@ module CuperSpmvOnly_RtlIssueScoreboard8
     end
 
     always @(*) begin
+        lane_scoreboard_empty_r = 8'hff;
+
+        for (lane_i = 0; lane_i < 8; lane_i = lane_i + 1) begin
+            for (sb_i = 0; sb_i < SCOREBOARD_DEPTH; sb_i = sb_i + 1) begin
+                if (sb_valid[sb_i][lane_i]) begin
+                    lane_scoreboard_empty_r[lane_i] = 1'b0;
+                end
+            end
+        end
+    end
+
+    always @(*) begin
         for (lane_i = 0; lane_i < 8; lane_i = lane_i + 1) begin
             lane_eligible_r[lane_i] =
                 head_valid[lane_i] &&
-                (head_done[lane_i] || !lane_hazard_r[lane_i]);
+                ((head_done[lane_i] && lane_scoreboard_empty_r[lane_i]) ||
+                 (!head_done[lane_i] && !lane_hazard_r[lane_i]));
         end
     end
 
@@ -107,16 +121,7 @@ module CuperSpmvOnly_RtlIssueScoreboard8
                          ((head_valid != 8'd0) && (lane_eligible_r == 8'd0));
     assign issue_payload = issue_payload_r;
 
-    reg scoreboard_empty_r;
-    always @(*) begin
-        scoreboard_empty_r = 1'b1;
-        for (sb_i = 0; sb_i < SCOREBOARD_DEPTH; sb_i = sb_i + 1) begin
-            if (sb_valid[sb_i] != 8'd0) begin
-                scoreboard_empty_r = 1'b0;
-            end
-        end
-    end
-    assign scoreboard_empty = scoreboard_empty_r;
+    assign scoreboard_empty = &lane_scoreboard_empty_r;
 
     always @(posedge clk) begin
         if (rst) begin
