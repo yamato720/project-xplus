@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24/31</title>
+  <title>U55C Cuper SpMV Bitstream Compare - 2026-05-24/06-28</title>
   <style>
     :root {
       color-scheme: light;
@@ -345,14 +345,17 @@
         <code>cuper-tapa-jacobi-u55c-20260615-demo.xclbin</code>，kernel 为
         <code>CuperJacobiIteration</code>，已完成一次 Jacobi 迭代、子矩阵完整固定轮数
         和完整 <code>thermal2</code> 固定轮数上板测试。
+        2026-06-28 补充 8-HBM <code>lanereal8-scoreboard-donedrain</code> 失败边界：
+        <code>thermal2_n16</code> 通过，但 <code>thermal2_n1024</code> 仍 300s timeout。
       </div>
       <div class="meta">
-        <span class="pill">日期 2026-05-24/31 CST</span>
+        <span class="pill">日期 2026-05-24/06-28 CST</span>
         <span class="pill">设备 xilinx_u55c_gen3x16_xdma_base_3</span>
         <span class="pill">BDF 0000:01:00.1</span>
         <span class="pill">XRT 2.15.225</span>
         <span class="pill">repo main / 2026-05-31 packed timing demo-only test</span>
         <span class="pill">Jacobi demo / 2026-06-15 master-controller test</span>
+        <span class="pill">SpMV 8-HBM scoreboard / 2026-06-28 done-drain test</span>
       </div>
     </div>
   </header>
@@ -496,6 +499,49 @@
     </section>
 
     <section>
+      <h2>8-HBM Scoreboard 失败边界</h2>
+      <p>
+        2026-06-28 复测
+        <code>cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin</code>。
+        该版保留 head-register wrapper，并把 done token 改为 per-lane drain barrier；
+        routed timing clean，DATA/KERNEL/HBM 为 <code>150/500/450 MHz</code>。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset</th>
+              <th>结果</th>
+              <th class="num">FPGA 时间</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>thermal2_n16</code></td>
+              <td><span class="ok">PASS</span></td>
+              <td class="num">0.081832 ms</td>
+              <td><code>Error Num=0</code></td>
+            </tr>
+            <tr>
+              <td><code>thermal2_n1024</code></td>
+              <td><span class="bad">timeout</span></td>
+              <td class="num">-</td>
+              <td>300s timeout，<code>rc=124</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="callout">
+        n1024 debug 与前两版一致：停在 <code>after ReadFromDevice before Finish</code>；
+        三次 pre-finish 采样里 <code>Status/Metrics</code> 仍是初始化哨兵，
+        <code>progress_magic valid=0</code>，<code>Y[0..15]</code> 全 0。
+        结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死；该失败
+        artifact 不进入性能曲线，也不更新正式 <code>source.diff</code>。
+      </p>
+    </section>
+
+    <section>
       <h2>测试口径</h2>
       <div class="two-col">
         <div>
@@ -568,8 +614,8 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     <section>
       <h2>Bitstream 信息</h2>
       <p>
-        本表只保留四个标准 bitstream，以及 demo 的两组配对：上一 demo 与本次 demo。
-        <span class="tag current-demo">本次 demo</span> 行为当前测试对象。
+        本表保留四个旧标准 bitstream、主要 demo 对比项，以及 2026-06 的 Jacobi/SpMV
+        实验 artifact。<span class="tag current-demo">本次 demo</span> 行为当前测试对象。
         若同名 demo 槽已被覆盖，上一 demo 行按历史 UUID/SHA 标识。
       </p>
       <div class="table-wrap">
@@ -676,6 +722,16 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <td class="num">141 MHz</td>
               <td class="num">450 MHz</td>
               <td><code>c4908d759c81c2d4b1202236ba611a2cdeb2ec3edeab595ec588efa799257705</code></td>
+            </tr>
+            <tr class="current-demo-row">
+              <td>single SpMV 8-HBM 实验：<span class="tag current-demo">done-drain</span></td>
+              <td><span class="tag current-demo">8-HBM scoreboard</span> lane-real done-drain</td>
+              <td><code>cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin</code></td>
+              <td><code>CuperSpmvServiceOnly</code></td>
+              <td><code>e90660d3-9efa-9066-7517-4547fc21097f</code></td>
+              <td class="num">150 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad</code></td>
             </tr>
             <tr>
               <td>Jacobi 标准</td>

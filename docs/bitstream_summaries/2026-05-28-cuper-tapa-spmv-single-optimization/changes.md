@@ -763,8 +763,8 @@ Build dir: cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/
 v++ link elapsed: 2h 59m 18s
 ```
 
-这版是旧 `thermal2_n1024` timeout 的复测候选；当前还没有服务器侧上板结果，因此仍不更新
-正式 `source.diff`。
+服务器侧后续复测确认这版仍未解决旧 `thermal2_n1024` timeout；它作为失败边界保留，
+正式 `source.diff` 仍不更新。
 
 ## 2026-06-28：lanereal8 scoreboard done-drain 修复
 
@@ -805,7 +805,19 @@ Build dir: cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/
 v++ link elapsed: 3h 15m 0s
 ```
 
-这版仍是旧 `thermal2_n1024` timeout 的复测候选；正式 `source.diff` 继续等板上确认后再更新。
+服务器侧复测结果：
+
+| 数据集 | 结果 | FPGA 时间 | 备注 |
+| --- | --- | ---: | --- |
+| `thermal2_n16` | PASS | 0.081832 ms | `Error Num=0` |
+| `thermal2_n1024` | timeout | 无 | 300s timeout，`rc=124` |
+
+debug 与前两版一致：`thermal2_n1024` 停在 `after ReadFromDevice before Finish`，
+三次 pre-finish 采样里 `Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，
+`Y[0..15]` 全 0。结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死。
+正式 `source.diff` 继续不更新。下一步若继续该分支，应单独构建
+`JACOBI_SPMV_SCOREBOARD_DEBUG=1` 版本，用 lane counters 区分 core、RTL issue、
+scheduled accumulator 和 scatter writer 的卡点。
 
 ## source.diff 规则
 

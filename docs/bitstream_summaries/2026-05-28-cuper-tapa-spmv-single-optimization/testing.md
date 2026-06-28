@@ -1602,12 +1602,8 @@ input/issued counts match
 - 总 elapsed `2h 59m 18s`；
 - routed timing clean：WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
 
-服务器侧尚未复测该 headreg artifact。下一步优先只跑旧失败边界：
-
-```text
-thermal2_n16
-thermal2_n1024
-```
+服务器侧后续复测确认该 headreg artifact 仍未解决旧 `thermal2_n1024` timeout；
+下一版已转向 done-drain 语义。该版作为失败边界保留，不更新正式 `source.diff`。
 
 ## 2026-06-28：lanereal8 scoreboard done-drain 修正版
 
@@ -1672,9 +1668,27 @@ POST-VPL: 0 errors
 Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
 ```
 
-这版仍是旧 `thermal2_n1024` timeout 的复测候选；服务器侧下一步先只跑：
+服务器侧 demo-only 上板结果：
+
+| 数据集 | 结果 | FPGA 时间 | 备注 |
+| --- | --- | ---: | --- |
+| `thermal2_n16` | PASS | 0.081832 ms | `Error Num=0` |
+| `thermal2_n1024` | timeout | 无 | 300s timeout，`rc=124` |
+
+运行 manifest：
 
 ```text
-thermal2_n16
-thermal2_n1024
+395bitstream/manifest.txt
+base_log=logs/spmv_8hbm_donedrain_hw_20260628_144700
+date=2026-06-28 14:47:00 CST
+bitfile=395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
+uuid=e90660d3-9efa-9066-7517-4547fc21097f
+sha256=94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
 ```
+
+`thermal2_n1024` 的 debug 与前两版一致：停在 `after ReadFromDevice before Finish`；
+三次 pre-finish 采样里 `Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，
+`Y[0..15]` 全 0。结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死。
+这轮仍不更新正式 `source.diff`。下一步若继续该分支，应单独构建
+`JACOBI_SPMV_SCOREBOARD_DEBUG=1` 版本，用 core/issue/acc lane counters 定位卡在
+core、RTL issue、scheduled accumulator 还是 scatter writer。

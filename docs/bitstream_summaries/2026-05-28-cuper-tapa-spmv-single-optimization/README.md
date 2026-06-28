@@ -709,26 +709,30 @@ cuper-jacobi-spmv-lanereal8-scoreboard-headreg8-hw-150m-build/logs/v++_CuperSpmv
 cuper-jacobi-spmv-lanereal8-scoreboard-donedrain8-hw-150m-build/logs/build_hw_tmux.live.log
 ```
 
-三版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
+五版均已完成 VPL implementation 和 xclbin 封装，POST-VPL `0 errors`，且 150 MHz
 routed timing clean。服务器侧上板结果显示：original8 和 strip8 均可跑完整
 `thermal2`，完整点分别为 `2.74379 ms` 和 `2.71420 ms`；lanereal8-scoreboard 只在
-`thermal2_n16` 返回，`thermal2_n1024` 300s timeout。当前结论是：8-HBM 基础路径可用，
-但性能不优于 16-HBM strip；RTL issue scoreboard 分支存在功能/进度闭合问题，不进入
-性能曲线，也不更新正式 `source.diff`。
+`thermal2_n16` 返回，`thermal2_n1024` 300s timeout。head-register 修正之后继续做的
+donedrain 版也只在 `thermal2_n16` 通过，`thermal2_n1024` 仍 300s timeout。当前结论是：
+8-HBM 基础路径可用，但性能不优于 16-HBM strip；RTL issue scoreboard 分支存在功能/进度
+闭合问题，不进入性能曲线，也不更新正式 `source.diff`。
 
 `lanereal8-scoreboard-headreg` 是对旧 timeout 版本的 RTL wrapper 修正版：wrapper 先把
 每条 owner-lane FIFO 的 head 存进本地寄存器，issue scoreboard 只看缓存 head；RAW
 hazard bubble、downstream full 或 padding bubble 期间不再反复读上游 FIFO，也不会在
 pop 同拍采错变化后的 `s_dout`。该版 Verilator wrapper smoke、8-lane primitive smoke
-和 scoreboard dataset C++/Verilator smoke 均通过，xclbin 已生成并同步，等待服务器侧
-复测 `thermal2_n1024` 旧 timeout。
+和 scoreboard dataset C++/Verilator smoke 均通过，但服务器侧复测确认没有解决
+`thermal2_n1024` 旧 timeout。该版作为失败边界保留，不再作为待测候选。
 
 `lanereal8-scoreboard-donedrain` 保留 head-register wrapper，并进一步把 issue primitive
 的 done token 改为 per-lane drain barrier：同 lane scoreboard window 全空后才允许发
 done，blocked done 期间继续输出 all-padding beat 让窗口老化。该版对应的 HLS C++
 占位调度器已同步语义，Verilator primitive/wrapper smoke 和 `thermal2_n1024` owner 0
-dataset C++/Verilator smoke 均通过。xclbin 已生成并同步，等待服务器侧优先复测
-`thermal2_n16` 和 `thermal2_n1024`。
+dataset C++/Verilator smoke 均通过。服务器侧复测结果为：`thermal2_n16` PASS，
+FPGA 时间 `0.081832 ms`，`Error Num=0`；`thermal2_n1024` 300s timeout，`rc=124`，
+没有 FPGA 时间。debug 与前两版一致，停在 `after ReadFromDevice before Finish`，
+三次 pre-finish 采样中 `Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，
+`Y[0..15]` 全 0。结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死。
 
 ## 当前基线
 
