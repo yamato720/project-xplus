@@ -3661,12 +3661,10 @@ void CuperSpmvOnly_TaggedScatterWriter(
     const INDEX_TYPE scalar_writes_total = tagged_pairs_total * 2;
 
     INDEX_TYPE channel_cursor = 0;
-    bool pending_valid = false;
-    INDEX_TYPE pending_addr = 0;
-    VALUE_TYPE pending_data = 0.0f;
-    bool next_valid = false;
-    INDEX_TYPE next_addr = 0;
-    VALUE_TYPE next_data = 0.0f;
+    bool pair_valid = false;
+    INDEX_TYPE pair_base_addr = 0;
+    float_v2 pair_value;
+    ap_uint<1> write_lane = 0;
     bool first_tag_reported = false;
     bool first_write_reported = false;
     bool first_resp_reported = false;
@@ -3681,28 +3679,18 @@ scatter:
          response_count < scalar_writes_total;) {
 #pragma HLS loop_tripcount min=8 max=4000000
 #pragma HLS pipeline II=1
-        if (!pending_valid && next_valid) {
-            pending_addr = next_addr;
-            pending_data = next_data;
-            pending_valid = true;
-            next_valid = false;
-        }
+        const bool y_write_available =
+            !Y_out.write_addr.full() && !Y_out.write_data.full();
 
-        if (!pending_valid && !next_valid &&
-            pair_count < tagged_pairs_total &&
+        if (!pair_valid && pair_count < tagged_pairs_total &&
             !Vector_Y_Tagged_Stream[channel_cursor].empty()) {
             CuperSpmvOnly_TaggedFloatV2 tagged;
             Vector_Y_Tagged_Stream[channel_cursor].try_read(tagged);
 
-            const INDEX_TYPE base_addr =
-                (tagged.packet_idx << 4) + (tagged.pair_lane << 1);
-
-            pending_addr = base_addr;
-            pending_data = tagged.value[0];
-            pending_valid = true;
-            next_addr = base_addr + 1;
-            next_data = tagged.value[1];
-            next_valid = true;
+            pair_base_addr = (tagged.packet_idx << 4) + (tagged.pair_lane << 1);
+            pair_value = tagged.value;
+            write_lane = 0;
+            pair_valid = true;
 
             ++pair_count;
             if (!first_tag_reported) {
@@ -3715,20 +3703,24 @@ scatter:
             }
         }
 
-        if (pending_valid &&
-            !Y_out.write_addr.full() &&
-            !Y_out.write_data.full()) {
-            Y_out.write_addr.try_write(pending_addr);
-            Y_out.write_data.try_write(pending_data);
+        if (pair_valid && y_write_available) {
+            const INDEX_TYPE write_addr = pair_base_addr + write_lane;
+            Y_out.write_addr.write(write_addr);
+            Y_out.write_data.write(pair_value[write_lane]);
             if (!first_write_reported) {
                 Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
                     kCuperSpmvOnlyProgressScatterFirstWrite,
-                    pending_addr,
+                    write_addr,
                     pair_count,
                     response_count));
                 first_write_reported = true;
             }
-            pending_valid = false;
+            if (write_lane == 0) {
+                write_lane = 1;
+            } else {
+                pair_valid = false;
+                write_lane = 0;
+            }
         }
 
         uint8_t num_responses = 0;
@@ -3776,12 +3768,10 @@ void CuperSpmvOnly_TaggedScatterWriterOoo(
     const INDEX_TYPE scalar_writes_total = tagged_pairs_total * 2;
 
     INDEX_TYPE channel_cursor = 0;
-    bool pending_valid = false;
-    INDEX_TYPE pending_addr = 0;
-    VALUE_TYPE pending_data = 0.0f;
-    bool next_valid = false;
-    INDEX_TYPE next_addr = 0;
-    VALUE_TYPE next_data = 0.0f;
+    bool pair_valid = false;
+    INDEX_TYPE pair_base_addr = 0;
+    float_v2 pair_value;
+    ap_uint<1> write_lane = 0;
     bool first_tag_reported = false;
     bool first_write_reported = false;
     bool first_resp_reported = false;
@@ -3796,28 +3786,18 @@ scatter:
          response_count < scalar_writes_total;) {
 #pragma HLS loop_tripcount min=8 max=4000000
 #pragma HLS pipeline II=1
-        if (!pending_valid && next_valid) {
-            pending_addr = next_addr;
-            pending_data = next_data;
-            pending_valid = true;
-            next_valid = false;
-        }
+        const bool y_write_available =
+            !Y_out.write_addr.full() && !Y_out.write_data.full();
 
-        if (!pending_valid && !next_valid &&
-            pair_count < tagged_pairs_total &&
+        if (!pair_valid && pair_count < tagged_pairs_total &&
             !Vector_Y_Tagged_Stream[channel_cursor].empty()) {
             CuperSpmvOnly_TaggedFloatV2 tagged;
             Vector_Y_Tagged_Stream[channel_cursor].try_read(tagged);
 
-            const INDEX_TYPE base_addr =
-                (tagged.packet_idx << 4) + (tagged.pair_lane << 1);
-
-            pending_addr = base_addr;
-            pending_data = tagged.value[0];
-            pending_valid = true;
-            next_addr = base_addr + 1;
-            next_data = tagged.value[1];
-            next_valid = true;
+            pair_base_addr = (tagged.packet_idx << 4) + (tagged.pair_lane << 1);
+            pair_value = tagged.value;
+            write_lane = 0;
+            pair_valid = true;
 
             ++pair_count;
             if (!first_tag_reported) {
@@ -3830,20 +3810,24 @@ scatter:
             }
         }
 
-        if (pending_valid &&
-            !Y_out.write_addr.full() &&
-            !Y_out.write_data.full()) {
-            Y_out.write_addr.try_write(pending_addr);
-            Y_out.write_data.try_write(pending_data);
+        if (pair_valid && y_write_available) {
+            const INDEX_TYPE write_addr = pair_base_addr + write_lane;
+            Y_out.write_addr.write(write_addr);
+            Y_out.write_data.write(pair_value[write_lane]);
             if (!first_write_reported) {
                 Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
                     kCuperSpmvOnlyProgressScatterFirstWrite,
-                    pending_addr,
+                    write_addr,
                     pair_count,
                     response_count));
                 first_write_reported = true;
             }
-            pending_valid = false;
+            if (write_lane == 0) {
+                write_lane = 1;
+            } else {
+                pair_valid = false;
+                write_lane = 0;
+            }
         }
 
         uint8_t num_responses = 0;

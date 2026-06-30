@@ -529,8 +529,25 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
     input wire [din1_WIDTH-1:0] din1,
     output reg [dout_WIDTH-1:0] dout
 );
+`ifdef CUPER_VERILATOR_DPI_FP
+    import "DPI-C" function int cuper_verilator_fadd32(input int a, input int b);
+`endif
+
     reg [dout_WIDTH-1:0] pipe [0:31];
     integer i;
+
+    function [dout_WIDTH-1:0] fadd_model;
+        input [din0_WIDTH-1:0] a;
+        input [din1_WIDTH-1:0] b;
+        begin
+`ifdef CUPER_VERILATOR_DPI_FP
+            fadd_model = cuper_verilator_fadd32(a, b);
+`else
+            fadd_model = $shortrealtobits($bitstoshortreal(a) +
+                                          $bitstoshortreal(b));
+`endif
+        end
+    endfunction
 
     always @(posedge clk) begin
         if (reset) begin
@@ -539,8 +556,7 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
                 pipe[i] <= {dout_WIDTH{1'b0}};
             end
         end else if (ce) begin
-            pipe[0] <= $shortrealtobits($bitstoshortreal(din0) +
-                                        $bitstoshortreal(din1));
+            pipe[0] <= fadd_model(din0, din1);
             for (i = 1; i < 32; i = i + 1) begin
                 if (i < NUM_STAGE) begin
                     pipe[i] <= pipe[i - 1];
@@ -551,8 +567,7 @@ module CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1
             // 取 pipe[NUM_STAGE-1]，Verilator 会比 xsim/IP 晚一拍，表现为
             // scalar0 的结果被 scalar1 的 pong tag 写回。
             if (NUM_STAGE == 1) begin
-                dout <= $shortrealtobits($bitstoshortreal(din0) +
-                                         $bitstoshortreal(din1));
+                dout <= fadd_model(din0, din1);
             end else begin
                 dout <= pipe[NUM_STAGE - 2];
             end

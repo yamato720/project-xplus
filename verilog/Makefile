@@ -1,5 +1,6 @@
 BUILD_DIR ?= build
 TAPA_RTL_DIR ?= ../cuper-tapa-spmv-ooobank16-fix-hw-150m-20260620-build/tapa_CuperSpmvServiceOnly/hdl
+TAPA_RTL_DIR_8 ?= ../cuper-tapa-spmv-ownerbank8-hw-150m-build/tapa_CuperSpmvServiceOnly/hdl
 ROWS ?= 128
 EVENTS ?= 4096
 ENTRIES ?= 8
@@ -10,12 +11,16 @@ CSR_SCALE ?= 1024
 CSR_DROP_DIAGONAL ?= 0
 FREQ_MHZ ?= 150
 HBM_CHANNELS ?= 16
+DATASET_TIMEOUT ?= 1000000
 
 CC ?= gcc
 CXX ?= g++
 VERILATOR ?= verilator
+VERILATOR_BUILD_JOBS ?= 32
 VIVADO ?= /home/pyx/vivado/Vivado/2022.2/bin/vivado
 VIVADO_PART ?= xcu55c-fsvh2892-2L-e
+VERILATOR_FP32_DPI := csrc/verilator_fp32_dpi.cpp
+VERILATOR_FP32_DEFINE := -DCUPER_VERILATOR_DPI_FP=1
 
 GEN := $(BUILD_DIR)/gen_ooo_accum_vectors
 CSR_GEN := $(BUILD_DIR)/gen_csr_accum_vectors
@@ -38,7 +43,11 @@ SCOREBOARD_DEPTH ?= 12
 FIFO_DEPTH ?=
 CSV ?=
 
-.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-vector-scoreboard-sim tapa-owner-scoreboard-sim tapa-scoreboard-dataset-cpp-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
+TAPA_SCATTER8_BASE := tapa_mangled_Z36CuperSpmvOnly_TaggedScatterWriterOooILi8EEviiiiiRN4tapa8istreamsI27CuperSpmvOnly_TaggedFloatV2XT_EEERNS0_10async_mmapIfEERNS0_7ostreamI26CuperSpmvOnlyProgressEventEE
+TAPA_SCATTER8_TOP := $(TAPA_SCATTER8_BASE)_CuperSpmvOnly_TaggedScatterWriterOoo_8_Pipeline_scatter
+TAPA_SCATTER8_PREFIX := VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter
+
+.PHONY: all vectors sim csr-vectors csr-sim tapa-lint tapa-sim tapa-bank-lint tapa-bank-sim tapa-vector-scoreboard-sim tapa-owner-scoreboard-sim tapa-scoreboard-dataset-cpp-sim tapa-bank-scatter-cpp-sim tapa-splitter-bank-scatter-cpp-sim tapa-splitter-bank-generated-scatter-cpp-sim tapa-core-splitter-bank-scatter-cpp-sim tapa-splitter16-bank16-dataset-cpp-sim tapa-ownerbank8-dataset-cpp-sim tapa-scatter-only-cpp-sim tapa-scatter-only-sim tapa-scatter-only-rtl-sim tapa-scatter-sim tapa-scatter-rtl-sim tapa-corestrip-xsim backend-xsim-vectors tapa-backend-dataset-xsim top-xsim-vectors cuper-spmv-service-only-top-xsim clean
 
 all: sim
 
@@ -205,6 +214,7 @@ tapa-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/tapa_bank_scatter_cpp_obj
 	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
 	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
 	  -Itapa \
 	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
 	  -Mdir $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank \
@@ -228,6 +238,7 @@ tapa-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	  -I/usr/local/share/verilator/include/vltstd \
 	  -DVERILATOR=1 \
 	  csrc/sim_tapa_bank_to_scatter.cpp \
+	  $(VERILATOR_FP32_DPI) \
 	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a \
 	  $(BUILD_DIR)/tapa_bank_scatter_cpp_obj/bank/verilated.o \
@@ -254,6 +265,7 @@ tapa-splitter-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
 	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
 	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
 	  -Itapa \
 	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
 	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank \
@@ -278,6 +290,7 @@ tapa-splitter-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	  -I/usr/local/share/verilator/include/vltstd \
 	  -DVERILATOR=1 \
 	  csrc/sim_tapa_splitter_bank_scatter.cpp \
+	  $(VERILATOR_FP32_DPI) \
 	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter_bank_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_PipelineScatterModel__ALL.a \
@@ -308,6 +321,7 @@ tapa-splitter-bank-generated-scatter-cpp-sim: | $(BUILD_DIR)
 	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
 	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
 	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
 	  -Itapa \
 	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
 	  -Mdir $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank \
@@ -333,6 +347,7 @@ tapa-splitter-bank-generated-scatter-cpp-sim: | $(BUILD_DIR)
 	  -I/usr/local/share/verilator/include/vltstd \
 	  -DVERILATOR=1 -DUSE_TAPA_GENERATED_SCATTER=1 \
 	  csrc/sim_tapa_splitter_bank_scatter.cpp \
+	  $(VERILATOR_FP32_DPI) \
 	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter_bank_generated_scatter_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter__ALL.a \
@@ -389,6 +404,7 @@ tapa-core-splitter-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a
 	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
 	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
 	  -Itapa \
 	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
 	  -Mdir $(BUILD_DIR)/tapa_core_splitter_bank_scatter_cpp_obj/bank \
@@ -415,6 +431,7 @@ tapa-core-splitter-bank-scatter-cpp-sim: | $(BUILD_DIR)
 	  -I/usr/local/share/verilator/include/vltstd \
 	  -DVERILATOR=1 \
 	  csrc/sim_tapa_core_splitter_bank_scatter.cpp \
+	  $(VERILATOR_FP32_DPI) \
 	  $(BUILD_DIR)/tapa_core_splitter_bank_scatter_cpp_obj/core/VCuperSpmvOnly_CoreStrip__ALL.a \
 	  $(BUILD_DIR)/tapa_core_splitter_bank_scatter_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_core_splitter_bank_scatter_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
@@ -446,6 +463,7 @@ tapa-splitter16-bank16-dataset-cpp-sim: | $(BUILD_DIR)
 	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
 	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
 	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
 	  -Itapa \
 	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
 	  -Mdir $(BUILD_DIR)/tapa_splitter16_bank16_dataset_cpp_obj/bank \
@@ -471,6 +489,7 @@ tapa-splitter16-bank16-dataset-cpp-sim: | $(BUILD_DIR)
 	  -I/usr/local/share/verilator/include/vltstd \
 	  -DVERILATOR=1 \
 	  csrc/sim_tapa_splitter16_bank16_dataset.cpp \
+	  $(VERILATOR_FP32_DPI) \
 	  $(BUILD_DIR)/tapa_splitter16_bank16_dataset_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter16_bank16_dataset_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
 	  $(BUILD_DIR)/tapa_splitter16_bank16_dataset_cpp_obj/scatter/VCuperSpmvOnly_TaggedScatterWriterOoo_CuperSpmvOnly_TaggedScatterWriterOoo_Pipeline_scatter__ALL.a \
@@ -482,6 +501,80 @@ tapa-splitter16-bank16-dataset-cpp-sim: | $(BUILD_DIR)
 	$(BUILD_DIR)/tapa_splitter16_bank16_dataset_cpp_obj/sim_tapa_splitter16_bank16_dataset \
 	  --matrix $(CSR_MATRIX) \
 	  --timeout-cycles $(TIMEOUT)
+
+tapa-ownerbank8-dataset-cpp-sim: | $(BUILD_DIR)
+	test -f "$(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo.v"
+	test -f "$(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v"
+	test -f "$(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v"
+	test -f "$(TAPA_RTL_DIR_8)/$(TAPA_SCATTER8_TOP).v"
+	test -f "$(TAPA_RTL_DIR_8)/$(TAPA_SCATTER8_BASE)_flow_control_loop_pipe_sequential_init.v"
+	mkdir -p $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -I$(TAPA_RTL_DIR_8) \
+	  --top-module CuperSpmvOnly_SourceLaneSplitterOoo \
+	  -Mdir $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter \
+	  $(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo_CuperSpmvOnly_SourceLaneSplitterOoo_Pipeline_split_packets.v \
+	  $(TAPA_RTL_DIR_8)/CuperSpmvOnly_SourceLaneSplitterOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter \
+	  -f VCuperSpmvOnly_SourceLaneSplitterOoo.mk \
+	  VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a verilated.o verilated_threads.o verilated_timing.o
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  $(VERILATOR_FP32_DEFINE) \
+	  -Itapa \
+	  --top-module CuperSpmvOnly_RtlOwnerBankAccumulatorOoo \
+	  -GHBM_CHANNEL_NUM=8 \
+	  -Mdir $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/bank \
+	  tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v
+	$(MAKE) -C $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/bank \
+	  -f VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo.mk \
+	  VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a
+	$(VERILATOR) -cc --timing -Wno-fatal -Wno-WIDTH \
+	  -Wno-DECLFILENAME -Wno-SHORTREAL \
+	  -I$(TAPA_RTL_DIR_8) \
+	  --top-module $(TAPA_SCATTER8_TOP) \
+	  --prefix $(TAPA_SCATTER8_PREFIX) \
+	  -Mdir $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/scatter \
+	  $(TAPA_RTL_DIR_8)/$(TAPA_SCATTER8_BASE)_flow_control_loop_pipe_sequential_init.v \
+	  $(TAPA_RTL_DIR_8)/$(TAPA_SCATTER8_TOP).v
+	$(MAKE) -C $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/scatter \
+	  -f $(TAPA_SCATTER8_PREFIX).mk \
+	  $(TAPA_SCATTER8_PREFIX)__ALL.a
+	$(CXX) -std=c++17 -O2 -Wall -Wextra \
+	  -I$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter \
+	  -I$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/bank \
+	  -I$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/scatter \
+	  -I/usr/local/share/verilator/include \
+	  -I/usr/local/share/verilator/include/vltstd \
+	  -DVERILATOR=1 -DCUPER_HBM_CHANNELS=8 -DCUPER_SCATTER_HAS_PROGRESS=1 \
+	  csrc/sim_tapa_splitter16_bank16_dataset.cpp \
+	  $(VERILATOR_FP32_DPI) \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter/VCuperSpmvOnly_SourceLaneSplitterOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/bank/VCuperSpmvOnly_RtlOwnerBankAccumulatorOoo__ALL.a \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/scatter/$(TAPA_SCATTER8_PREFIX)__ALL.a \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter/verilated.o \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter/verilated_threads.o \
+	  $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/splitter/verilated_timing.o \
+	  -pthread -lpthread -latomic \
+	  -o $(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/sim_tapa_ownerbank8_dataset
+	$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/sim_tapa_ownerbank8_dataset \
+	  --matrix ../data/suitesparse/Schmid/csr/thermal2_n16 \
+	  --timeout-cycles $(DATASET_TIMEOUT)
+	$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/sim_tapa_ownerbank8_dataset \
+	  --matrix ../data/suitesparse/Schmid/csr/thermal2_n16 \
+	  --timeout-cycles $(DATASET_TIMEOUT) \
+	  --fifo-depth 4 --write-response-delay 7 \
+	  --output-stall-period 19 --output-stall-cycles 5
+	$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/sim_tapa_ownerbank8_dataset \
+	  --matrix ../data/suitesparse/Schmid/csr/thermal2_n1024 \
+	  --timeout-cycles $(DATASET_TIMEOUT)
+	$(BUILD_DIR)/tapa_ownerbank8_dataset_cpp_obj/sim_tapa_ownerbank8_dataset \
+	  --matrix ../data/suitesparse/Schmid/csr/thermal2_n1024 \
+	  --timeout-cycles $(DATASET_TIMEOUT) \
+	  --fifo-depth 16 --write-response-delay 11 \
+	  --output-stall-period 31 --output-stall-cycles 3
 
 tapa-scatter-only-cpp-sim: | $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/tapa_scatter_cpp_obj

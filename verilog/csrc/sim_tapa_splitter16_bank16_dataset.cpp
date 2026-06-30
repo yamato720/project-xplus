@@ -20,7 +20,13 @@
 
 namespace {
 
-constexpr int kHbmChannels = 16;
+#ifndef CUPER_HBM_CHANNELS
+#define CUPER_HBM_CHANNELS 16
+#endif
+
+constexpr int kHbmChannels = CUPER_HBM_CHANNELS;
+static_assert(kHbmChannels == 8 || kHbmChannels == 16,
+              "dataset harness supports 8-HBM and 16-HBM owner-bank layouts");
 constexpr int kPeNum = 8;
 constexpr int kOwnerLaneStreams = kHbmChannels * kPeNum;
 constexpr int kSliceSize = kHbmChannels * 4;
@@ -437,6 +443,7 @@ void drive_scatter_stream(ScatterTop& scatter, int channel,
       drive_word(scatter.Vector_Y_Tagged_Stream_7_dout, word);
       scatter.Vector_Y_Tagged_Stream_7_empty_n = valid;
       break;
+#if CUPER_HBM_CHANNELS == 16
     case 8:
       drive_word(scatter.Vector_Y_Tagged_Stream_8_dout, word);
       scatter.Vector_Y_Tagged_Stream_8_empty_n = valid;
@@ -469,6 +476,10 @@ void drive_scatter_stream(ScatterTop& scatter, int channel,
       drive_word(scatter.Vector_Y_Tagged_Stream_15_dout, word);
       scatter.Vector_Y_Tagged_Stream_15_empty_n = valid;
       break;
+#else
+    default:
+      throw std::runtime_error("scatter channel out of range");
+#endif
   }
 }
 
@@ -482,6 +493,7 @@ bool scatter_stream_read(const ScatterTop& scatter, int channel) {
     case 5: return scatter.Vector_Y_Tagged_Stream_5_read;
     case 6: return scatter.Vector_Y_Tagged_Stream_6_read;
     case 7: return scatter.Vector_Y_Tagged_Stream_7_read;
+#if CUPER_HBM_CHANNELS == 16
     case 8: return scatter.Vector_Y_Tagged_Stream_8_read;
     case 9: return scatter.Vector_Y_Tagged_Stream_9_read;
     case 10: return scatter.Vector_Y_Tagged_Stream_10_read;
@@ -490,6 +502,9 @@ bool scatter_stream_read(const ScatterTop& scatter, int channel) {
     case 13: return scatter.Vector_Y_Tagged_Stream_13_read;
     case 14: return scatter.Vector_Y_Tagged_Stream_14_read;
     default: return scatter.Vector_Y_Tagged_Stream_15_read;
+#else
+    default: throw std::runtime_error("scatter channel out of range");
+#endif
   }
 }
 
@@ -498,17 +513,38 @@ bool scatter_stream_read(const ScatterTop& scatter, int channel) {
 int main(int argc, char** argv) {
   std::string matrix_dir = "../data/suitesparse/Schmid/csr/thermal2_n1024";
   int timeout_cycles = kTimeoutDefault;
+  int fifo_depth = 256;
+  int write_response_delay = 0;
+  int output_stall_period = 0;
+  int output_stall_cycles = 0;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--matrix" && i + 1 < argc) {
       matrix_dir = argv[++i];
     } else if (arg == "--timeout-cycles" && i + 1 < argc) {
       timeout_cycles = std::stoi(argv[++i]);
+    } else if (arg == "--fifo-depth" && i + 1 < argc) {
+      fifo_depth = std::stoi(argv[++i]);
+    } else if (arg == "--write-response-delay" && i + 1 < argc) {
+      write_response_delay = std::stoi(argv[++i]);
+    } else if (arg == "--output-stall-period" && i + 1 < argc) {
+      output_stall_period = std::stoi(argv[++i]);
+    } else if (arg == "--output-stall-cycles" && i + 1 < argc) {
+      output_stall_cycles = std::stoi(argv[++i]);
     } else {
       std::cerr << "usage: " << argv[0]
-                << " [--matrix CSR_DIR] [--timeout-cycles N]\n";
+                << " [--matrix CSR_DIR] [--timeout-cycles N]"
+                << " [--fifo-depth N] [--write-response-delay N]"
+                << " [--output-stall-period N] [--output-stall-cycles N]\n";
       return 2;
     }
+  }
+  if (fifo_depth <= 0 || timeout_cycles <= 0 || write_response_delay < 0 ||
+      output_stall_period < 0 || output_stall_cycles < 0 ||
+      (output_stall_period > 0 &&
+       output_stall_cycles >= output_stall_period)) {
+    std::cerr << "FAIL: bad simulation options\n";
+    return 2;
   }
 
   Csr csr;
@@ -533,7 +569,8 @@ int main(int argc, char** argv) {
     total_matrix_words += matrix_words[source];
   }
 
-  std::cout << "INFO: splitter16-bank16 dataset matrix=" << matrix_dir
+  std::cout << "INFO: splitter" << kHbmChannels << "-bank"
+            << kHbmChannels << " dataset matrix=" << matrix_dir
             << " rows=" << csr.rows
             << " nnz=" << csr.col_idx.size()
             << " batch_num=" << ((csr.cols + kSliceSize - 1) / kSliceSize +
@@ -568,11 +605,27 @@ int main(int argc, char** argv) {
   std::array<bool, kHbmChannels> bank_done_seen{};
   bool scatter_done_seen = false;
   int y_write_count = 0;
-  int pending_responses = 0;
+  std::deque<int> pending_responses;
+  std::vector<std::array<std::array<float, 2>, kPeNum>> bank_expected(
+      static_cast<size_t>(num_out_packets));
+  std::array<int, kHbmChannels> bank_mismatch_reports{};
+  int bank_value_errors = 0;
 
   for (int cycle = 0; cycle < timeout_cycles; ++cycle) {
     const bool rst = cycle < 5;
-    const bool response_available = !rst && pending_responses > 0;
+    if (!rst) {
+      for (int& delay : pending_responses) {
+        if (delay > 0) {
+          --delay;
+        }
+      }
+    }
+    const bool response_available =
+        !rst && !pending_responses.empty() && pending_responses.front() == 0;
+    const bool output_stalled =
+        !rst && output_stall_period > 0 &&
+        (cycle % output_stall_period) < output_stall_cycles;
+    const bool output_full_n = !output_stalled;
 
     for (int source = 0; source < kHbmChannels; ++source) {
       auto& splitter = *splitters[source];
@@ -602,7 +655,9 @@ int main(int argc, char** argv) {
         set_splitter_lane_full(
             splitter,
             lane,
-            owner_lane_fifo[static_cast<size_t>(stream_idx)].size() < 256);
+            static_cast<int>(
+                owner_lane_fifo[static_cast<size_t>(stream_idx)].size()) <
+                fifo_depth);
       }
     }
 
@@ -614,7 +669,7 @@ int main(int argc, char** argv) {
       bank.Row_num = static_cast<uint32_t>(csr.rows);
       bank.Owner_id = static_cast<uint32_t>(owner);
       bank.Vector_Y_Tagged_Stream_s_full_n =
-          bank_to_scatter_fifo[owner].size() < 256;
+          static_cast<int>(bank_to_scatter_fifo[owner].size()) < fifo_depth;
       clear_bank_peek(bank);
       for (int lane = 0; lane < kPeNum; ++lane) {
         drive_bank_lane(bank, lane, owner_lane_fifo[owner * kPeNum + lane]);
@@ -625,9 +680,14 @@ int main(int argc, char** argv) {
     scatter.ap_start = (!rst && !scatter_done_seen) ? 1 : 0;
     scatter.scalar_writes_total = static_cast<uint32_t>(scalar_writes_total);
     scatter.tagged_pairs_total = static_cast<uint32_t>(tagged_pairs_total);
-    scatter.Y_out_write_addr_s_full_n = 1;
-    scatter.Y_out_write_data_s_full_n = 1;
+    scatter.Y_out_write_addr_s_full_n = output_full_n;
+    scatter.Y_out_write_data_s_full_n = output_full_n;
+#ifdef CUPER_SCATTER_HAS_PROGRESS
+    scatter.Progress_out_s_full_n = 1;
+    scatter.p_read = 0;
+#else
     scatter.Y_out_write_addr_offset_load = 0;
+#endif
     scatter.Y_out_write_resp_s_dout = 0;
     scatter.Y_out_write_resp_s_empty_n = response_available ? 1 : 0;
     for (int owner = 0; owner < kHbmChannels; ++owner) {
@@ -732,17 +792,66 @@ int main(int argc, char** argv) {
     for (int owner = 0; owner < kHbmChannels; ++owner) {
       for (int lane = 0; lane < kPeNum; ++lane) {
         if (bank_read_pre[owner][lane]) {
+          const Word130 consumed = owner_lane_fifo[owner * kPeNum + lane].front();
           owner_lane_fifo[owner * kPeNum + lane].pop_front();
+          const uint32_t done = consumed[0] & 1U;
+          if (done == 0) {
+            const uint32_t packet =
+                (consumed[0] >> 1) | ((consumed[1] & 1U) << 31);
+            const uint32_t pair =
+                (consumed[1] >> 1) | ((consumed[2] & 1U) << 31);
+            const uint32_t scalar =
+                (consumed[2] >> 1) | ((consumed[3] & 1U) << 31);
+            const uint32_t value =
+                (consumed[3] >> 1) | ((consumed[4] & 1U) << 31);
+            if (packet < bank_expected.size() && pair < kPeNum &&
+                scalar < 2) {
+              bank_expected[packet][pair][scalar] += fval(value);
+            } else {
+              std::cerr << "FAIL: bank input out of range owner=" << owner
+                        << " lane=" << lane
+                        << " packet=" << packet
+                        << " pair=" << pair
+                        << " scalar=" << scalar << "\n";
+              ++bank_value_errors;
+            }
+          }
           ++bank_reads[owner];
         }
       }
-    if (bank_write_pre[owner]) {
+      if (bank_write_pre[owner]) {
+        const Word129& tagged = bank_word_pre[owner];
+        const uint32_t packet = tagged[0];
+        const uint32_t pair = tagged[1];
+        const uint32_t ping = tagged[2];
+        const uint32_t pong = tagged[3];
+        if (packet < bank_expected.size() && pair < kPeNum) {
+          const float got_ping = fval(ping);
+          const float got_pong = fval(pong);
+          const float expect_ping = bank_expected[packet][pair][0];
+          const float expect_pong = bank_expected[packet][pair][1];
+          const float diff_ping = std::fabs(got_ping - expect_ping);
+          const float diff_pong = std::fabs(got_pong - expect_pong);
+          if (diff_ping > kTolerance || diff_pong > kTolerance) {
+            if (bank_mismatch_reports[owner] < 8) {
+              std::cerr << "FAIL: bank_mismatch owner=" << owner
+                        << " packet=" << packet
+                        << " pair=" << pair
+                        << " ping=" << got_ping
+                        << " expect_ping=" << expect_ping
+                        << " pong=" << got_pong
+                        << " expect_pong=" << expect_pong << "\n";
+              ++bank_mismatch_reports[owner];
+            }
+            ++bank_value_errors;
+          }
+        } else {
+          std::cerr << "FAIL: bank output out of range owner=" << owner
+                    << " packet=" << packet
+                    << " pair=" << pair << "\n";
+          ++bank_value_errors;
+        }
         if (bank_pairs[owner] < 2 && csr.rows <= 16) {
-          const Word129& tagged = bank_word_pre[owner];
-          const uint32_t packet = tagged[0];
-          const uint32_t pair = tagged[1];
-          const uint32_t ping = tagged[2];
-          const uint32_t pong = tagged[3];
           std::cerr << "TRACE bank owner=" << owner
                     << " packet=" << packet
                     << " pair=" << pair
@@ -785,14 +894,14 @@ int main(int argc, char** argv) {
       y[static_cast<size_t>(row)] = y_data_pre;
       y_seen[static_cast<size_t>(row)] = true;
       ++y_write_count;
-      ++pending_responses;
+      pending_responses.push_back(write_response_delay);
     }
     if (y_resp_read_pre) {
       if (!response_available) {
         std::cerr << "FAIL: response read on empty stream\n";
         return 1;
       }
-      --pending_responses;
+      pending_responses.pop_front();
     }
 
     if (!rst && scatter.ap_done) {
@@ -852,6 +961,10 @@ int main(int argc, char** argv) {
                   << " expect=" << scalar_writes_total << "\n";
         ++errors;
       }
+      if (bank_value_errors != 0) {
+        std::cerr << "FAIL: bank_value_errors=" << bank_value_errors << "\n";
+        errors += bank_value_errors;
+      }
       for (int row = 0; row < csr.rows; ++row) {
         const bool seen = y_seen[static_cast<size_t>(row)];
         const float got = fval(y[static_cast<size_t>(row)]);
@@ -882,7 +995,8 @@ int main(int argc, char** argv) {
         return 1;
       }
 
-      std::cout << "PASS: splitter16-bank16 dataset cycles=" << cycle
+      std::cout << "PASS: splitter" << kHbmChannels << "-bank"
+                << kHbmChannels << " dataset cycles=" << cycle
                 << " param_reads=" << total_param_reads
                 << " matrix_reads=" << total_matrix_reads
                 << " splitter_writes=" << total_splitter_writes
@@ -916,7 +1030,7 @@ int main(int argc, char** argv) {
             << " scatter_reads=" << total_scatter_reads
             << " y_writes=" << y_write_count << "/"
             << scalar_writes_total
-            << " pending_responses=" << pending_responses << "\n";
+            << " pending_responses=" << pending_responses.size() << "\n";
   for (int i = 0; i < kHbmChannels; ++i) {
     std::cerr << "  source/owner " << i
               << " param_left=" << param_fifo[i].size()

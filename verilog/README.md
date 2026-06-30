@@ -153,7 +153,8 @@ C/C++ 数据生成器和 Verilator 驱动。
 | `gen_tapa_top_xsim_vectors.cpp` | 生成 CuperSpmvServiceOnly top xsim 数据 |
 | `gen_tapa_top_xsim_tb.py` | 从生成 RTL 自动生成 top xsim testbench |
 | `sim_tapa_scoreboard_dataset.cpp` | 用真实矩阵数据驱动 `RtlIssueScoreboard8` |
-| `sim_tapa_splitter16_bank16_dataset.cpp` | 16 splitter + 16 bank + scatter 数据集仿真 |
+| `sim_tapa_splitter16_bank16_dataset.cpp` | 8/16 splitter + owner-bank + scatter 数据集仿真 |
+| `verilator_fp32_dpi.cpp` | Verilator 下的 FP32 add/mul DPI 模型，避免 shortreal 模型差异 |
 | `sim_tapa_splitter_bank_scatter.cpp` | splitter/bank/scatter 小联调 |
 | `sim_tapa_bank_to_scatter.cpp` | bank/scatter 小联调 |
 | `sim_tapa_scatter_pipeline.cpp` | scatter pipeline 仿真 |
@@ -212,4 +213,7 @@ make -C verilog tapa-bank-scatter-cpp-sim
 # generated splitter + 全 RTL owner-bank + generated/model scatter
 make -C verilog tapa-splitter-bank-scatter-cpp-sim
 make -C verilog tapa-splitter-bank-generated-scatter-cpp-sim
+
+# 8-HBM generated splitter + 全 RTL owner-bank + generated scatter 数据集
+make -C verilog tapa-ownerbank8-dataset-cpp-sim
 ```

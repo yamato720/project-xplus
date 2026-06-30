@@ -1692,3 +1692,84 @@ sha256=94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
 这轮仍不更新正式 `source.diff`。下一步若继续该分支，应单独构建
 `JACOBI_SPMV_SCOREBOARD_DEBUG=1` 版本，用 core/issue/acc lane counters 定位卡在
 core、RTL issue、scheduled accumulator 还是 scatter writer。
+
+## 2026-07-01：8-HBM owner-bank RTL artifact
+
+测试对象：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
+kernel: CuperSpmvServiceOnly
+UUID: e48ae29f-9a2f-372b-b3d3-1f811339dd27
+SHA256: 6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+HBM mapping: Matrix_data_0..7 -> HBM[0..7], SpElement_list_ptr -> HBM[8],
+             X -> HBM[9], Y_out -> HBM[10], Status -> HBM[30], Metrics -> HBM[31]
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+```
+
+构建命令口径：
+
+```bash
+export JOBS=32
+export JACOBI_TOP=CuperSpmvServiceOnly
+export JACOBI_SPMV_ONLY=1
+export JACOBI_HBM_CHANNELS=8
+export JACOBI_SPMV_STRIP_PADDING=1
+export JACOBI_SPMV_LANE_STATIC_REAL=1
+export JACOBI_SPMV_OOO_ACCUMULATE=1
+export JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+export CLOCK_PERIOD=4.0
+export JACOBI_KERNEL_FREQUENCY=150
+export BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-hw-150m-build
+./scripts/build_host.sh
+./scripts/build_xo_u55c.sh
+./scripts/link_xclbin_u55c.sh
+```
+
+构建结果：
+
+```text
+build_dir: cuper-tapa-spmv-ownerbank8-hw-150m-build/
+log: cuper-tapa-spmv-ownerbank8-hw-150m-build/logs/build_hw_tmux.log
+xclbin: cuper-tapa-spmv-ownerbank8-hw-150m-build/CuperSpmvServiceOnly.xclbin
+Run vpl: FINISHED. Run Status: impl Complete!
+Created .../cuper-tapa-spmv-ownerbank8-hw-150m-build/CuperSpmvServiceOnly.xclbin
+Total elapsed time: 2h 40m 37s
+tmux run finished with exit code: 0
+```
+
+本地验证命令：
+
+```bash
+make -C verilog tapa-bank-lint
+make -C verilog tapa-bank-sim
+make -C verilog tapa-splitter-bank-generated-scatter-cpp-sim
+make -C verilog tapa-ownerbank8-dataset-cpp-sim
+git diff --check
+```
+
+8-HBM dataset C++/Verilator 覆盖：
+
+```text
+thermal2_n16
+thermal2_n16 + fifo-depth=4 + write-response-delay=7 + output stall
+thermal2_n1024
+thermal2_n1024 + fifo-depth=16 + write-response-delay=11 + output stall
+```
+
+本轮新增的关键检查：
+
+- 8 个 generated `SourceLaneSplitterOoo` 全部参与；
+- 8 个 `RtlOwnerBankAccumulatorOoo` owner bank 全部参与；
+- generated `TaggedScatterWriterOoo<8>` 参与，而不是只测模型 scatter；
+- bank 输出先和按输入 lane token 累加的 expected pair 做逐 pair 校验；
+- scatter 写回端模拟 write response delay 和 output full，覆盖 writer backpressure；
+- `thermal2_n16` 和 `thermal2_n1024` 都有正常压力和 backpressure 压力两组。
+
+当前状态：
+
+- xclbin 和 `.info` 已同步到 `395bitstream/`；
+- 本机 lint/sim 和 routed timing 均通过；
+- 服务器侧上板尚未执行，下一步只先跑 `thermal2_n16` 与 `thermal2_n1024`；
+- 未确认板上性能提升前，不更新正式 `source.diff`，也不刷新 HTML 性能曲线。

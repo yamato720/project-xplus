@@ -203,3 +203,42 @@ JACOBI_SPMV_ONLY=1
 JACOBI_HBM_CHANNELS=16
 JACOBI_SPMV_LANE_STATIC_REAL=1
 ```
+
+## 9. 2026-07-01 ownerbank8 阅读入口
+
+ownerbank8 仍从 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly(...)` 进入，
+但和 20260627 的 scoreboard-only 分支不同。读代码时按下面顺序：
+
+1. `DLC/Cuper-jacobi-iteration/kernels/detail/cuper_spmv_service_only_top_graphs.hpp`
+   - 搜 `CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC`；
+   - `SourceLaneSplitterOoo[source]` 把每个 core 的 8 条 pair-lane 分发到 owner；
+   - `RtlOwnerBankAccumulatorOoo[owner]` 每个 owner bank 接 8 条 pair-lane；
+   - `TaggedScatterWriterOoo<8>` 轮询 8 条 owner-bank output stream。
+2. `verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo.v`
+   - 这是 hotpatch 到 XO 的 owner-bank wrapper；
+   - wrapper 内部实例化 8 个 lane accumulator，并统计输出 token 完成后才 `ap_done`。
+3. `verilog/tapa/CuperSpmvOnly_RtlOwnerLaneAccumulatorOoo.v`
+   - 单 lane RAW scoreboard、URAM partial sum 和 FP32 add pipeline 在这里；
+   - Verilator 下通过 `CUPER_VERILATOR_DPI_FP` 调用 C++ FP32 add 模型。
+4. `verilog/csrc/sim_tapa_splitter16_bank16_dataset.cpp`
+   - 同一个 harness 支持 8-HBM 和 16-HBM；
+   - 8-HBM target 用 `make -C verilog tapa-ownerbank8-dataset-cpp-sim`。
+
+构建和运行必须同时设置：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=8
+JACOBI_SPMV_STRIP_PADDING=1
+JACOBI_SPMV_LANE_STATIC_REAL=1
+JACOBI_SPMV_OOO_ACCUMULATE=1
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+```
+
+注意两点：
+
+- 不要同时打开 `JACOBI_SPMV_OOO_SCOREBOARD_RTL`；那是旧 scoreboard-only 分支；
+- 当前 xclbin 的 `Y_out` kernel signature 是 `float* Y_out` / 32-bit scalar writer，
+  而 strip8 是 `float_v16* Y_out` / 512-bit writer。host 参数名和 HBM bank mapping
+  没变，但 writer 微架构不同，性能要以上板实测为准。

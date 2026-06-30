@@ -819,6 +819,73 @@ debug 与前两版一致：`thermal2_n1024` 停在 `after ReadFromDevice before 
 `JACOBI_SPMV_SCOREBOARD_DEBUG=1` 版本，用 lane counters 区分 core、RTL issue、
 scheduled accumulator 和 scatter writer 的卡点。
 
+## 2026-07-01：8-HBM owner-bank RTL demo 同步
+
+本轮停止继续投入旧 scoreboard-only 8-HBM 分支，改用已经在 16-HBM 路线验证过可完成
+link 的 RTL owner-bank accumulator 结构，重新生成 8-HBM `CuperSpmvServiceOnly`
+demo artifact。
+
+核心改动：
+
+- 保持 8-HBM top ABI 和 HBM bank mapping：`Matrix_data_0..7 -> HBM[0..7]`，
+  `SpElement_list_ptr -> HBM[8]`，`X -> HBM[9]`，`Y_out -> HBM[10]`，
+  `Status -> HBM[30]`，`Metrics -> HBM[31]`；
+- 启用 `JACOBI_SPMV_LANE_STATIC_REAL=1`、`JACOBI_SPMV_OOO_ACCUMULATE=1` 和
+  `JACOBI_SPMV_OOO_ACCUMULATE_RTL=1`；
+- 不启用 `JACOBI_SPMV_OOO_SCOREBOARD_RTL`，也不使用单体
+  `JACOBI_SPMV_CHISEL_DATAPATH`；
+- `TaggedScatterWriterOoo` 改成一次持有一个 `float_v2` pair，并在两个 scalar
+  write 都被 AXI stream 接收后再读下一条 tagged pair，修复 backpressure 下第二个
+  scalar 可能被覆盖的风险；
+- Verilator 仿真统一用 `verilator_fp32_dpi.cpp` 做 FP32 add 模型，避免
+  `$shortrealtobits/$bitstoshortreal` 在本机 Verilator 版本上的不稳定性；
+- `sim_tapa_splitter16_bank16_dataset.cpp` 扩展为支持 8-HBM/16-HBM 两种 owner-bank
+  layout，并加入 output stall、write response delay、小 FIFO 和 bank 输出值校验；
+- 新增 `make -C verilog tapa-ownerbank8-dataset-cpp-sim`，直接连接 8 个 generated
+  splitter、8 个 custom owner-bank 和 8 路 generated scatter。
+
+同步 artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin.info
+```
+
+构建结果：
+
+```text
+UUID: e48ae29f-9a2f-372b-b3d3-1f811339dd27
+SHA256: 6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build dir: cuper-tapa-spmv-ownerbank8-hw-150m-build/
+Build log: cuper-tapa-spmv-ownerbank8-hw-150m-build/logs/build_hw_tmux.log
+v++ link elapsed: 2h 40m 37s
+```
+
+资源摘要：
+
+```text
+CLB LUTs: 238,335 (18.28%)
+CLB Registers: 337,095 (12.93%)
+Block RAM Tile: 760 (37.70%)
+URAM: 256 (26.67%)
+DSPs: 351 (3.89%)
+Total SLLs: 11,692
+SLR0: CLB LUTs 153,069 (34.81%), BRAM 527 (78.42%), URAM 256 (80.00%)
+```
+
+和 strip8 的关键差异：
+
+- strip8 是 HLS accumulator + 512-bit `float_v16* Y_out` writer，完整 `thermal2`
+  已板测 `2.71420 ms`；
+- ownerbank8 是 RTL owner-bank accumulator + scalar `float* Y_out` writer，核心目标是
+  解决 scoreboard-only n1024 timeout 和降低后端综合/布局风险；
+- ownerbank8 还没有板上性能数据，不能替代 strip8 的实测性能结论，也不进入 HTML
+  性能曲线；
+- 正式 `source.diff` 仍不更新，等 `thermal2_n16` / `thermal2_n1024` 上板确认功能边界后
+  再决定是否继续 sweep。
+
 ## source.diff 规则
 
 本目标遵循先测试后写正式 diff：

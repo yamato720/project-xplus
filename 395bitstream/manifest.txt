@@ -1,5 +1,6 @@
-base_log=logs/spmv_8hbm_donedrain_hw_20260628_144700
-date=2026-06-28 14:47:00 CST
-bitfile=/home/pyx/ProjectFS/Project-X/Project-XPlus/395bitstream/cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
-uuid=e90660d3-9efa-9066-7517-4547fc21097f
-sha256=94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad
+base_log=cuper-tapa-spmv-ownerbank8-hw-150m-build/logs/build_hw_tmux.log
+date=2026-07-01 00:00:00 CST
+bitfile=395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
+uuid=e48ae29f-9a2f-372b-b3d3-1f811339dd27
+sha256=6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264
+status=build synced, local sim passed, board test pending

@@ -734,6 +734,66 @@ FPGA 时间 `0.081832 ms`，`Error Num=0`；`thermal2_n1024` 300s timeout，`rc=
 三次 pre-finish 采样中 `Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，
 `Y[0..15]` 全 0。结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死。
 
+## 2026-07-01 补充：SpMV-only 8-HBM owner-bank RTL demo
+
+本轮同步一份新的 `CuperSpmvServiceOnly` 8-HBM demo artifact，用于替代旧
+scoreboard-only 8-HBM 分支继续验证 lane-static real + RTL owner-bank 后端。它仍属于
+`cuper-tapa-spmv` SpMV-only 实验线，不替代已板测的 `20260627-strip8-demo` 结论，也不
+更新正式 `source.diff`。
+
+生成文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin.info
+```
+
+版本信息：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: e48ae29f-9a2f-372b-b3d3-1f811339dd27
+SHA256: 6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+```
+
+构建目录和日志：
+
+```text
+cuper-tapa-spmv-ownerbank8-hw-150m-build/
+cuper-tapa-spmv-ownerbank8-hw-150m-build/logs/build_hw_tmux.log
+```
+
+关键宏组合：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=8
+JACOBI_SPMV_STRIP_PADDING=1
+JACOBI_SPMV_LANE_STATIC_REAL=1
+JACOBI_SPMV_OOO_ACCUMULATE=1
+JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+CLOCK_PERIOD=4.0
+JACOBI_KERNEL_FREQUENCY=150
+```
+
+本机验证已通过：
+
+```text
+make -C verilog tapa-bank-lint
+make -C verilog tapa-bank-sim
+make -C verilog tapa-splitter-bank-generated-scatter-cpp-sim
+make -C verilog tapa-ownerbank8-dataset-cpp-sim
+git diff --check
+```
+
+`tapa-ownerbank8-dataset-cpp-sim` 覆盖 `thermal2_n16`、`thermal2_n1024`、小 FIFO、
+write response delay 和 output backpressure。当前还没有服务器侧上板结果；下一步只先跑
+`thermal2_n16` 与 `thermal2_n1024`，确认旧 scoreboard-only 分支的 n1024 timeout
+是否解除。
+
 ## 当前基线
 
 根据 `docs/codex/testing.md` 和既有 HTML 记录：
