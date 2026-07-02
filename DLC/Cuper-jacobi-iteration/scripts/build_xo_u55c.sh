@@ -114,6 +114,25 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   exit 1
 fi
 
+if [[ "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-0}" != "0" && "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-}" != "" ]]; then
+  if [[ "$TOP" != "CuperSpmvServiceOnly" ]]; then
+    echo "JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 is only for JACOBI_TOP=CuperSpmvServiceOnly." >&2
+    exit 1
+  fi
+  if [[ "$HBM_CHANNELS" != "8" ]]; then
+    echo "JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 requires JACOBI_HBM_CHANNELS=8." >&2
+    exit 1
+  fi
+  if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" == "0" || "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" == "" ]]; then
+    echo "JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 requires JACOBI_SPMV_OOO_ACCUMULATE_RTL=1." >&2
+    exit 1
+  fi
+  if [[ "$JOBS" != "1" ]]; then
+    echo "Cuper SpMV ownerbank8 lighttrace forces JOBS=1 to avoid Vitis HLS dispatch aborts."
+    JOBS=1
+  fi
+fi
+
 if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
   JACOBI_SPMV_LANE_STATIC_REAL=1
   JACOBI_SPMV_OOO_ACCUMULATE=1
@@ -173,6 +192,11 @@ if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMU
   fi
   cflags+=("-DJACOBI_SPMV_OOO_ACCUMULATE_RTL=1")
   echo "Cuper SpMV OOO accumulator RTL boundary: $CUSTOM_RTL_DIR"
+fi
+
+if [[ "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-0}" != "0" && "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-}" != "" ]]; then
+  cflags+=("-DJACOBI_SPMV_OWNERBANK_LIGHTTRACE=1")
+  echo "Cuper SpMV ownerbank8 lighttrace: enabled"
 fi
 
 if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then

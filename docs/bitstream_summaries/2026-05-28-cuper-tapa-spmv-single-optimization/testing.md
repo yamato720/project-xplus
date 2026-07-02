@@ -1771,5 +1771,134 @@ thermal2_n1024 + fifo-depth=16 + write-response-delay=11 + output stall
 
 - xclbin 和 `.info` 已同步到 `395bitstream/`；
 - 本机 lint/sim 和 routed timing 均通过；
-- 服务器侧上板尚未执行，下一步只先跑 `thermal2_n16` 与 `thermal2_n1024`；
-- 未确认板上性能提升前，不更新正式 `source.diff`，也不刷新 HTML 性能曲线。
+- 服务器侧上板已确认 `thermal2_n16` PASS；
+- `thermal2_n1024` 300s timeout，timeout 前采样里 `Status/Metrics` 仍是初始化哨兵，
+  `progress_magic valid=0`，`Y[0..15]` 全 0；
+- ownerbank8 保留为失败边界，未确认板上性能提升前不更新正式 `source.diff`，
+  也不刷新 HTML 性能曲线。
+
+## 2026-07-01：ownerbank8-lighttrace 本地验证
+
+调试构建宏：
+
+```bash
+export JACOBI_TOP=CuperSpmvServiceOnly
+export JACOBI_SPMV_ONLY=1
+export JACOBI_HBM_CHANNELS=8
+export JACOBI_SPMV_LANE_STATIC_REAL=1
+export JACOBI_SPMV_OOO_ACCUMULATE=1
+export JACOBI_SPMV_OOO_ACCUMULATE_RTL=1
+export JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1
+export CLOCK_PERIOD=4.0
+export JACOBI_KERNEL_FREQUENCY=150
+export BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-lighttrace-build
+```
+
+已完成的本地验证：
+
+```bash
+make -C verilog tapa-bank-lint
+make -C verilog tapa-bank-sim
+make -C verilog tapa-splitter-bank-generated-scatter-cpp-sim
+make -C verilog tapa-ownerbank8-dataset-cpp-sim
+JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=8 \
+  JACOBI_SPMV_LANE_STATIC_REAL=1 \
+  JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+  JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 \
+  CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-lighttrace-build \
+  make cuper-jacobi-build-host
+JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=8 \
+  JACOBI_SPMV_LANE_STATIC_REAL=1 \
+  JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+  JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 \
+  BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-lighttrace-build \
+  make -C DLC/Cuper-jacobi-iteration run-sw \
+  MATRIX=$PWD/data/suitesparse/Schmid/csr/thermal2_n16
+JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=8 \
+  JACOBI_SPMV_LANE_STATIC_REAL=1 \
+  JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+  JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 \
+  BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-lighttrace-build \
+  make -C DLC/Cuper-jacobi-iteration run-sw \
+  MATRIX=$PWD/data/suitesparse/Schmid/csr/thermal2_n1024
+JACOBI_TOP=CuperSpmvServiceOnly \
+  JACOBI_SPMV_ONLY=1 \
+  JACOBI_HBM_CHANNELS=8 \
+  JACOBI_SPMV_LANE_STATIC_REAL=1 \
+  JACOBI_SPMV_OOO_ACCUMULATE_RTL=1 \
+  JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1 \
+  JOBS=1 \
+  BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-lighttrace-build \
+  make -C DLC/Cuper-jacobi-iteration build-xo
+```
+
+结果：
+
+- `tapa-bank-lint` PASS，保留既有 `SHORTREAL` / `DECLFILENAME` warning；
+- `tapa-bank-sim` PASS，owner-bank RTL accumulator 输出正确；
+- `tapa-splitter-bank-generated-scatter-cpp-sim` PASS；
+- `tapa-ownerbank8-dataset-cpp-sim` PASS，覆盖 `thermal2_n16` / `thermal2_n1024`、
+  output backpressure 和 write response delay；
+- lighttrace host build PASS，`CMakeLists.txt` 已确认 host 编译路径带上
+  `JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1`；
+- lighttrace TAPA software simulation PASS：`thermal2_n16` 和 `thermal2_n1024`
+  均 `Correctness Verification: Passed`、`Error Num=0`；
+- lighttrace XO smoke PASS，生成
+  `cuper-tapa-spmv-ownerbank8-lighttrace-build/CuperSpmvServiceOnly.xo`，TAPA analyze、
+  HLS synth、custom RTL wrapper/fadd IP hotpatch 和 TAPA pack 均完成。
+
+XO 构建注意事项：
+
+- 首次不限制并行度的 `build-xo` 在 `CuperSpmvOnly_OwnerBankOutputLightTraceTap`
+  HLS worker 内触发 Vitis HLS 2022.2 `Abnormal program termination (6)`，栈位于
+  dispatch service 初始化，没有 C++ 语法诊断；
+- 复跑 `JOBS=1` 后同一份源码完成 HLS 和 pack；
+- `scripts/build_xo_u55c.sh` 已对 `JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1` 自动强制
+  `JOBS=1`，避免后续硬件构建复现该并发工具问题。
+
+硬件构建：
+
+```bash
+tmux new-session -d -s cuper_ownerbank8_lighttrace_hw \
+  /home/pyx/project-x/Project-XPlus/cuper-tapa-spmv-ownerbank8-lighttrace-build/run_lighttrace_hw_tmux.sh
+```
+
+结果：
+
+```text
+Build dir: cuper-tapa-spmv-ownerbank8-lighttrace-build/
+Main log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
+Memory log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_memory.log
+xclbin: cuper-tapa-spmv-ownerbank8-lighttrace-build/CuperSpmvServiceOnly.xclbin
+UUID: b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
+SHA256: 5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+v++ total elapsed: 2h 33m 11s
+tmux run finished with exit code: 0
+```
+
+内存监控：
+
+- `.memory_abort` 不存在；
+- swap 使用量一直为 0；
+- 最大 RSS 约 17 GB，低于脚本阈值 65 GB；
+- 构建结束时系统可用内存约 76 GiB。
+
+同步文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin.info
+```
+
+硬件只跑 `thermal2_n16` 和 `thermal2_n1024`。验收标准不是性能提升，而是在
+pre-Finish 采样里至少看到一个明确阶段 counter，并定位最后推进到 entry/mmap、
+loader/core、owner-bank 或 scatter writer 哪一段。若 progress writer 自身仍不可见，
+下一步再做 mmap-only 或 entry-probe xclbin。

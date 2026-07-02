@@ -133,6 +133,7 @@ def start_hw_tmux(root: Path, session: str, force: bool) -> int:
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_SEGMENTED_ACCUMULATE=1"] if os.environ.get("JACOBI_SPMV_SEGMENTED_ACCUMULATE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_ACCUMULATE_RTL=1"] if os.environ.get("JACOBI_SPMV_OOO_ACCUMULATE_RTL") not in {None, "", "0"} else []),
+                *(["export JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1"] if os.environ.get("JACOBI_SPMV_OWNERBANK_LIGHTTRACE") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_OOO_SCOREBOARD_RTL=1"] if os.environ.get("JACOBI_SPMV_OOO_SCOREBOARD_RTL") not in {None, "", "0"} else []),
                 *(["export JACOBI_SPMV_SCOREBOARD_DEPTH=" + shell_quote(os.environ["JACOBI_SPMV_SCOREBOARD_DEPTH"])] if os.environ.get("JACOBI_SPMV_SCOREBOARD_DEPTH") else []),
                 *(["export JACOBI_SPMV_SCOREBOARD_DEBUG=1"] if os.environ.get("JACOBI_SPMV_SCOREBOARD_DEBUG") not in {None, "", "0"} else []),

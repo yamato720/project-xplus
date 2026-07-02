@@ -347,6 +347,9 @@
         和完整 <code>thermal2</code> 固定轮数上板测试。
         2026-06-28 补充 8-HBM <code>lanereal8-scoreboard-donedrain</code> 失败边界：
         <code>thermal2_n16</code> 通过，但 <code>thermal2_n1024</code> 仍 300s timeout。
+        2026-07-01 <code>ownerbank8</code> 复测同样为 <code>thermal2_n16</code> 通过、
+        <code>thermal2_n1024</code> 300s timeout；下一步改用
+        <code>ownerbank8-lighttrace</code> 定位 entry/mmap、loader/core、owner-bank 或 scatter 边界。
       </div>
       <div class="meta">
         <span class="pill">日期 2026-05-24/06-28 CST</span>
@@ -538,6 +541,15 @@
         <code>progress_magic valid=0</code>，<code>Y[0..15]</code> 全 0。
         结论：done-drain 没有解决 8-HBM scoreboard 分支的 n1024 卡死；该失败
         artifact 不进入性能曲线，也不更新正式 <code>source.diff</code>。
+      </p>
+      <p class="callout">
+        2026-07-01 <code>ownerbank8</code>
+        <code>cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin</code> 已完成最小上板：
+        <code>thermal2_n16</code> PASS，<code>thermal2_n1024</code> 300s timeout。
+        timeout 前 <code>Status/Metrics</code> 仍是初始化哨兵，
+        <code>progress_magic valid=0</code>，<code>Y[0..15]</code> 全 0。
+        该版保留为失败边界，不更新 <code>source.diff</code>；下一版
+        <code>ownerbank8-lighttrace</code> 只增加 progress stage 可见性，不改变 ABI 或 8-HBM bank mapping。
       </p>
     </section>
 
@@ -732,6 +744,26 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
               <td class="num">150 MHz</td>
               <td class="num">450 MHz</td>
               <td><code>94d60c0d10dfd6e5384ec0e305e6836a4531ea82d74a24375d054c5546e1d7ad</code></td>
+            </tr>
+            <tr class="current-demo-row">
+              <td>single SpMV 8-HBM 实验：<span class="tag current-demo">ownerbank8</span></td>
+              <td><span class="tag current-demo">8-HBM owner-bank</span> RTL accumulator</td>
+              <td><code>cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin</code></td>
+              <td><code>CuperSpmvServiceOnly</code></td>
+              <td><code>e48ae29f-9a2f-372b-b3d3-1f811339dd27</code></td>
+              <td class="num">150 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264</code></td>
+            </tr>
+            <tr class="current-demo-row">
+              <td>single SpMV 8-HBM debug：<span class="tag current-demo">ownerbank8-lighttrace</span></td>
+              <td><span class="tag current-demo">8-HBM owner-bank</span> progress trace</td>
+              <td><code>cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin</code></td>
+              <td><code>CuperSpmvServiceOnly</code></td>
+              <td><code>b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867</code></td>
+              <td class="num">150 MHz</td>
+              <td class="num">450 MHz</td>
+              <td><code>5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227</code></td>
             </tr>
             <tr>
               <td>Jacobi 标准</td>

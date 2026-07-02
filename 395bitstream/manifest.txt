@@ -3,4 +3,12 @@ date=2026-07-01 00:00:00 CST
 bitfile=395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
 uuid=e48ae29f-9a2f-372b-b3d3-1f811339dd27
 sha256=6496bc8ee81ba63e23a6d104a62fdbf5e0bbc6e753b4b7bd5508ec86ddc46264
-status=build synced, local sim passed, board test pending
+status=ownerbank8 board failed at thermal2_n1024; lighttrace debug build synced
+
+[ownerbank8-lighttrace]
+base_log=cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
+date=2026-07-01 18:20:41 CST
+bitfile=395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
+uuid=b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
+sha256=5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
+status=build synced, local sim passed, timing clean, board test pending

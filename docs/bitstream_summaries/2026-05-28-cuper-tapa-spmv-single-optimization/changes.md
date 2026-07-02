@@ -881,10 +881,56 @@ SLR0: CLB LUTs 153,069 (34.81%), BRAM 527 (78.42%), URAM 256 (80.00%)
   已板测 `2.71420 ms`；
 - ownerbank8 是 RTL owner-bank accumulator + scalar `float* Y_out` writer，核心目标是
   解决 scoreboard-only n1024 timeout 和降低后端综合/布局风险；
-- ownerbank8 还没有板上性能数据，不能替代 strip8 的实测性能结论，也不进入 HTML
-  性能曲线；
-- 正式 `source.diff` 仍不更新，等 `thermal2_n16` / `thermal2_n1024` 上板确认功能边界后
-  再决定是否继续 sweep。
+- 服务器侧上板结果为 `thermal2_n16` PASS、`thermal2_n1024` 300s timeout；
+- timeout 前采样中 `Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，
+  `Y[0..15]` 全 0；
+- ownerbank8 不能替代 strip8 的实测性能结论，也不进入 HTML 性能曲线；
+- 正式 `source.diff` 仍不更新。
+
+## 2026-07-01：ownerbank8-lighttrace 调试构建
+
+本轮在 ownerbank8 失败边界上新增最小 debug 构建开关
+`JACOBI_SPMV_OWNERBANK_LIGHTTRACE=1`。该开关只允许
+`JACOBI_TOP=CuperSpmvServiceOnly`、`JACOBI_HBM_CHANNELS=8` 和
+`JACOBI_SPMV_OOO_ACCUMULATE_RTL=1` 组合；仍保持现有 host ABI 和 HBM bank mapping，
+不引入全 Chisel datapath，也不覆盖正式 `source.diff`。
+
+新增进度事件：
+
+- `vector_first_x`；
+- `matrix_first_beat`；
+- `core_first_output`；
+- `splitter_first_write` / `splitter_done`；
+- `ownerbank_first_input` / `ownerbank_first_output` / `ownerbank_done_drain`；
+- 复用已有 `entry`、`ptr_lengths`、`ptr_done`、`scatter_*` 和 `final`。
+
+实现上只有 `CuperSpmvOnly_ProgressWriter` 写 `Status/Metrics[8..15]`；
+vector/matrix/core/splitter/owner-bank/scatter 只发 progress stream，避免多个 task 同时写
+同一个 mmap 端口。RTL owner-bank 前后使用 HLS pass-through tap，不改 custom RTL
+端口和 ABI。若 progress writer 自身仍不可见，下一步再单独做 mmap-only 或 entry-probe
+xclbin 隔离 Status/Metrics mmap 和 host/XRT 同步问题。
+
+同步 artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin.info
+```
+
+构建结果：
+
+```text
+UUID: b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
+SHA256: 5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build dir: cuper-tapa-spmv-ownerbank8-lighttrace-build/
+Build log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
+v++ link elapsed: 2h 33m 11s
+```
+
+内存监控未触发 `.memory_abort`，swap 为 0，最大 RSS 约 17 GB。该版只作为上板定位
+debug xclbin，不作为性能候选；服务器侧只跑 `thermal2_n16` 和 `thermal2_n1024`。
 
 ## source.diff 规则
 

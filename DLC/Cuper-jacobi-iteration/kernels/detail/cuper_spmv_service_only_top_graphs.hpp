@@ -14,12 +14,29 @@ static constexpr INDEX_TYPE kCuperSpmvOnlyProgressMagic = 0x53504d56;  // "SPMV"
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressEntry = 1;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressPtrLengths = 2;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressPtrDone = 3;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressVectorFirstX = 4;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressMatrixFirstBeat = 5;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressCoreFirstOutput = 6;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressSplitterFirstWrite = 7;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressSplitterDone = 8;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankFirstInput = 9;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterStart = 10;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstTag = 11;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstWrite = 12;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterFirstResp = 13;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterDone = 14;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressFinal = 15;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankFirstOutput = 16;
+static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankDoneDrain = 17;
+
+#if defined(JACOBI_SPMV_OWNERBANK_LIGHTTRACE) && \
+    (!defined(JACOBI_SPMV_LANE_STATIC_REAL) || \
+     !defined(JACOBI_SPMV_OOO_ACCUMULATE_RTL))
+#error "JACOBI_SPMV_OWNERBANK_LIGHTTRACE is only for the lane-static RTL owner-bank path."
+#endif
+#if defined(JACOBI_SPMV_OWNERBANK_LIGHTTRACE) && !defined(JACOBI_HBM_CHANNELS_8)
+#error "JACOBI_SPMV_OWNERBANK_LIGHTTRACE is currently scoped to ownerbank8 debug builds."
+#endif
 
 #if defined(JACOBI_SPMV_SCOREBOARD_DEBUG) && !defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
 #error "JACOBI_SPMV_SCOREBOARD_DEBUG requires JACOBI_SPMV_OOO_SCOREBOARD_RTL."
@@ -823,6 +840,17 @@ write_spmv_rtl_progress_entry_resp:
 }
 #endif
 
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+inline bool CuperSpmvOnly_TryReadAnyProgressStream(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Progress_in,
+    INDEX_TYPE &cursor,
+    CuperSpmvOnlyProgressEvent &event);
+inline bool CuperSpmvOnly_TryReadAnyOwnerLaneProgressStream(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM * 8> &Progress_in,
+    INDEX_TYPE &cursor,
+    CuperSpmvOnlyProgressEvent &event);
+#endif
+
 void CuperSpmvOnly_ProgressWriter(
     const INDEX_TYPE Batch_num,
     const INDEX_TYPE Matrix_len,
@@ -830,6 +858,14 @@ void CuperSpmvOnly_ProgressWriter(
     const INDEX_TYPE Column_num,
     const INDEX_TYPE Iteration_num,
     tapa::istream<CuperSpmvOnlyProgressEvent> &Ptr_Progress_in,
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+    tapa::istream<CuperSpmvOnlyProgressEvent> &Vector_Progress_in,
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Matrix_Progress_in,
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Core_Progress_in,
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Splitter_Progress_in,
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM * 8> &OwnerBankInput_Progress_in,
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &OwnerBankOutput_Progress_in,
+#endif
     tapa::istream<CuperSpmvOnlyProgressEvent> &Writer_Progress_in,
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
     tapa::ostream<INDEX_TYPE> &Scoreboard_Debug_Stop_out,
@@ -842,6 +878,13 @@ void CuperSpmvOnly_ProgressWriter(
     // 这些槽位会被 host 在 Finish() 前主动 sync 读取，用来判断板上卡住时
     // kernel 到达了哪一段。
     INDEX_TYPE event_count = 1;
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+    INDEX_TYPE matrix_progress_cursor = 0;
+    INDEX_TYPE core_progress_cursor = 0;
+    INDEX_TYPE splitter_progress_cursor = 0;
+    INDEX_TYPE owner_input_progress_cursor = 0;
+    INDEX_TYPE owner_output_progress_cursor = 0;
+#endif
 #ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
     CuperSpmvOnly_WriteRtlProgressEntryHeartbeat(Status);
 #endif
@@ -861,6 +904,34 @@ progress_loop:
         if (!Writer_Progress_in.empty()) {
             Writer_Progress_in.try_read(event);
             got_event = true;
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+        } else if (CuperSpmvOnly_TryReadAnyProgressStream(
+                       OwnerBankOutput_Progress_in,
+                       owner_output_progress_cursor,
+                       event)) {
+            got_event = true;
+        } else if (CuperSpmvOnly_TryReadAnyOwnerLaneProgressStream(
+                       OwnerBankInput_Progress_in,
+                       owner_input_progress_cursor,
+                       event)) {
+            got_event = true;
+        } else if (CuperSpmvOnly_TryReadAnyProgressStream(
+                       Splitter_Progress_in,
+                       splitter_progress_cursor,
+                       event)) {
+            got_event = true;
+        } else if (CuperSpmvOnly_TryReadAnyProgressStream(Core_Progress_in,
+                                                         core_progress_cursor,
+                                                         event)) {
+            got_event = true;
+        } else if (CuperSpmvOnly_TryReadAnyProgressStream(Matrix_Progress_in,
+                                                         matrix_progress_cursor,
+                                                         event)) {
+            got_event = true;
+        } else if (!Vector_Progress_in.empty()) {
+            Vector_Progress_in.try_read(event);
+            got_event = true;
+#endif
         } else if (!Ptr_Progress_in.empty()) {
             Ptr_Progress_in.try_read(event);
             got_event = true;
@@ -889,6 +960,182 @@ void CuperSpmvOnly_NullProgressSource(
     tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
     (void)Progress_out;
 }
+
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+inline bool CuperSpmvOnly_TryReadProgressStreamByIndex(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Progress_in,
+    const INDEX_TYPE index,
+    CuperSpmvOnlyProgressEvent &event) {
+#pragma HLS inline
+    bool got = false;
+    switch (index) {
+        case 0: got = Progress_in[0].try_read(event); break;
+        case 1: got = Progress_in[1].try_read(event); break;
+        case 2: got = Progress_in[2].try_read(event); break;
+        case 3: got = Progress_in[3].try_read(event); break;
+        case 4: got = Progress_in[4].try_read(event); break;
+        case 5: got = Progress_in[5].try_read(event); break;
+        case 6: got = Progress_in[6].try_read(event); break;
+        case 7: got = Progress_in[7].try_read(event); break;
+#ifdef JACOBI_HBM_CHANNELS_GE_16
+        case 8: got = Progress_in[8].try_read(event); break;
+        case 9: got = Progress_in[9].try_read(event); break;
+        case 10: got = Progress_in[10].try_read(event); break;
+        case 11: got = Progress_in[11].try_read(event); break;
+        case 12: got = Progress_in[12].try_read(event); break;
+        case 13: got = Progress_in[13].try_read(event); break;
+        case 14: got = Progress_in[14].try_read(event); break;
+        case 15: got = Progress_in[15].try_read(event); break;
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        case 16: got = Progress_in[16].try_read(event); break;
+        case 17: got = Progress_in[17].try_read(event); break;
+        case 18: got = Progress_in[18].try_read(event); break;
+        case 19: got = Progress_in[19].try_read(event); break;
+        case 20: got = Progress_in[20].try_read(event); break;
+        case 21: got = Progress_in[21].try_read(event); break;
+        case 22: got = Progress_in[22].try_read(event); break;
+        case 23: got = Progress_in[23].try_read(event); break;
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        case 24: got = Progress_in[24].try_read(event); break;
+        case 25: got = Progress_in[25].try_read(event); break;
+        case 26: got = Progress_in[26].try_read(event); break;
+        case 27: got = Progress_in[27].try_read(event); break;
+        case 28: got = Progress_in[28].try_read(event); break;
+        case 29: got = Progress_in[29].try_read(event); break;
+        case 30: got = Progress_in[30].try_read(event); break;
+        case 31: got = Progress_in[31].try_read(event); break;
+#endif
+        default: got = false; break;
+    }
+    return got;
+}
+
+inline bool CuperSpmvOnly_TryReadOwnerLaneProgressStreamByIndex(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM * 8> &Progress_in,
+    const INDEX_TYPE index,
+    CuperSpmvOnlyProgressEvent &event) {
+#pragma HLS inline
+    bool got = false;
+    switch (index) {
+        case 0: got = Progress_in[0].try_read(event); break;
+        case 1: got = Progress_in[1].try_read(event); break;
+        case 2: got = Progress_in[2].try_read(event); break;
+        case 3: got = Progress_in[3].try_read(event); break;
+        case 4: got = Progress_in[4].try_read(event); break;
+        case 5: got = Progress_in[5].try_read(event); break;
+        case 6: got = Progress_in[6].try_read(event); break;
+        case 7: got = Progress_in[7].try_read(event); break;
+        case 8: got = Progress_in[8].try_read(event); break;
+        case 9: got = Progress_in[9].try_read(event); break;
+        case 10: got = Progress_in[10].try_read(event); break;
+        case 11: got = Progress_in[11].try_read(event); break;
+        case 12: got = Progress_in[12].try_read(event); break;
+        case 13: got = Progress_in[13].try_read(event); break;
+        case 14: got = Progress_in[14].try_read(event); break;
+        case 15: got = Progress_in[15].try_read(event); break;
+        case 16: got = Progress_in[16].try_read(event); break;
+        case 17: got = Progress_in[17].try_read(event); break;
+        case 18: got = Progress_in[18].try_read(event); break;
+        case 19: got = Progress_in[19].try_read(event); break;
+        case 20: got = Progress_in[20].try_read(event); break;
+        case 21: got = Progress_in[21].try_read(event); break;
+        case 22: got = Progress_in[22].try_read(event); break;
+        case 23: got = Progress_in[23].try_read(event); break;
+        case 24: got = Progress_in[24].try_read(event); break;
+        case 25: got = Progress_in[25].try_read(event); break;
+        case 26: got = Progress_in[26].try_read(event); break;
+        case 27: got = Progress_in[27].try_read(event); break;
+        case 28: got = Progress_in[28].try_read(event); break;
+        case 29: got = Progress_in[29].try_read(event); break;
+        case 30: got = Progress_in[30].try_read(event); break;
+        case 31: got = Progress_in[31].try_read(event); break;
+        case 32: got = Progress_in[32].try_read(event); break;
+        case 33: got = Progress_in[33].try_read(event); break;
+        case 34: got = Progress_in[34].try_read(event); break;
+        case 35: got = Progress_in[35].try_read(event); break;
+        case 36: got = Progress_in[36].try_read(event); break;
+        case 37: got = Progress_in[37].try_read(event); break;
+        case 38: got = Progress_in[38].try_read(event); break;
+        case 39: got = Progress_in[39].try_read(event); break;
+        case 40: got = Progress_in[40].try_read(event); break;
+        case 41: got = Progress_in[41].try_read(event); break;
+        case 42: got = Progress_in[42].try_read(event); break;
+        case 43: got = Progress_in[43].try_read(event); break;
+        case 44: got = Progress_in[44].try_read(event); break;
+        case 45: got = Progress_in[45].try_read(event); break;
+        case 46: got = Progress_in[46].try_read(event); break;
+        case 47: got = Progress_in[47].try_read(event); break;
+        case 48: got = Progress_in[48].try_read(event); break;
+        case 49: got = Progress_in[49].try_read(event); break;
+        case 50: got = Progress_in[50].try_read(event); break;
+        case 51: got = Progress_in[51].try_read(event); break;
+        case 52: got = Progress_in[52].try_read(event); break;
+        case 53: got = Progress_in[53].try_read(event); break;
+        case 54: got = Progress_in[54].try_read(event); break;
+        case 55: got = Progress_in[55].try_read(event); break;
+        case 56: got = Progress_in[56].try_read(event); break;
+        case 57: got = Progress_in[57].try_read(event); break;
+        case 58: got = Progress_in[58].try_read(event); break;
+        case 59: got = Progress_in[59].try_read(event); break;
+        case 60: got = Progress_in[60].try_read(event); break;
+        case 61: got = Progress_in[61].try_read(event); break;
+        case 62: got = Progress_in[62].try_read(event); break;
+        case 63: got = Progress_in[63].try_read(event); break;
+        default: got = false; break;
+    }
+    return got;
+}
+
+inline bool CuperSpmvOnly_TryReadAnyProgressStream(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM> &Progress_in,
+    INDEX_TYPE &cursor,
+    CuperSpmvOnlyProgressEvent &event) {
+#pragma HLS inline
+    bool got = false;
+scan_progress_streams:
+    for (INDEX_TYPE scan = 0; scan < HBM_CHANNEL_NUM; ++scan) {
+#pragma HLS loop_tripcount min=8 max=32
+        const INDEX_TYPE index = cursor;
+        if (!got) {
+            got = CuperSpmvOnly_TryReadProgressStreamByIndex(Progress_in,
+                                                             index,
+                                                             event);
+        }
+        ++cursor;
+        if (cursor == HBM_CHANNEL_NUM) {
+            cursor = 0;
+        }
+    }
+    return got;
+}
+
+inline bool CuperSpmvOnly_TryReadAnyOwnerLaneProgressStream(
+    tapa::istreams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM * 8> &Progress_in,
+    INDEX_TYPE &cursor,
+    CuperSpmvOnlyProgressEvent &event) {
+#pragma HLS inline
+    const INDEX_TYPE stream_count = HBM_CHANNEL_NUM * 8;
+    bool got = false;
+scan_owner_lane_progress_streams:
+    for (INDEX_TYPE scan = 0; scan < HBM_CHANNEL_NUM * 8; ++scan) {
+#pragma HLS loop_tripcount min=64 max=256
+        const INDEX_TYPE index = cursor;
+        if (!got) {
+            got = CuperSpmvOnly_TryReadOwnerLaneProgressStreamByIndex(
+                Progress_in,
+                index,
+                event);
+        }
+        ++cursor;
+        if (cursor == stream_count) {
+            cursor = 0;
+        }
+    }
+    return got;
+}
+#endif
 
 inline void CuperSpmvOnly_WriteStatus(tapa::async_mmap<INDEX_TYPE> &Status,
                                       const INDEX_TYPE iterations_done,
@@ -1051,6 +1298,241 @@ iter:
                                 Matrix_A_Stream);
     }
 }
+
+inline INDEX_TYPE CuperSpmvOnly_ReadStripBoundary(
+    const INDEX_TYPE core_id,
+    tapa::istream<INDEX_TYPE> &PE_Param_in,
+    tapa::ostream<INDEX_TYPE> &PE_Param_out);
+
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+void CuperSpmvOnly_VectorLoaderLightTrace(
+    const INDEX_TYPE Iteration_num,
+    const INDEX_TYPE Column_num,
+    tapa::async_mmap<float_v16> &X,
+    tapa::ostream<float_v16> &Vector_X_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE Batch_num_X = Cuper_NumFloatV16Packets(Column_num);
+    bool first_x_reported = false;
+
+iter:
+    for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+    read_x:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < Batch_num_X;) {
+#pragma HLS loop_tripcount min=1 max=500000
+#pragma HLS pipeline II=1
+            const INDEX_TYPE prev_response = i_response;
+            Async_Read(X,
+                       Vector_X_Stream,
+                       Batch_num_X,
+                       i_request,
+                       i_response);
+            if (!first_x_reported && i_response != prev_response) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressVectorFirstX,
+                    iter,
+                    prev_response,
+                    Batch_num_X));
+                first_x_reported = true;
+            }
+        }
+    }
+}
+
+void CuperSpmvOnly_MatrixLoaderStripLightTrace(
+    const INDEX_TYPE Iteration_num,
+    tapa::async_mmap<ap_uint<512>> &Matrix_data,
+    tapa::istream<INDEX_TYPE> &Matrix_Len_Stream,
+    tapa::ostream<ap_uint<512>> &Matrix_A_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+    const INDEX_TYPE Channel_id) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    bool first_beat_reported = false;
+
+iter:
+    for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        const INDEX_TYPE matrix_len = Matrix_Len_Stream.read();
+    read_matrix:
+        for (INDEX_TYPE i_request = 0, i_response = 0; i_response < matrix_len;) {
+#pragma HLS loop_tripcount min=1 max=10000
+#pragma HLS pipeline II=1
+            const INDEX_TYPE prev_response = i_response;
+            Async_Read(Matrix_data,
+                       Matrix_A_Stream,
+                       matrix_len,
+                       i_request,
+                       i_response);
+            if (!first_beat_reported && i_response != prev_response) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressMatrixFirstBeat,
+                    Channel_id,
+                    iter,
+                    matrix_len));
+                first_beat_reported = true;
+            }
+        }
+    }
+}
+
+inline void CuperSpmvOnly_CoreComputeRoundStripLightTrace(
+    const INDEX_TYPE Core_id,
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Column_num,
+    tapa::istream<INDEX_TYPE> &PE_Param_in,
+    tapa::istream<ap_uint<512>> &Matrix_A_Stream,
+    tapa::istream<float_v16> &Vector_X_Stream_in,
+    tapa::ostream<INDEX_TYPE> &PE_Param_out,
+    tapa::ostream<float_v16> &Vector_X_Stream_out,
+    tapa::ostream<INDEX_TYPE> &Vector_Y_Param,
+    tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+    bool &first_output_reported) {
+#pragma HLS inline
+    VALUE_TYPE local_X[X_BRAM_DEPTH][Slice_WIDTH];
+
+#pragma HLS bind_storage variable=local_X latency=2
+#pragma HLS array_partition variable=local_X complete dim=1
+#pragma HLS array_partition variable=local_X cyclic factor=X_PARTITION_FACTOR dim=2
+
+    INDEX_TYPE start_32 =
+        CuperSpmvOnly_ReadStripBoundary(Core_id, PE_Param_in, PE_Param_out);
+    Vector_Y_Param.write(start_32);
+
+cuper_spmv_only_strip_core_trace_main:
+    for (INDEX_TYPE i = 0; i < Batch_num; ++i) {
+#pragma HLS loop_tripcount min=1 max=200
+        const INDEX_TYPE total_vector_packets = Cuper_NumFloatV16Packets(Column_num);
+        const INDEX_TYPE start_idx = i * Slice_WIDTH_DIV_16;
+        const INDEX_TYPE end_idx = std::min(start_idx + Slice_WIDTH_DIV_16,
+                                            total_vector_packets);
+
+    load_vector:
+        for (INDEX_TYPE j = start_idx; j < end_idx;) {
+#pragma HLS loop_tripcount min=1 max=512
+#pragma HLS pipeline II=1
+            if (!Vector_X_Stream_in.empty() && !Vector_X_Stream_out.full()) {
+                float_v16 x;
+                Vector_X_Stream_in.try_read(x);
+                Vector_X_Stream_out.try_write(x);
+
+                for (INDEX_TYPE k = 0; k < 16; ++k) {
+                    for (INDEX_TYPE l = 0; l < X_BRAM_DEPTH; ++l) {
+                        local_X[l][((j - start_idx) << 4) + k] = x[k];
+                    }
+                }
+                ++j;
+            }
+        }
+
+        const INDEX_TYPE end_32 =
+            CuperSpmvOnly_ReadStripBoundary(Core_id, PE_Param_in, PE_Param_out);
+        Vector_Y_Param.write(end_32);
+
+    decode_matrix:
+        for (INDEX_TYPE j = start_32; j < end_32;) {
+#pragma HLS loop_tripcount min=1 max=200
+#pragma HLS pipeline II=1
+            if (!Matrix_A_Stream.empty()) {
+                ap_uint<512> spelement;
+                Matrix_A_Stream.try_read(spelement);
+                Matrix_Mult_X matmultx;
+
+#ifdef FLEX_REUSE
+                ap_uint<14> col_old = 0x3FFF;
+                VALUE_TYPE val_old = 0.0;
+#endif
+                for (INDEX_TYPE p = 0; p < 8; ++p) {
+                    ap_uint<64> a = spelement(63 + p * 64, p * 64);
+                    ap_uint<14> a_col = a(63, 50);
+                    ap_uint<18> a_row = a(49, 32);
+                    ap_uint<32> a_val = a(31, 0);
+
+                    matmultx.row[p] = a_row;
+                    if (a_row[17] == 0) {
+#ifdef FLEX_REUSE
+                        VALUE_TYPE val;
+                        if ((col_old & a_col) == 0x3FFF) {
+                            val = val_old;
+                        } else {
+                            val = tapa::bit_cast<VALUE_TYPE>(a_val);
+                        }
+#else
+                        VALUE_TYPE val = tapa::bit_cast<VALUE_TYPE>(a_val);
+#endif
+                        matmultx.val[p] =
+                            val * local_X[p / (8 / X_BRAM_DEPTH)][a_col];
+#ifdef FLEX_REUSE
+                        col_old = a_col;
+                        val_old = val;
+#endif
+                    }
+                }
+                Matrix_Mult_Vector_Stream.write(matmultx);
+                if (!first_output_reported) {
+                    Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                        kCuperSpmvOnlyProgressCoreFirstOutput,
+                        Core_id,
+                        i,
+                        j));
+                    first_output_reported = true;
+                }
+                ++j;
+            }
+        }
+        start_32 = end_32;
+    }
+}
+
+void CuperSpmvOnly_CoreStripLightTrace(
+    tapa::istream<INDEX_TYPE> &PE_Param_in,
+    tapa::istream<ap_uint<512>> &Matrix_A_Stream,
+    tapa::istream<float_v16> &Vector_X_Stream_in,
+    tapa::ostream<INDEX_TYPE> &PE_Param_out,
+    tapa::ostream<float_v16> &Vector_X_Stream_out,
+    tapa::ostream<INDEX_TYPE> &Vector_Y_Param,
+    tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+    const INDEX_TYPE Core_id) {
+    const INDEX_TYPE Batch_num = PE_Param_in.read();
+    const INDEX_TYPE Row_num = PE_Param_in.read();
+    const INDEX_TYPE Iteration_num = PE_Param_in.read();
+    const INDEX_TYPE Column_num = PE_Param_in.read();
+
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+
+    PE_Param_out.write(Batch_num);
+    PE_Param_out.write(Row_num);
+    PE_Param_out.write(Iteration_num);
+    PE_Param_out.write(Column_num);
+
+    Vector_Y_Param.write(Batch_num);
+    Vector_Y_Param.write(Row_num);
+    Vector_Y_Param.write(Iteration_num);
+
+    bool first_output_reported = false;
+iter:
+    for (INDEX_TYPE iter = 0; iter < Iteration_time; ++iter) {
+#pragma HLS loop_flatten off
+#pragma HLS loop_tripcount min=1 max=16
+        CuperSpmvOnly_CoreComputeRoundStripLightTrace(Core_id,
+                                                      Batch_num,
+                                                      Column_num,
+                                                      PE_Param_in,
+                                                      Matrix_A_Stream,
+                                                      Vector_X_Stream_in,
+                                                      PE_Param_out,
+                                                      Vector_X_Stream_out,
+                                                      Vector_Y_Param,
+                                                      Matrix_Mult_Vector_Stream,
+                                                      Progress_out,
+                                                      first_output_reported);
+    }
+}
+#endif
 
 inline INDEX_TYPE CuperSpmvOnly_ReadStripBoundary(
     const INDEX_TYPE core_id,
@@ -2393,6 +2875,28 @@ inline void CuperSpmvOnly_WriteSplitDoneOoo(
     Owner_Lane_Stream.write(done);
 }
 
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+inline void CuperSpmvOnly_ReportSplitLaneLightTrace(
+    const INDEX_TYPE Source_id,
+    const INDEX_TYPE lane,
+    const Matrix_Mult_X &matmultx,
+    bool &first_write_reported,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out) {
+#pragma HLS inline
+    const ap_uint<18> a_row = matmultx.row[lane];
+    if (!first_write_reported && a_row[17] == 0) {
+        Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+            kCuperSpmvOnlyProgressSplitterFirstWrite,
+            Source_id,
+            lane,
+            CuperSpmvOnly_TaggedPacketIndexFromSlot(Source_id,
+                                                    a_row(17, 1),
+                                                    lane)));
+        first_write_reported = true;
+    }
+}
+#endif
+
 void CuperSpmvOnly_SourceLaneSplitterOoo(
     tapa::istream<INDEX_TYPE> &Vector_Y_Param,
     tapa::istream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
@@ -2407,6 +2911,9 @@ void CuperSpmvOnly_SourceLaneSplitterOoo(
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
     tapa::ostream<CuperSpmvOnlyScoreboardDebugPulse> &Debug_out,
 #endif
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+#endif
     const INDEX_TYPE Source_id) {
     // 静态 8-lane transpose。
     //
@@ -2419,6 +2926,7 @@ void CuperSpmvOnly_SourceLaneSplitterOoo(
     Vector_Y_Param.read();  // Row_num 由 owner accumulator 直接从 top 参数获得。
     const INDEX_TYPE Iteration_num = Vector_Y_Param.read();
     const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    bool first_write_reported = false;
 
 iter:
     for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
@@ -2441,6 +2949,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 0, matmultx,
                                                 Owner_Lane_Stream_0);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        0,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[0][17] == 0) {
                     debug_pulse[0] = 1;
@@ -2448,6 +2963,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 1, matmultx,
                                                 Owner_Lane_Stream_1);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        1,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[1][17] == 0) {
                     debug_pulse[1] = 1;
@@ -2455,6 +2977,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 2, matmultx,
                                                 Owner_Lane_Stream_2);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        2,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[2][17] == 0) {
                     debug_pulse[2] = 1;
@@ -2462,6 +2991,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 3, matmultx,
                                                 Owner_Lane_Stream_3);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        3,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[3][17] == 0) {
                     debug_pulse[3] = 1;
@@ -2469,6 +3005,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 4, matmultx,
                                                 Owner_Lane_Stream_4);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        4,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[4][17] == 0) {
                     debug_pulse[4] = 1;
@@ -2476,6 +3019,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 5, matmultx,
                                                 Owner_Lane_Stream_5);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        5,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[5][17] == 0) {
                     debug_pulse[5] = 1;
@@ -2483,6 +3033,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 6, matmultx,
                                                 Owner_Lane_Stream_6);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        6,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[6][17] == 0) {
                     debug_pulse[6] = 1;
@@ -2490,6 +3047,13 @@ iter:
 #endif
                 CuperSpmvOnly_WriteSplitLaneOoo(Source_id, 7, matmultx,
                                                 Owner_Lane_Stream_7);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                CuperSpmvOnly_ReportSplitLaneLightTrace(Source_id,
+                                                        7,
+                                                        matmultx,
+                                                        first_write_reported,
+                                                        Progress_out);
+#endif
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 if (matmultx.row[7][17] == 0) {
                     debug_pulse[7] = 1;
@@ -2508,6 +3072,13 @@ iter:
         CuperSpmvOnly_WriteSplitDoneOoo(Source_id, 5, Owner_Lane_Stream_5);
         CuperSpmvOnly_WriteSplitDoneOoo(Source_id, 6, Owner_Lane_Stream_6);
         CuperSpmvOnly_WriteSplitDoneOoo(Source_id, 7, Owner_Lane_Stream_7);
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+        Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+            kCuperSpmvOnlyProgressSplitterDone,
+            Source_id,
+            iter_idx,
+            Batch_num));
+#endif
     }
 }
 
@@ -2912,6 +3483,89 @@ iter:
         }
     }
 }
+
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+void CuperSpmvOnly_OwnerBankInputLightTraceTap(
+    const INDEX_TYPE Iteration_num,
+    tapa::istream<CuperSpmvOnly_TaggedScalar> &Input_Stream,
+    tapa::ostream<CuperSpmvOnly_TaggedScalar> &Output_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+    const INDEX_TYPE Owner_id,
+    const INDEX_TYPE Pair_lane) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    bool first_input_reported = false;
+
+iter:
+    for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
+#pragma HLS loop_tripcount min=1 max=16
+    pass_one_round:
+        for (bool done = false; !done;) {
+#pragma HLS loop_tripcount min=1 max=4000000
+#pragma HLS pipeline II=1
+            CuperSpmvOnly_TaggedScalar tagged = Input_Stream.read();
+            Output_Stream.write(tagged);
+            if (tagged.done != 0) {
+                done = true;
+            } else if (!first_input_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressOwnerBankFirstInput,
+                    Owner_id,
+                    Pair_lane,
+                    tagged.packet_idx));
+                first_input_reported = true;
+            }
+        }
+
+    }
+}
+
+void CuperSpmvOnly_OwnerBankOutputLightTraceTap(
+    const INDEX_TYPE Iteration_num,
+    const INDEX_TYPE Row_num,
+    tapa::istream<CuperSpmvOnly_TaggedFloatV2> &Input_Stream,
+    tapa::ostream<CuperSpmvOnly_TaggedFloatV2> &Output_Stream,
+    tapa::ostream<CuperSpmvOnlyProgressEvent> &Progress_out,
+    const INDEX_TYPE Owner_id) {
+    const INDEX_TYPE Iteration_time = (Iteration_num == 0) ? 1 : Iteration_num;
+    const INDEX_TYPE num_out_packets = Cuper_NumFloatV16Packets(Row_num);
+    const INDEX_TYPE owner_packet_count =
+        num_out_packets > Owner_id
+            ? ((num_out_packets - Owner_id) + HBM_CHANNEL_NUM - 1) /
+                  HBM_CHANNEL_NUM
+            : 0;
+    const INDEX_TYPE expected_outputs = owner_packet_count * 8;
+    bool first_output_reported = false;
+
+iter:
+    for (INDEX_TYPE iter_idx = 0; iter_idx < Iteration_time; ++iter_idx) {
+#pragma HLS loop_tripcount min=1 max=16
+    pass_outputs:
+        for (INDEX_TYPE output_count = 0; output_count < expected_outputs;) {
+#pragma HLS loop_tripcount min=1 max=80000
+#pragma HLS pipeline II=1
+            CuperSpmvOnly_TaggedFloatV2 tagged = Input_Stream.read();
+            Output_Stream.write(tagged);
+            if (!first_output_reported) {
+                Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                    kCuperSpmvOnlyProgressOwnerBankFirstOutput,
+                    Owner_id,
+                    tagged.packet_idx,
+                    tagged.pair_lane));
+                first_output_reported = true;
+            }
+            ++output_count;
+        }
+
+        if (expected_outputs > 0) {
+            Progress_out.write(CuperSpmvOnly_MakeProgressEvent(
+                kCuperSpmvOnlyProgressOwnerBankDoneDrain,
+                Owner_id,
+                iter_idx,
+                expected_outputs));
+        }
+    }
+}
+#endif
 
 inline void CuperSpmvOnly_ConsumeOwnerLaneAdderOoo(
     tapa::istream<CuperSpmvOnly_TaggedScalar> &Owner_Lane_Stream,
@@ -3929,6 +4583,18 @@ iter:
                 Matrix_Mult_Vector_Stream[CORE_ID], \
                 CORE_ID)
 
+#define CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(CORE_ID) \
+        .invoke(CuperSpmvOnly_CoreStripLightTrace, \
+                PE_Param[CORE_ID], \
+                Matrix_A_Stream[CORE_ID], \
+                Vector_X_Stream[CORE_ID], \
+                PE_Param[(CORE_ID) + 1], \
+                Vector_X_Stream[(CORE_ID) + 1], \
+                Vector_Y_Param[CORE_ID], \
+                Matrix_Mult_Vector_Stream[CORE_ID], \
+                Core_Progress_Stream[CORE_ID], \
+                CORE_ID)
+
 #define CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(CORE_ID) \
         .invoke(CuperSpmvOnly_CoreCompactPe, \
                 PE_Param[CORE_ID], \
@@ -3948,20 +4614,52 @@ iter:
                 CORE_ID)
 
 #ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+#define CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, PAIR_LANE) \
+        Owner_Lane_Rtl_Input_Stream[(OWNER_ID) * 8 + (PAIR_LANE)]
+#define CUPER_SPMV_ONLY_RTL_OWNER_BANK_OUTPUT_STREAM(OWNER_ID) \
+        Owner_Bank_Rtl_Output_Stream[OWNER_ID]
+#else
+#define CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, PAIR_LANE) \
+        Owner_Lane_Stream[(OWNER_ID) * 8 + (PAIR_LANE)]
+#define CUPER_SPMV_ONLY_RTL_OWNER_BANK_OUTPUT_STREAM(OWNER_ID) \
+        Vector_Y_Tagged_Stream[OWNER_ID]
+#endif
 #define CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(OWNER_ID) \
         .invoke(CuperSpmvOnly_RtlOwnerBankAccumulatorOoo, \
                 Iteration_num, \
                 Row_num, \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 0], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 1], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 2], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 3], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 4], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 5], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 6], \
-                Owner_Lane_Stream[(OWNER_ID) * 8 + 7], \
-                Vector_Y_Tagged_Stream[OWNER_ID], \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 0), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 1), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 2), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 3), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 4), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 5), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 6), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM(OWNER_ID, 7), \
+                CUPER_SPMV_ONLY_RTL_OWNER_BANK_OUTPUT_STREAM(OWNER_ID), \
                 OWNER_ID)
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+#define CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, PAIR_LANE) \
+        .invoke(CuperSpmvOnly_OwnerBankInputLightTraceTap, \
+                Iteration_num, \
+                Owner_Lane_Stream[(OWNER_ID) * 8 + (PAIR_LANE)], \
+                Owner_Lane_Rtl_Input_Stream[(OWNER_ID) * 8 + (PAIR_LANE)], \
+                OwnerBankInput_Progress_Stream[(OWNER_ID) * 8 + (PAIR_LANE)], \
+                OWNER_ID, \
+                PAIR_LANE)
+#define CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(OWNER_ID) \
+        .invoke(CuperSpmvOnly_OwnerBankOutputLightTraceTap, \
+                Iteration_num, \
+                Row_num, \
+                Owner_Bank_Rtl_Output_Stream[OWNER_ID], \
+                Vector_Y_Tagged_Stream[OWNER_ID], \
+                OwnerBankOutput_Progress_Stream[OWNER_ID], \
+                OWNER_ID)
+#else
+#define CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, PAIR_LANE)
+#define CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(OWNER_ID)
+#endif
 #elif defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
 #define CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD(OWNER_ID) \
         .invoke(CuperSpmvOnly_RtlOwnerScoreboardOoo, \
@@ -4020,6 +4718,16 @@ iter:
                 OWNER_ID)
 #endif
 
+#define CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(OWNER_ID) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 0) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 1) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 2) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 3) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 4) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 5) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 6) \
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE(OWNER_ID, 7)
+
 #define CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, LANE_ID) \
         ((((LANE_ID) * HBM_CHANNEL_NUM_DIV_8) + ((SOURCE_ID) % HBM_CHANNEL_NUM_DIV_8)) * 8 + \
          ((SOURCE_ID) / HBM_CHANNEL_NUM_DIV_8))
@@ -4029,6 +4737,13 @@ iter:
                 Scoreboard_Core_Debug_Stream[SOURCE_ID],
 #else
 #define IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG(SOURCE_ID)
+#endif
+
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+#define IF_CUPER_SPMV_ONLY_LIGHTTRACE_SPLITTER_ARG(SOURCE_ID) \
+                Splitter_Progress_Stream[SOURCE_ID],
+#else
+#define IF_CUPER_SPMV_ONLY_LIGHTTRACE_SPLITTER_ARG(SOURCE_ID)
 #endif
 
 #define CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER(SOURCE_ID) \
@@ -4044,6 +4759,7 @@ iter:
                 Owner_Lane_Stream[CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, 6)], \
                 Owner_Lane_Stream[CUPER_SPMV_ONLY_OWNER_LANE_INDEX(SOURCE_ID, 7)], \
                 IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG(SOURCE_ID) \
+                IF_CUPER_SPMV_ONLY_LIGHTTRACE_SPLITTER_ARG(SOURCE_ID) \
                 SOURCE_ID)
 
 void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
@@ -4078,6 +4794,12 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                                                  Vector_Y_Tagged_Stream("Vector_Y_Tagged_Stream");
     tapa::streams<CuperSpmvOnly_TaggedScalar, HBM_CHANNEL_NUM * 8, 64>
                                                                  Owner_Lane_Stream("Owner_Lane_Stream");
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+    tapa::streams<CuperSpmvOnly_TaggedScalar, HBM_CHANNEL_NUM * 8, 64>
+                                                                 Owner_Lane_Rtl_Input_Stream("Owner_Lane_Rtl_Input_Stream");
+    tapa::streams<CuperSpmvOnly_TaggedFloatV2, HBM_CHANNEL_NUM, 1024>
+                                                                 Owner_Bank_Rtl_Output_Stream("Owner_Bank_Rtl_Output_Stream");
+#endif
 #ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
     tapa::streams<CuperSpmvOnly_ScheduledTaggedVector,
                   HBM_CHANNEL_NUM,
@@ -4115,6 +4837,19 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2>           Matrix_Len_Stream("Matrix_Len_Stream");
 #endif
     tapa::stream<CuperSpmvOnlyProgressEvent, 64>             Ptr_Progress_Stream("Ptr_Progress_Stream");
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+    tapa::stream<CuperSpmvOnlyProgressEvent, 64>             Vector_Progress_Stream("Vector_Progress_Stream");
+    tapa::streams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM, 16>
+                                                                 Matrix_Progress_Stream("Matrix_Progress_Stream");
+    tapa::streams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM, 16>
+                                                                 Core_Progress_Stream("Core_Progress_Stream");
+    tapa::streams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM, 16>
+                                                                 Splitter_Progress_Stream("Splitter_Progress_Stream");
+    tapa::streams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM * 8, 2>
+                                                                 OwnerBankInput_Progress_Stream("OwnerBankInput_Progress_Stream");
+    tapa::streams<CuperSpmvOnlyProgressEvent, HBM_CHANNEL_NUM, 16>
+                                                                 OwnerBankOutput_Progress_Stream("OwnerBankOutput_Progress_Stream");
+#endif
     tapa::stream<CuperSpmvOnlyProgressEvent, 64>             Writer_Progress_Stream("Writer_Progress_Stream");
 
     tapa::task()
@@ -4125,6 +4860,14 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Column_num,
                 Iteration_num,
                 Ptr_Progress_Stream,
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+                Vector_Progress_Stream,
+                Matrix_Progress_Stream,
+                Core_Progress_Stream,
+                Splitter_Progress_Stream,
+                OwnerBankInput_Progress_Stream,
+                OwnerBankOutput_Progress_Stream,
+#endif
                 Writer_Progress_Stream,
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
                 Scoreboard_Debug_Stop_Stream,
@@ -4171,20 +4914,39 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 PE_Param[0])
 #endif
         // 读取输入向量 X；本实验不取负，直接计算 Y=A*X。
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+        .invoke(CuperSpmvOnly_VectorLoaderLightTrace,
+                Iteration_num,
+                Column_num,
+                X,
+                Vector_X_Stream[0],
+                Vector_Progress_Stream)
+#else
         .invoke(Vector_Loader,
                 Iteration_num,
                 Column_num,
                 X,
                 Vector_X_Stream[0])
+#endif
 #if defined(JACOBI_SPMV_STRIP_PADDING) || \
     defined(JACOBI_SPMV_COMPACT_PE) || \
     defined(JACOBI_SPMV_LANE_STATIC_REAL)
         // 每个 HBM channel 按自己的总长度读矩阵，剔除跨 channel 的尾部 padding。
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_MatrixLoaderStripLightTrace,
+                                             Iteration_num,
+                                             Matrix_data,
+                                             Matrix_Len_Stream,
+                                             Matrix_A_Stream,
+                                             Matrix_Progress_Stream,
+                                             tapa::seq())
+#else
         .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_MatrixLoaderStrip,
                                              Iteration_num,
                                              Matrix_data,
                                              Matrix_Len_Stream,
                                              Matrix_A_Stream)
+#endif
 #else
         // 每个 Matrix_data HBM channel 各自启动一个 loader。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Matrix_Loader,
@@ -4235,6 +4997,16 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE(31)
 #endif
 #elif defined(JACOBI_SPMV_STRIP_PADDING) || defined(JACOBI_SPMV_LANE_STATIC_REAL)
+#ifdef JACOBI_SPMV_OWNERBANK_LIGHTTRACE
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(0)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(1)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(2)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(3)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(4)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(5)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(6)
+        CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE(7)
+#else
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(0)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(1)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(2)
@@ -4272,6 +5044,7 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(29)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(30)
         CUPER_SPMV_ONLY_INVOKE_CORE_STRIP(31)
+#endif
 #endif
 #else
         CUPER_SPMV_ONLY_INVOKE_CORE(0)
@@ -4364,6 +5137,44 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         // TAPA custom RTL owner-bank accumulator。每个 owner bank 接 8 条
         // pair-lane 输入流，在 bank 内部做局部乱序累加，对外只输出一条
         // tagged float_v2 stream，减少 128 个细粒度 task 带来的布线拥塞。
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(0)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(1)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(2)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(3)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(4)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(5)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(6)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(8)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(9)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(10)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(11)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(12)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(13)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(14)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(15)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(16)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(17)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(18)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(19)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(20)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(21)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(22)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(24)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(25)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(26)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(27)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(28)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(29)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(30)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8(31)
+#endif
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(0)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(1)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(2)
@@ -4401,6 +5212,44 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(29)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(30)
         CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC(31)
+#endif
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(0)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(1)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(2)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(3)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(4)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(5)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(6)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(7)
+#ifdef JACOBI_HBM_CHANNELS_GE_16
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(8)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(9)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(10)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(11)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(12)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(13)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(14)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(15)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_24
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(16)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(17)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(18)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(19)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(20)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(21)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(22)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(23)
+#endif
+#ifdef JACOBI_HBM_CHANNELS_GE_32
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(24)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(25)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(26)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(27)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(28)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(29)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(30)
+        CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE(31)
 #endif
 #elif defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
         // 弱 RTL 分支：只把 8 条 owner-lane 的选择和 RAW scoreboard 交给 RTL；
@@ -4666,11 +5515,17 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 
 #undef CUPER_SPMV_ONLY_INVOKE_CORE
 #undef CUPER_SPMV_ONLY_INVOKE_CORE_STRIP
+#undef CUPER_SPMV_ONLY_INVOKE_CORE_STRIP_LIGHTTRACE
 #undef CUPER_SPMV_ONLY_INVOKE_CORE_COMPACT_PE
 #undef CUPER_SPMV_ONLY_INVOKE_TAGGED_ACC
 #ifdef JACOBI_SPMV_OOO_ACCUMULATE_RTL
+#undef CUPER_SPMV_ONLY_RTL_OWNER_BANK_INPUT_STREAM
+#undef CUPER_SPMV_ONLY_RTL_OWNER_BANK_OUTPUT_STREAM
 #undef CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_BANK_ACC
+#undef CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE
+#undef CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_OUTPUT_TRACE
 #endif
+#undef CUPER_SPMV_ONLY_INVOKE_OWNER_BANK_INPUT_TRACE_8
 #ifdef JACOBI_SPMV_OOO_SCOREBOARD_RTL
 #undef CUPER_SPMV_ONLY_INVOKE_RTL_OWNER_SCOREBOARD
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
@@ -4684,4 +5539,5 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
 #undef CUPER_SPMV_ONLY_OWNER_LANE_INDEX
 #undef IF_CUPER_SPMV_ONLY_SCOREBOARD_DEBUG_SPLITTER_ARG
+#undef IF_CUPER_SPMV_ONLY_LIGHTTRACE_SPLITTER_ARG
 #undef CUPER_SPMV_ONLY_INVOKE_OOO_SPLITTER

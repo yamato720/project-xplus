@@ -46,7 +46,8 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard + HLS scheduled accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，不建议继续 sweep |
 | `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard head-register 修正版，150 MHz routed timing clean，作为旧 timeout 失败边界保留 |
 | `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard done-drain 修正版，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，done-drain 未解决旧卡死 |
-| `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，150 MHz routed timing clean，本地 8-HBM dataset sim 通过 `thermal2_n16`/`thermal2_n1024`，等待服务器上板 |
+| `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
+| `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -535,6 +536,7 @@ cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-demo.xclbin
 cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-headreg-demo.xclbin
 cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin
 cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin
+cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
 ```
 
 这些 artifact 都来自 `DLC/Cuper-jacobi-iteration` 的 `CuperSpmvServiceOnly` 顶层，目标是把
@@ -603,22 +605,32 @@ ownerbank8:
   Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
   Build log: cuper-tapa-spmv-ownerbank8-hw-150m-build/logs/build_hw_tmux.log
   v++ link elapsed: 2h 40m 37s
+
+ownerbank8-lighttrace:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
+  UUID: b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
+  SHA256: 5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
+  Memory monitor: no .memory_abort, swap 0, max RSS about 17 GB
+  v++ link elapsed: 2h 33m 11s
 ```
 
 original8、strip8 和 lanereal8-scoreboard 构建前已完成对应 8-HBM 软件 smoke，结果均为
 `Error Num=0`。headreg 和 donedrain 修正版均已通过 RTL wrapper Verilator、vector
 primitive Verilator 和 scoreboard dataset C++/Verilator smoke。既有服务器侧上板结果：
 
-| 数据集 | original8 FPGA ms | strip8 FPGA ms | lanereal8-scoreboard | lanereal8-scoreboard-donedrain |
-| --- | ---: | ---: | --- | --- |
-| `thermal2_n16` | 0.074269 | 0.079358 | 0.080481, PASS | 0.081832, PASS |
-| `thermal2_n1024` | 0.077615 | 0.083637 | timeout 300s | timeout 300s, rc=124 |
-| `thermal2_n4096` | 0.089127 | 0.087664 | 未继续 | 未继续 |
-| `thermal2_n16384` | 0.109745 | 0.124493 | 未继续 | 未继续 |
-| `thermal2_n65536` | 0.216074 | 0.222817 | 未继续 | 未继续 |
-| `thermal2_n131072` | 0.345646 | 0.365984 | 未继续 | 未继续 |
-| `thermal2_n262144` | 0.632533 | 0.622525 | 未继续 | 未继续 |
-| `thermal2` | 2.74379 | 2.71420 | 未继续 | 未继续 |
+| 数据集 | original8 FPGA ms | strip8 FPGA ms | lanereal8-scoreboard | lanereal8-scoreboard-donedrain | ownerbank8 |
+| --- | ---: | ---: | --- | --- | --- |
+| `thermal2_n16` | 0.074269 | 0.079358 | 0.080481, PASS | 0.081832, PASS | PASS |
+| `thermal2_n1024` | 0.077615 | 0.083637 | timeout 300s | timeout 300s, rc=124 | timeout 300s |
+| `thermal2_n4096` | 0.089127 | 0.087664 | 未继续 | 未继续 | 未继续 |
+| `thermal2_n16384` | 0.109745 | 0.124493 | 未继续 | 未继续 | 未继续 |
+| `thermal2_n65536` | 0.216074 | 0.222817 | 未继续 | 未继续 | 未继续 |
+| `thermal2_n131072` | 0.345646 | 0.365984 | 未继续 | 未继续 | 未继续 |
+| `thermal2_n262144` | 0.632533 | 0.622525 | 未继续 | 未继续 | 未继续 |
+| `thermal2` | 2.74379 | 2.71420 | 未继续 | 未继续 | 未继续 |
 
 结论：8-HBM original/strip 基础路径可跑完整 `thermal2`，strip8 只在部分中大规模点略快，
 整体没有超过已验证的 16 路 strip/lanereal 线；`lanereal8-scoreboard` 和
@@ -648,8 +660,15 @@ drain barrier，但服务器侧 `thermal2_n1024` 仍 300s timeout。下一步若
 但 host argument 名和 HBM bank ABI 不变。当前本机已完成 `tapa-bank-lint`、
 `tapa-bank-sim`、`tapa-splitter-bank-generated-scatter-cpp-sim` 和新增 8-HBM
 dataset C++/Verilator sim；dataset sim 覆盖 `thermal2_n16`、`thermal2_n1024`、
-output backpressure、write response delay 和小 FIFO 压力。服务器侧上板尚未执行，
+output backpressure、write response delay 和小 FIFO 压力。服务器侧上板结果为
+`thermal2_n16` PASS，但 `thermal2_n1024` 300s timeout；timeout 采样中
+`Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，`Y[0..15]` 全 0。
 因此它不替代 strip8 的 `2.71420 ms` 实测结论，也不进入 HTML 性能曲线。
+已同步的调试版为 `ownerbank8-lighttrace`：保持同一 ABI 和 8-HBM bank mapping，
+只在 `Status/Metrics[8..15]` 通过 progress writer 增加 entry、ptr、vector、
+matrix、core、splitter、owner-bank input/output/done 和 scatter 分阶段事件。
+该版本机已完成 `.xclbin` 构建并 timing clean，等待服务器侧只跑 `thermal2_n16` 和
+`thermal2_n1024`；验收目标是 pre-Finish 采样能定位最后推进 stage，而不是性能提升。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

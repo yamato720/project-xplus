@@ -790,9 +790,37 @@ git diff --check
 ```
 
 `tapa-ownerbank8-dataset-cpp-sim` 覆盖 `thermal2_n16`、`thermal2_n1024`、小 FIFO、
-write response delay 和 output backpressure。当前还没有服务器侧上板结果；下一步只先跑
-`thermal2_n16` 与 `thermal2_n1024`，确认旧 scoreboard-only 分支的 n1024 timeout
-是否解除。
+write response delay 和 output backpressure。服务器侧上板结果已确认：
+`thermal2_n16` PASS；`thermal2_n1024` 300s timeout，timeout 前采样里
+`Status/Metrics` 仍是初始化哨兵，`progress_magic valid=0`，`Y[0..15]` 全 0。
+因此 ownerbank8 保留为失败边界，不替代 strip8，也不更新正式 `source.diff`。
+
+下一步调试构建命名为 `ownerbank8-lighttrace`，继续使用同一 ABI 和 8-HBM bank mapping，
+不切全 Chisel。它只新增 progress writer 可见事件：entry、ptr lengths/done、
+vector first X、matrix first beat、CoreStrip first output、splitter first owner-lane write/done、
+owner-bank first input、owner-bank first tagged output/done drain、scatter first tag/write/resp/final。
+若这版仍在 `thermal2_n1024` timeout，验收标准是 pre-Finish 采样至少能看到最后推进的
+stage，从而区分 entry/mmap、loader/core、owner-bank 和 scatter writer 边界。
+
+`ownerbank8-lighttrace` 已完成本机硬件构建并同步为：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin.info
+```
+
+构建结果：
+
+```text
+UUID: b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
+SHA256: 5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
+```
+
+这版仍是 debug artifact，等待服务器侧最小上板；在 `thermal2_n1024` 边界定位前不替代
+`strip8`，也不更新正式 `source.diff`。
 
 ## 当前基线
 

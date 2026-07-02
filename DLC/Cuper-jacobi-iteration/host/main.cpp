@@ -96,12 +96,20 @@ const char* SpmvOnlyProgressStageName(const INDEX_TYPE stage) {
     case 1: return "entry";
     case 2: return "ptr_lengths";
     case 3: return "ptr_done";
+    case 4: return "vector_first_x";
+    case 5: return "matrix_first_beat";
+    case 6: return "core_first_output";
+    case 7: return "splitter_first_write";
+    case 8: return "splitter_done";
+    case 9: return "ownerbank_first_input";
     case 10: return "scatter_start";
     case 11: return "scatter_first_tag";
     case 12: return "scatter_first_write";
     case 13: return "scatter_first_resp";
     case 14: return "scatter_done";
     case 15: return "final";
+    case 16: return "ownerbank_first_output";
+    case 17: return "ownerbank_done_drain";
     default: return "unknown";
     }
 }
