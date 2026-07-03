@@ -90,3 +90,43 @@ SpMV。
 
 未生成/更新正式 `source.diff`。原因：本轮只是同步 entry-probe xclbin，尚未完成板上
 demo-only 测试，也没有 SpMV 性能或正确性结论。
+
+## 2026-07-03 本机上板复测尝试
+
+尝试命令：
+
+```bash
+for d in thermal2_n16 thermal2_n1024 thermal2_n4096 thermal2_n16384 thermal2_n65536 thermal2_n131072 thermal2_n262144 thermal2; do
+  timeout 180s make run-cuper-spmv-chisel8-xrt TARGET=hw \
+    BITFILE=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xclbin \
+    DATASET="data/suitesparse/Schmid/csr/$d"
+done
+```
+
+日志目录：
+
+```text
+logs/cuper_spmv_chisel8_entryprobe_hw_20260703_212602/
+```
+
+结果：8 个数据集均在 host 打开 XRT device 时失败，未进入 kernel launch：
+
+```text
+error:  No such device with index '0'
+```
+
+对应 `no_check.status` 为：
+
+```text
+thermal2_n16: 2
+thermal2_n1024: 2
+thermal2_n4096: 2
+thermal2_n16384: 2
+thermal2_n65536: 2
+thermal2_n131072: 2
+thermal2_n262144: 2
+thermal2: 2
+```
+
+因此本轮没有本机可采信的 entry-probe no-check `rc=0` 或 `CHECK_Y=1 rc=3`
+上板记录；后续需要在有 U55C/XRT device 的服务器侧补跑。

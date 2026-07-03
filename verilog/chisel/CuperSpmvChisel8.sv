@@ -503,155 +503,371 @@ module CuperSpmvChisel8(
   output         m_axi_Metrics_WVALID
 );
 
-  reg  [63:0]  argPtr_0;
-  reg  [63:0]  argPtr_1;
-  reg  [63:0]  argPtr_2;
-  reg  [63:0]  argPtr_3;
-  reg  [63:0]  argPtr_4;
-  reg  [63:0]  argPtr_5;
-  reg  [63:0]  argPtr_6;
-  reg  [63:0]  argPtr_7;
-  reg  [63:0]  argPtr_8;
-  reg  [63:0]  argPtr_9;
-  reg  [63:0]  argPtr_10;
-  reg  [63:0]  argPtr_11;
-  reg  [63:0]  argPtr_12;
-  reg  [31:0]  batchNum;
-  reg  [31:0]  matrixLen;
-  reg  [31:0]  rowNum;
-  reg  [31:0]  columnNum;
-  reg  [31:0]  iterationNum;
-  reg          startPending;
-  reg          autoRestart;
-  reg          doneSticky;
-  reg          awValid;
-  reg  [11:0]  awAddr;
-  reg          wValid;
-  reg  [31:0]  wData;
-  reg  [3:0]   wStrb;
-  reg          bValid;
-  reg  [3:0]   state;
-  reg  [2:0]   matrixIndex;
-  reg  [4:0]   statusIndex;
-  reg  [4:0]   metricIndex;
-  reg  [31:0]  ptr0;
-  reg  [511:0] x0;
-  reg  [511:0] matrixFirst_0;
-  reg  [511:0] matrixFirst_1;
-  reg  [511:0] matrixFirst_2;
-  reg  [511:0] matrixFirst_3;
-  reg  [511:0] matrixFirst_4;
-  reg  [511:0] matrixFirst_5;
-  reg  [511:0] matrixFirst_6;
-  reg  [511:0] matrixFirst_7;
-  reg  [63:0]  cycleCounter;
-  reg  [1:0]   lastBresp;
-  reg  [1:0]   lastRresp;
-  reg          rValid;
-  reg  [31:0]  rData;
-  reg          rIsCtrl;
-  wire         _selectedMatrixRResp_T_1 = matrixIndex == 3'h1;
-  wire         _selectedMatrixRResp_T_2 = matrixIndex == 3'h2;
-  wire         _selectedMatrixRResp_T_3 = matrixIndex == 3'h3;
-  wire         _selectedMatrixRResp_T_4 = matrixIndex == 3'h4;
-  wire         _selectedMatrixRResp_T_5 = matrixIndex == 3'h5;
-  wire         _selectedMatrixRResp_T_6 = matrixIndex == 3'h6;
-  wire         selectedMatrixRValid =
-    ~(|matrixIndex) & m_axi_Matrix_data_0_RVALID | _selectedMatrixRResp_T_1
-    & m_axi_Matrix_data_1_RVALID | _selectedMatrixRResp_T_2 & m_axi_Matrix_data_2_RVALID
-    | _selectedMatrixRResp_T_3 & m_axi_Matrix_data_3_RVALID | _selectedMatrixRResp_T_4
-    & m_axi_Matrix_data_4_RVALID | _selectedMatrixRResp_T_5 & m_axi_Matrix_data_5_RVALID
-    | _selectedMatrixRResp_T_6 & m_axi_Matrix_data_6_RVALID | (&matrixIndex)
+  reg  [63:0] argPtr_0;
+  reg  [63:0] argPtr_1;
+  reg  [63:0] argPtr_2;
+  reg  [63:0] argPtr_3;
+  reg  [63:0] argPtr_4;
+  reg  [63:0] argPtr_5;
+  reg  [63:0] argPtr_6;
+  reg  [63:0] argPtr_7;
+  reg  [63:0] argPtr_8;
+  reg  [63:0] argPtr_9;
+  reg  [63:0] argPtr_10;
+  reg  [63:0] argPtr_11;
+  reg  [63:0] argPtr_12;
+  reg  [31:0] batchNum;
+  reg  [31:0] matrixLen;
+  reg  [31:0] rowNum;
+  reg  [31:0] columnNum;
+  reg  [31:0] iterationNum;
+  reg         startPending;
+  reg         autoRestart;
+  reg         doneSticky;
+  reg         awValid;
+  reg  [11:0] awAddr;
+  reg         wValid;
+  reg  [31:0] wData;
+  reg  [3:0]  wStrb;
+  reg         bValid;
+  reg  [3:0]  state;
+  reg  [31:0] ptrIndex;
+  reg  [31:0] xPacketIndex;
+  reg  [2:0]  matrixIndex;
+  reg  [31:0] matrixBeatIndex;
+  reg  [5:0]  statusIndex;
+  reg  [5:0]  metricIndex;
+  reg  [31:0] ptrWordsRead;
+  reg  [31:0] xPacketsRead;
+  reg  [31:0] matrixLenPerChannel_0;
+  reg  [31:0] matrixLenPerChannel_1;
+  reg  [31:0] matrixLenPerChannel_2;
+  reg  [31:0] matrixLenPerChannel_3;
+  reg  [31:0] matrixLenPerChannel_4;
+  reg  [31:0] matrixLenPerChannel_5;
+  reg  [31:0] matrixLenPerChannel_6;
+  reg  [31:0] matrixLenPerChannel_7;
+  reg  [31:0] matrixBeatsRead_0;
+  reg  [31:0] matrixBeatsRead_1;
+  reg  [31:0] matrixBeatsRead_2;
+  reg  [31:0] matrixBeatsRead_3;
+  reg  [31:0] matrixBeatsRead_4;
+  reg  [31:0] matrixBeatsRead_5;
+  reg  [31:0] matrixBeatsRead_6;
+  reg  [31:0] matrixBeatsRead_7;
+  reg  [31:0] matrixDoneMask;
+  reg  [31:0] rErrorMask;
+  reg  [31:0] bErrorMask;
+  reg  [31:0] firstPtr;
+  reg  [31:0] lastPtr;
+  reg  [63:0] firstXLow64;
+  reg  [63:0] lastXLow64;
+  reg  [63:0] matrixFirstLow64_0;
+  reg  [63:0] matrixFirstLow64_1;
+  reg  [63:0] matrixFirstLow64_2;
+  reg  [63:0] matrixFirstLow64_3;
+  reg  [63:0] matrixFirstLow64_4;
+  reg  [63:0] matrixFirstLow64_5;
+  reg  [63:0] matrixFirstLow64_6;
+  reg  [63:0] matrixFirstLow64_7;
+  reg  [63:0] matrixLastLow64_0;
+  reg  [63:0] matrixLastLow64_1;
+  reg  [63:0] matrixLastLow64_2;
+  reg  [63:0] matrixLastLow64_3;
+  reg  [63:0] matrixLastLow64_4;
+  reg  [63:0] matrixLastLow64_5;
+  reg  [63:0] matrixLastLow64_6;
+  reg  [63:0] matrixLastLow64_7;
+  reg  [63:0] cycleCounter;
+  reg  [1:0]  lastBresp;
+  reg  [1:0]  lastRresp;
+  wire [28:0] _ptrWordsExpected_T = batchNum[28:0] + 29'h2;
+  wire [32:0] _xPacketsExpected_T = {1'h0, columnNum} + 33'hF;
+  reg         rValid;
+  reg  [31:0] rData;
+  reg         rIsCtrl;
+  wire        _selectedMatrixRMask_T_1 = matrixIndex == 3'h1;
+  wire        _selectedMatrixRMask_T_2 = matrixIndex == 3'h2;
+  wire        _selectedMatrixRMask_T_3 = matrixIndex == 3'h3;
+  wire        _selectedMatrixRMask_T_4 = matrixIndex == 3'h4;
+  wire        _selectedMatrixRMask_T_5 = matrixIndex == 3'h5;
+  wire        _selectedMatrixRMask_T_6 = matrixIndex == 3'h6;
+  wire        selectedMatrixRValid =
+    ~(|matrixIndex) & m_axi_Matrix_data_0_RVALID | _selectedMatrixRMask_T_1
+    & m_axi_Matrix_data_1_RVALID | _selectedMatrixRMask_T_2 & m_axi_Matrix_data_2_RVALID
+    | _selectedMatrixRMask_T_3 & m_axi_Matrix_data_3_RVALID | _selectedMatrixRMask_T_4
+    & m_axi_Matrix_data_4_RVALID | _selectedMatrixRMask_T_5 & m_axi_Matrix_data_5_RVALID
+    | _selectedMatrixRMask_T_6 & m_axi_Matrix_data_6_RVALID | (&matrixIndex)
     & m_axi_Matrix_data_7_RVALID;
-  wire         _GEN = statusIndex == 5'hF;
-  wire         _GEN_0 = metricIndex == 5'hF;
-  wire         _GEN_1 = state == 4'h1;
-  wire         _GEN_2 = state == 4'h2;
-  wire         _GEN_3 = ~(|state) | _GEN_1;
-  wire         _GEN_4 = state == 4'h3;
-  wire         _GEN_5 = ~(|state) | _GEN_1 | _GEN_2;
-  wire         _GEN_6 = state == 4'h4;
-  wire         _GEN_7 = _GEN_1 | _GEN_2 | _GEN_4;
-  wire         _GEN_8 = ~(|state) | _GEN_7;
-  wire         _GEN_9 = state == 4'h5;
-  wire         _GEN_10 = ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6;
-  wire         _GEN_11 = state == 4'h6;
-  wire         _GEN_12 = ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9;
-  wire         _GEN_13 = state == 4'h7;
-  wire         _GEN_14 = ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11;
-  wire         _GEN_15 = state == 4'h8;
-  wire         _GEN_16 = state == 4'h9;
-  wire         _GEN_17 =
-    ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15;
-  wire         _GEN_18 = state == 4'hA;
-  wire         _GEN_19 =
-    ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15
-    | _GEN_16;
-  wire         _GEN_20 = state == 4'hB;
-  wire         _GEN_21 =
-    ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15
-    | _GEN_16 | _GEN_18;
-  wire         _GEN_22 = state == 4'hC;
-  wire         _GEN_23 = _GEN_18 | _GEN_20;
-  wire         _GEN_24 =
-    _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15 | _GEN_16
-    | _GEN_23;
-  wire         _GEN_25 = state == 4'hD;
-  wire         _GEN_26 =
-    ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15
-    | _GEN_16 | _GEN_18 | _GEN_20 | _GEN_22;
-  wire         _GEN_27 = state == 4'hE;
-  wire         _GEN_28 =
-    ~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13 | _GEN_15
-    | _GEN_16 | _GEN_18 | _GEN_20 | _GEN_22 | _GEN_25;
-  reg  [3:0]   casez_tmp;
-  wire [3:0]   _GEN_29 = _GEN_27 & m_axi_Metrics_WREADY ? 4'hF : state;
+  wire [31:0] selectedMatrixExpected =
+    ((|matrixIndex) ? 32'h0 : matrixLenPerChannel_0)
+    | (_selectedMatrixRMask_T_1 ? matrixLenPerChannel_1 : 32'h0)
+    | (_selectedMatrixRMask_T_2 ? matrixLenPerChannel_2 : 32'h0)
+    | (_selectedMatrixRMask_T_3 ? matrixLenPerChannel_3 : 32'h0)
+    | (_selectedMatrixRMask_T_4 ? matrixLenPerChannel_4 : 32'h0)
+    | (_selectedMatrixRMask_T_5 ? matrixLenPerChannel_5 : 32'h0)
+    | (_selectedMatrixRMask_T_6 ? matrixLenPerChannel_6 : 32'h0)
+    | ((&matrixIndex) ? matrixLenPerChannel_7 : 32'h0);
+  reg  [63:0] casez_tmp;
+  always @(*) begin
+    casez (metricIndex)
+      6'b000000:
+        casez_tmp = 64'h4353504D56384348;
+      6'b000001:
+        casez_tmp = cycleCounter;
+      6'b000010:
+        casez_tmp = {_ptrWordsExpected_T, 3'h0, ptrWordsRead};
+      6'b000011:
+        casez_tmp = {3'h0, _xPacketsExpected_T[32:4], xPacketsRead};
+      6'b000100:
+        casez_tmp = {bErrorMask, rErrorMask};
+      6'b000101:
+        casez_tmp = {32'h0, matrixDoneMask};
+      6'b000110:
+        casez_tmp = firstXLow64;
+      6'b000111:
+        casez_tmp = lastXLow64;
+      6'b001000:
+        casez_tmp = {32'h0, matrixBeatsRead_0};
+      6'b001001:
+        casez_tmp = {32'h0, matrixBeatsRead_1};
+      6'b001010:
+        casez_tmp = {32'h0, matrixBeatsRead_2};
+      6'b001011:
+        casez_tmp = {32'h0, matrixBeatsRead_3};
+      6'b001100:
+        casez_tmp = {32'h0, matrixBeatsRead_4};
+      6'b001101:
+        casez_tmp = {32'h0, matrixBeatsRead_5};
+      6'b001110:
+        casez_tmp = {32'h0, matrixBeatsRead_6};
+      6'b001111:
+        casez_tmp = {32'h0, matrixBeatsRead_7};
+      6'b010000:
+        casez_tmp = matrixFirstLow64_0;
+      6'b010001:
+        casez_tmp = matrixFirstLow64_1;
+      6'b010010:
+        casez_tmp = matrixFirstLow64_2;
+      6'b010011:
+        casez_tmp = matrixFirstLow64_3;
+      6'b010100:
+        casez_tmp = matrixFirstLow64_4;
+      6'b010101:
+        casez_tmp = matrixFirstLow64_5;
+      6'b010110:
+        casez_tmp = matrixFirstLow64_6;
+      6'b010111:
+        casez_tmp = matrixFirstLow64_7;
+      6'b011000:
+        casez_tmp = matrixLastLow64_0;
+      6'b011001:
+        casez_tmp = matrixLastLow64_1;
+      6'b011010:
+        casez_tmp = matrixLastLow64_2;
+      6'b011011:
+        casez_tmp = matrixLastLow64_3;
+      6'b011100:
+        casez_tmp = matrixLastLow64_4;
+      6'b011101:
+        casez_tmp = matrixLastLow64_5;
+      6'b011110:
+        casez_tmp = matrixLastLow64_6;
+      6'b011111:
+        casez_tmp = matrixLastLow64_7;
+      6'b100000:
+        casez_tmp = argPtr_0;
+      6'b100001:
+        casez_tmp = argPtr_9;
+      6'b100010:
+        casez_tmp = argPtr_10;
+      6'b100011:
+        casez_tmp = argPtr_11;
+      6'b100100:
+        casez_tmp = argPtr_12;
+      6'b100101:
+        casez_tmp = {rowNum, columnNum};
+      6'b100110:
+        casez_tmp = {batchNum, matrixLen};
+      6'b100111:
+        casez_tmp = {32'h0, iterationNum};
+      6'b101000:
+        casez_tmp = {ptrIndex, xPacketIndex};
+      6'b101001:
+        casez_tmp = {32'h0, matrixBeatIndex};
+      6'b101010:
+        casez_tmp = {firstPtr, lastPtr};
+      6'b101011:
+        casez_tmp = 64'h0;
+      6'b101100:
+        casez_tmp = 64'h0;
+      6'b101101:
+        casez_tmp = 64'h0;
+      6'b101110:
+        casez_tmp = 64'h0;
+      6'b101111:
+        casez_tmp = 64'h0;
+      6'b110000:
+        casez_tmp = 64'h0;
+      6'b110001:
+        casez_tmp = 64'h0;
+      6'b110010:
+        casez_tmp = 64'h0;
+      6'b110011:
+        casez_tmp = 64'h0;
+      6'b110100:
+        casez_tmp = 64'h0;
+      6'b110101:
+        casez_tmp = 64'h0;
+      6'b110110:
+        casez_tmp = 64'h0;
+      6'b110111:
+        casez_tmp = 64'h0;
+      6'b111000:
+        casez_tmp = 64'h0;
+      6'b111001:
+        casez_tmp = 64'h0;
+      6'b111010:
+        casez_tmp = 64'h0;
+      6'b111011:
+        casez_tmp = 64'h0;
+      6'b111100:
+        casez_tmp = 64'h0;
+      6'b111101:
+        casez_tmp = 64'h0;
+      6'b111110:
+        casez_tmp = 64'h0;
+      default:
+        casez_tmp = 64'h0;
+    endcase
+  end // always
+  wire        _GEN = state == 4'h1;
+  wire        _GEN_0 = state == 4'h2;
+  wire        _GEN_1 = ptrIndex == {_ptrWordsExpected_T, 3'h0} - 32'h1;
+  wire        _GEN_2 = state == 4'h3;
+  wire        _GEN_3 = _GEN | _GEN_0;
+  wire        _GEN_4 = ~(|state) | _GEN_3;
+  wire        _GEN_5 = state == 4'h4;
+  wire        _GEN_6 = _GEN | _GEN_0 | _GEN_2;
+  wire        _GEN_7 = xPacketIndex == {2'h0, {1'h0, _xPacketsExpected_T[32:4]} - 30'h1};
+  wire        _GEN_8 = state == 4'h5;
+  wire        _GEN_9 =
+    selectedMatrixExpected == 32'h0 | matrixBeatIndex >= selectedMatrixExpected;
+  wire [63:0] _GEN_10 = {26'h0, matrixBeatIndex, 6'h0};
+  wire        _GEN_11 = _GEN | _GEN_0 | _GEN_2 | _GEN_5;
+  wire        _GEN_12 = ~(|state) | _GEN_11;
+  wire        _GEN_13 = state == 4'h6;
+  wire        _GEN_14 = _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8;
+  wire        _GEN_15 = ~(|state) | _GEN_14;
+  reg  [31:0] casez_tmp_0;
+  always @(*) begin
+    casez (matrixIndex)
+      3'b000:
+        casez_tmp_0 = matrixBeatsRead_0;
+      3'b001:
+        casez_tmp_0 = matrixBeatsRead_1;
+      3'b010:
+        casez_tmp_0 = matrixBeatsRead_2;
+      3'b011:
+        casez_tmp_0 = matrixBeatsRead_3;
+      3'b100:
+        casez_tmp_0 = matrixBeatsRead_4;
+      3'b101:
+        casez_tmp_0 = matrixBeatsRead_5;
+      3'b110:
+        casez_tmp_0 = matrixBeatsRead_6;
+      default:
+        casez_tmp_0 = matrixBeatsRead_7;
+    endcase
+  end // always
+  wire        _GEN_16 = matrixBeatIndex == selectedMatrixExpected - 32'h1;
+  wire        _GEN_17 = state == 4'h7;
+  wire        _GEN_18 = ~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13;
+  wire        _GEN_19 = state == 4'h8;
+  wire        _GEN_20 = state == 4'h9;
+  wire        _GEN_21 =
+    _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19;
+  wire        _GEN_22 = state == 4'hA;
+  wire        _GEN_23 =
+    ~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19
+    | _GEN_20;
+  wire        _GEN_24 = state == 4'hB;
+  wire        _GEN_25 =
+    ~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19
+    | _GEN_20 | _GEN_22;
+  wire        _GEN_26 = state == 4'hC;
+  wire        _GEN_27 = _GEN_22 | _GEN_24;
+  wire        _GEN_28 =
+    _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19 | _GEN_20
+    | _GEN_27;
+  wire        _GEN_29 = state == 4'hD;
+  wire        _GEN_30 =
+    ~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19
+    | _GEN_20 | _GEN_22 | _GEN_24 | _GEN_26;
+  wire        _GEN_31 = state == 4'hE;
+  wire        _GEN_32 =
+    ~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19
+    | _GEN_20 | _GEN_22 | _GEN_24 | _GEN_26 | _GEN_29;
+  wire        _GEN_33 = _GEN_29 | _GEN_31;
+  wire        _GEN_34 =
+    _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17 | _GEN_19 | _GEN_20
+    | _GEN_22 | _GEN_24 | _GEN_26 | _GEN_33;
+  wire        _GEN_35 = (&state) & m_axi_Metrics_BVALID;
+  reg  [3:0]  casez_tmp_1;
+  wire [3:0]  _GEN_36 = _GEN_35 ? ((&metricIndex) ? 4'h0 : 4'hD) : state;
   always @(*) begin
     casez (state)
       4'b0000:
-        casez_tmp = _GEN_29;
+        casez_tmp_1 = _GEN_36;
       4'b0001:
-        casez_tmp = m_axi_SpElement_list_ptr_ARREADY ? 4'h2 : state;
+        casez_tmp_1 =
+          (|_ptrWordsExpected_T)
+            ? (m_axi_SpElement_list_ptr_ARREADY ? 4'h2 : state)
+            : 4'h3;
       4'b0010:
-        casez_tmp = m_axi_SpElement_list_ptr_RVALID ? 4'h3 : state;
+        casez_tmp_1 = m_axi_SpElement_list_ptr_RVALID ? {2'h0, _GEN_1, 1'h1} : state;
       4'b0011:
-        casez_tmp =
-          ~(|matrixIndex) & m_axi_Matrix_data_0_ARREADY | _selectedMatrixRResp_T_1
-          & m_axi_Matrix_data_1_ARREADY | _selectedMatrixRResp_T_2
-          & m_axi_Matrix_data_2_ARREADY | _selectedMatrixRResp_T_3
-          & m_axi_Matrix_data_3_ARREADY | _selectedMatrixRResp_T_4
-          & m_axi_Matrix_data_4_ARREADY | _selectedMatrixRResp_T_5
-          & m_axi_Matrix_data_5_ARREADY | _selectedMatrixRResp_T_6
-          & m_axi_Matrix_data_6_ARREADY | (&matrixIndex) & m_axi_Matrix_data_7_ARREADY
-            ? 4'h4
-            : state;
+        casez_tmp_1 =
+          (|(_xPacketsExpected_T[32:4])) ? (m_axi_X_ARREADY ? 4'h4 : state) : 4'h5;
       4'b0100:
-        casez_tmp = selectedMatrixRValid ? ((&matrixIndex) ? 4'h5 : 4'h3) : state;
+        casez_tmp_1 = m_axi_X_RVALID ? (_GEN_7 ? 4'h5 : 4'h3) : state;
       4'b0101:
-        casez_tmp = m_axi_X_ARREADY ? 4'h6 : state;
+        casez_tmp_1 =
+          _GEN_9
+            ? ((&matrixIndex) ? 4'h7 : state)
+            : ~(|matrixIndex) & m_axi_Matrix_data_0_ARREADY | _selectedMatrixRMask_T_1
+              & m_axi_Matrix_data_1_ARREADY | _selectedMatrixRMask_T_2
+              & m_axi_Matrix_data_2_ARREADY | _selectedMatrixRMask_T_3
+              & m_axi_Matrix_data_3_ARREADY | _selectedMatrixRMask_T_4
+              & m_axi_Matrix_data_4_ARREADY | _selectedMatrixRMask_T_5
+              & m_axi_Matrix_data_5_ARREADY | _selectedMatrixRMask_T_6
+              & m_axi_Matrix_data_6_ARREADY | (&matrixIndex) & m_axi_Matrix_data_7_ARREADY
+                ? 4'h6
+                : state;
       4'b0110:
-        casez_tmp = m_axi_X_RVALID ? 4'h7 : state;
+        casez_tmp_1 =
+          selectedMatrixRValid ? {2'h1, _GEN_16 & (&matrixIndex), 1'h1} : state;
       4'b0111:
-        casez_tmp = m_axi_Y_out_AWREADY ? 4'h8 : state;
+        casez_tmp_1 = m_axi_Y_out_AWREADY ? 4'h8 : state;
       4'b1000:
-        casez_tmp = m_axi_Y_out_WREADY ? 4'h9 : state;
+        casez_tmp_1 = m_axi_Y_out_WREADY ? 4'h9 : state;
       4'b1001:
-        casez_tmp = m_axi_Y_out_BVALID ? 4'hA : state;
+        casez_tmp_1 = m_axi_Y_out_BVALID ? 4'hA : state;
       4'b1010:
-        casez_tmp = m_axi_Status_AWREADY ? 4'hB : state;
+        casez_tmp_1 = m_axi_Status_AWREADY ? 4'hB : state;
       4'b1011:
-        casez_tmp = m_axi_Status_WREADY ? 4'hC : state;
+        casez_tmp_1 = m_axi_Status_WREADY ? 4'hC : state;
       4'b1100:
-        casez_tmp = m_axi_Status_BVALID ? (_GEN ? 4'hD : 4'hA) : state;
+        casez_tmp_1 = m_axi_Status_BVALID ? ((&statusIndex) ? 4'hD : 4'hA) : state;
       4'b1101:
-        casez_tmp = m_axi_Metrics_AWREADY ? 4'hE : state;
+        casez_tmp_1 = m_axi_Metrics_AWREADY ? 4'hE : state;
       4'b1110:
-        casez_tmp = _GEN_29;
+        casez_tmp_1 = m_axi_Metrics_WREADY ? 4'hF : state;
       default:
-        casez_tmp = _GEN_29;
+        casez_tmp_1 = _GEN_36;
     endcase
   end // always
-  wire [2:0]   unusedRespIds =
+  wire [2:0]  unusedRespIds =
     {m_axi_SpElement_list_ptr_RID,
      m_axi_SpElement_list_ptr_BID,
      m_axi_SpElement_list_ptr_RLAST}
@@ -667,57 +883,95 @@ module CuperSpmvChisel8(
     ^ {m_axi_Y_out_RID, m_axi_Y_out_BID, m_axi_Y_out_RLAST}
     ^ {m_axi_Status_RID, m_axi_Status_BID, m_axi_Status_RLAST}
     ^ {m_axi_Metrics_RID, m_axi_Metrics_BID, m_axi_Metrics_RLAST};
-  wire         _rIsCtrl_T = s_axi_control_ARADDR == 12'h0;
-  wire         commitWrite = awValid & wValid & ~bValid;
-  wire         _GEN_30 = awAddr == 12'h0;
-  wire         _GEN_31 = commitWrite & _GEN_30 & wData[0];
-  wire         _GEN_32 = awAddr == 12'h10;
-  wire         _GEN_33 = awAddr == 12'h14;
-  wire         _GEN_34 = awAddr == 12'h1C;
-  wire         _GEN_35 = awAddr == 12'h20;
-  wire         _GEN_36 = awAddr == 12'h28;
-  wire         _GEN_37 = awAddr == 12'h2C;
-  wire         _GEN_38 = awAddr == 12'h34;
-  wire         _GEN_39 = awAddr == 12'h38;
-  wire         _GEN_40 = awAddr == 12'h40;
-  wire         _GEN_41 = awAddr == 12'h44;
-  wire         _GEN_42 = awAddr == 12'h4C;
-  wire         _GEN_43 = awAddr == 12'h50;
-  wire         _GEN_44 = awAddr == 12'h58;
-  wire         _GEN_45 = awAddr == 12'h5C;
-  wire         _GEN_46 = awAddr == 12'h64;
-  wire         _GEN_47 = awAddr == 12'h68;
-  wire         _GEN_48 = awAddr == 12'h70;
-  wire         _GEN_49 = awAddr == 12'h74;
-  wire         _GEN_50 = awAddr == 12'h7C;
-  wire         _GEN_51 = awAddr == 12'h80;
-  wire         _GEN_52 = awAddr == 12'h88;
-  wire         _GEN_53 = awAddr == 12'h8C;
-  wire         _GEN_54 = awAddr == 12'h94;
-  wire         _GEN_55 = awAddr == 12'h98;
-  wire         _GEN_56 = awAddr == 12'hA0;
-  wire         _GEN_57 = awAddr == 12'hA4;
-  wire         _GEN_58 = awAddr == 12'hAC;
-  wire         _GEN_59 = awAddr == 12'hB4;
-  wire         _GEN_60 = awAddr == 12'hBC;
-  wire         _GEN_61 = awAddr == 12'hC4;
-  wire         _GEN_62 = ~rValid & s_axi_control_ARVALID;
-  wire         _GEN_63 = rValid & s_axi_control_RREADY;
-  wire [511:0] selectedMatrixRData =
-    ((|matrixIndex) ? 512'h0 : m_axi_Matrix_data_0_RDATA)
-    | (_selectedMatrixRResp_T_1 ? m_axi_Matrix_data_1_RDATA : 512'h0)
-    | (_selectedMatrixRResp_T_2 ? m_axi_Matrix_data_2_RDATA : 512'h0)
-    | (_selectedMatrixRResp_T_3 ? m_axi_Matrix_data_3_RDATA : 512'h0)
-    | (_selectedMatrixRResp_T_4 ? m_axi_Matrix_data_4_RDATA : 512'h0)
-    | (_selectedMatrixRResp_T_5 ? m_axi_Matrix_data_5_RDATA : 512'h0)
-    | (_selectedMatrixRResp_T_6 ? m_axi_Matrix_data_6_RDATA : 512'h0)
-    | ((&matrixIndex) ? m_axi_Matrix_data_7_RDATA : 512'h0);
-  wire         _GEN_64 = ~(|state) & startPending;
-  wire         _GEN_65 = _GEN_11 & m_axi_X_RVALID;
-  wire         _GEN_66 = _GEN_22 & m_axi_Status_BVALID;
-  wire         _GEN_67 = (&state) & m_axi_Metrics_BVALID;
-  wire         _GEN_68 = ~awValid & s_axi_control_AWVALID;
-  wire         _GEN_69 = ~wValid & s_axi_control_WVALID;
+  wire [1:0]  selectedMatrixRResp =
+    ((|matrixIndex) ? 2'h0 : m_axi_Matrix_data_0_RRESP)
+    | (_selectedMatrixRMask_T_1 ? m_axi_Matrix_data_1_RRESP : 2'h0)
+    | (_selectedMatrixRMask_T_2 ? m_axi_Matrix_data_2_RRESP : 2'h0)
+    | (_selectedMatrixRMask_T_3 ? m_axi_Matrix_data_3_RRESP : 2'h0)
+    | (_selectedMatrixRMask_T_4 ? m_axi_Matrix_data_4_RRESP : 2'h0)
+    | (_selectedMatrixRMask_T_5 ? m_axi_Matrix_data_5_RRESP : 2'h0)
+    | (_selectedMatrixRMask_T_6 ? m_axi_Matrix_data_6_RRESP : 2'h0)
+    | ((&matrixIndex) ? m_axi_Matrix_data_7_RRESP : 2'h0);
+  wire [31:0] selectedMatrixMask =
+    {31'h0, ~(|matrixIndex)} | {30'h0, _selectedMatrixRMask_T_1, 1'h0}
+    | {29'h0, _selectedMatrixRMask_T_2, 2'h0} | {28'h0, _selectedMatrixRMask_T_3, 3'h0}
+    | {27'h0, _selectedMatrixRMask_T_4, 4'h0} | {26'h0, _selectedMatrixRMask_T_5, 5'h0}
+    | {25'h0, _selectedMatrixRMask_T_6, 6'h0} | {24'h0, &matrixIndex, 7'h0};
+  wire [63:0] selectedMatrixRData =
+    ((|matrixIndex) ? 64'h0 : m_axi_Matrix_data_0_RDATA[63:0])
+    | (_selectedMatrixRMask_T_1 ? m_axi_Matrix_data_1_RDATA[63:0] : 64'h0)
+    | (_selectedMatrixRMask_T_2 ? m_axi_Matrix_data_2_RDATA[63:0] : 64'h0)
+    | (_selectedMatrixRMask_T_3 ? m_axi_Matrix_data_3_RDATA[63:0] : 64'h0)
+    | (_selectedMatrixRMask_T_4 ? m_axi_Matrix_data_4_RDATA[63:0] : 64'h0)
+    | (_selectedMatrixRMask_T_5 ? m_axi_Matrix_data_5_RDATA[63:0] : 64'h0)
+    | (_selectedMatrixRMask_T_6 ? m_axi_Matrix_data_6_RDATA[63:0] : 64'h0)
+    | ((&matrixIndex) ? m_axi_Matrix_data_7_RDATA[63:0] : 64'h0);
+  wire        _GEN_37 = _GEN_0 & m_axi_SpElement_list_ptr_RVALID;
+  wire        _GEN_38 = _GEN | ~_GEN_37;
+  wire        _GEN_39 =
+    _GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h0);
+  wire        _GEN_40 = _GEN_5 & m_axi_X_RVALID;
+  wire        _GEN_41 = _GEN_6 | ~_GEN_40;
+  wire [31:0] _matrixBeatsRead_T = casez_tmp_0 + 32'h1;
+  wire        _GEN_42 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & ~(|matrixIndex));
+  wire        _GEN_43 = matrixIndex == 3'h1;
+  wire        _GEN_44 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_43);
+  wire        _GEN_45 = matrixIndex == 3'h2;
+  wire        _GEN_46 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_45);
+  wire        _GEN_47 = matrixIndex == 3'h3;
+  wire        _GEN_48 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_47);
+  wire        _GEN_49 = matrixIndex == 3'h4;
+  wire        _GEN_50 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_49);
+  wire        _GEN_51 = matrixIndex == 3'h5;
+  wire        _GEN_52 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_51);
+  wire        _GEN_53 = matrixIndex == 3'h6;
+  wire        _GEN_54 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_53);
+  wire        _GEN_55 = _GEN_14 | ~(_GEN_13 & selectedMatrixRValid & (&matrixIndex));
+  wire        _GEN_56 = matrixBeatIndex == 32'h0;
+  wire        _GEN_57 = _GEN_13 & selectedMatrixRValid;
+  wire        _GEN_58 = _GEN_13 & selectedMatrixRValid & _GEN_16;
+  wire        _rIsCtrl_T = s_axi_control_ARADDR == 12'h0;
+  wire        commitWrite = awValid & wValid & ~bValid;
+  wire        _GEN_59 = awAddr == 12'h0;
+  wire        _GEN_60 = commitWrite & _GEN_59 & wData[0];
+  wire        _GEN_61 = _GEN_60 | startPending;
+  wire        _GEN_62 = awAddr == 12'h10;
+  wire        _GEN_63 = awAddr == 12'h14;
+  wire        _GEN_64 = awAddr == 12'h1C;
+  wire        _GEN_65 = awAddr == 12'h20;
+  wire        _GEN_66 = awAddr == 12'h28;
+  wire        _GEN_67 = awAddr == 12'h2C;
+  wire        _GEN_68 = awAddr == 12'h34;
+  wire        _GEN_69 = awAddr == 12'h38;
+  wire        _GEN_70 = awAddr == 12'h40;
+  wire        _GEN_71 = awAddr == 12'h44;
+  wire        _GEN_72 = awAddr == 12'h4C;
+  wire        _GEN_73 = awAddr == 12'h50;
+  wire        _GEN_74 = awAddr == 12'h58;
+  wire        _GEN_75 = awAddr == 12'h5C;
+  wire        _GEN_76 = awAddr == 12'h64;
+  wire        _GEN_77 = awAddr == 12'h68;
+  wire        _GEN_78 = awAddr == 12'h70;
+  wire        _GEN_79 = awAddr == 12'h74;
+  wire        _GEN_80 = awAddr == 12'h7C;
+  wire        _GEN_81 = awAddr == 12'h80;
+  wire        _GEN_82 = awAddr == 12'h88;
+  wire        _GEN_83 = awAddr == 12'h8C;
+  wire        _GEN_84 = awAddr == 12'h94;
+  wire        _GEN_85 = awAddr == 12'h98;
+  wire        _GEN_86 = awAddr == 12'hA0;
+  wire        _GEN_87 = awAddr == 12'hA4;
+  wire        _GEN_88 = awAddr == 12'hAC;
+  wire        _GEN_89 = awAddr == 12'hB4;
+  wire        _GEN_90 = awAddr == 12'hBC;
+  wire        _GEN_91 = awAddr == 12'hC4;
+  wire        _GEN_92 = ~rValid & s_axi_control_ARVALID;
+  wire        _GEN_93 = rValid & s_axi_control_RREADY;
+  wire        _GEN_94 =
+    _GEN_93 ? ~(rIsCtrl | _GEN_60) & doneSticky : ~_GEN_60 & doneSticky;
+  wire        _GEN_95 = (&state) & m_axi_Metrics_BVALID & (&metricIndex);
+  wire        _GEN_96 = ~awValid & s_axi_control_AWVALID;
+  wire        _GEN_97 = ~wValid & s_axi_control_WVALID;
   always @(posedge ap_clk) begin
     if (~ap_rst_n) begin
       argPtr_0 <= 64'h0;
@@ -745,19 +999,53 @@ module CuperSpmvChisel8(
       wValid <= 1'h0;
       bValid <= 1'h0;
       state <= 4'h0;
+      ptrIndex <= 32'h0;
+      xPacketIndex <= 32'h0;
       matrixIndex <= 3'h0;
-      statusIndex <= 5'h0;
-      metricIndex <= 5'h0;
-      ptr0 <= 32'h0;
-      x0 <= 512'h0;
-      matrixFirst_0 <= 512'h0;
-      matrixFirst_1 <= 512'h0;
-      matrixFirst_2 <= 512'h0;
-      matrixFirst_3 <= 512'h0;
-      matrixFirst_4 <= 512'h0;
-      matrixFirst_5 <= 512'h0;
-      matrixFirst_6 <= 512'h0;
-      matrixFirst_7 <= 512'h0;
+      matrixBeatIndex <= 32'h0;
+      statusIndex <= 6'h0;
+      metricIndex <= 6'h0;
+      ptrWordsRead <= 32'h0;
+      xPacketsRead <= 32'h0;
+      matrixLenPerChannel_0 <= 32'h0;
+      matrixLenPerChannel_1 <= 32'h0;
+      matrixLenPerChannel_2 <= 32'h0;
+      matrixLenPerChannel_3 <= 32'h0;
+      matrixLenPerChannel_4 <= 32'h0;
+      matrixLenPerChannel_5 <= 32'h0;
+      matrixLenPerChannel_6 <= 32'h0;
+      matrixLenPerChannel_7 <= 32'h0;
+      matrixBeatsRead_0 <= 32'h0;
+      matrixBeatsRead_1 <= 32'h0;
+      matrixBeatsRead_2 <= 32'h0;
+      matrixBeatsRead_3 <= 32'h0;
+      matrixBeatsRead_4 <= 32'h0;
+      matrixBeatsRead_5 <= 32'h0;
+      matrixBeatsRead_6 <= 32'h0;
+      matrixBeatsRead_7 <= 32'h0;
+      matrixDoneMask <= 32'h0;
+      rErrorMask <= 32'h0;
+      bErrorMask <= 32'h0;
+      firstPtr <= 32'h0;
+      lastPtr <= 32'h0;
+      firstXLow64 <= 64'h0;
+      lastXLow64 <= 64'h0;
+      matrixFirstLow64_0 <= 64'h0;
+      matrixFirstLow64_1 <= 64'h0;
+      matrixFirstLow64_2 <= 64'h0;
+      matrixFirstLow64_3 <= 64'h0;
+      matrixFirstLow64_4 <= 64'h0;
+      matrixFirstLow64_5 <= 64'h0;
+      matrixFirstLow64_6 <= 64'h0;
+      matrixFirstLow64_7 <= 64'h0;
+      matrixLastLow64_0 <= 64'h0;
+      matrixLastLow64_1 <= 64'h0;
+      matrixLastLow64_2 <= 64'h0;
+      matrixLastLow64_3 <= 64'h0;
+      matrixLastLow64_4 <= 64'h0;
+      matrixLastLow64_5 <= 64'h0;
+      matrixLastLow64_6 <= 64'h0;
+      matrixLastLow64_7 <= 64'h0;
       cycleCounter <= 64'h0;
       lastBresp <= 2'h0;
       lastRresp <= 2'h0;
@@ -766,267 +1054,491 @@ module CuperSpmvChisel8(
       rIsCtrl <= 1'h0;
     end
     else begin
-      if (~commitWrite | _GEN_30) begin
+      if (~commitWrite | _GEN_59) begin
       end
-      else if (_GEN_32)
+      else if (_GEN_62)
         argPtr_0 <= {argPtr_0[63:32], wData};
-      else if (_GEN_33)
+      else if (_GEN_63)
         argPtr_0 <= {wData, argPtr_0[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63) begin
       end
-      else if (_GEN_34)
+      else if (_GEN_64)
         argPtr_1 <= {argPtr_1[63:32], wData};
-      else if (_GEN_35)
+      else if (_GEN_65)
         argPtr_1 <= {wData, argPtr_1[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65) begin
       end
-      else if (_GEN_36)
+      else if (_GEN_66)
         argPtr_2 <= {argPtr_2[63:32], wData};
-      else if (_GEN_37)
+      else if (_GEN_67)
         argPtr_2 <= {wData, argPtr_2[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67) begin
       end
-      else if (_GEN_38)
+      else if (_GEN_68)
         argPtr_3 <= {argPtr_3[63:32], wData};
-      else if (_GEN_39)
+      else if (_GEN_69)
         argPtr_3 <= {wData, argPtr_3[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69) begin
       end
-      else if (_GEN_40)
+      else if (_GEN_70)
         argPtr_4 <= {argPtr_4[63:32], wData};
-      else if (_GEN_41)
+      else if (_GEN_71)
         argPtr_4 <= {wData, argPtr_4[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71) begin
       end
-      else if (_GEN_42)
+      else if (_GEN_72)
         argPtr_5 <= {argPtr_5[63:32], wData};
-      else if (_GEN_43)
+      else if (_GEN_73)
         argPtr_5 <= {wData, argPtr_5[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73) begin
       end
-      else if (_GEN_44)
+      else if (_GEN_74)
         argPtr_6 <= {argPtr_6[63:32], wData};
-      else if (_GEN_45)
+      else if (_GEN_75)
         argPtr_6 <= {wData, argPtr_6[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75) begin
       end
-      else if (_GEN_46)
+      else if (_GEN_76)
         argPtr_7 <= {argPtr_7[63:32], wData};
-      else if (_GEN_47)
+      else if (_GEN_77)
         argPtr_7 <= {wData, argPtr_7[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77) begin
       end
-      else if (_GEN_48)
+      else if (_GEN_78)
         argPtr_8 <= {argPtr_8[63:32], wData};
-      else if (_GEN_49)
+      else if (_GEN_79)
         argPtr_8 <= {wData, argPtr_8[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79) begin
       end
-      else if (_GEN_50)
+      else if (_GEN_80)
         argPtr_9 <= {argPtr_9[63:32], wData};
-      else if (_GEN_51)
+      else if (_GEN_81)
         argPtr_9 <= {wData, argPtr_9[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81) begin
       end
-      else if (_GEN_52)
+      else if (_GEN_82)
         argPtr_10 <= {argPtr_10[63:32], wData};
-      else if (_GEN_53)
+      else if (_GEN_83)
         argPtr_10 <= {wData, argPtr_10[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83) begin
       end
-      else if (_GEN_54)
+      else if (_GEN_84)
         argPtr_11 <= {argPtr_11[63:32], wData};
-      else if (_GEN_55)
+      else if (_GEN_85)
         argPtr_11 <= {wData, argPtr_11[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85) begin
       end
-      else if (_GEN_56)
+      else if (_GEN_86)
         argPtr_12 <= {argPtr_12[63:32], wData};
-      else if (_GEN_57)
+      else if (_GEN_87)
         argPtr_12 <= {wData, argPtr_12[31:0]};
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_56 | _GEN_57 | ~_GEN_58) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | ~_GEN_88) begin
       end
       else
         batchNum <= wData;
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_56 | _GEN_57 | _GEN_58 | ~_GEN_59) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | _GEN_88 | ~_GEN_89) begin
       end
       else
         matrixLen <= wData;
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_56 | _GEN_57 | _GEN_58 | _GEN_59
-          | ~_GEN_60) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | _GEN_88 | _GEN_89
+          | ~_GEN_90) begin
       end
       else
         rowNum <= wData;
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_56 | _GEN_57 | _GEN_58 | _GEN_59 | _GEN_60
-          | ~_GEN_61) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | _GEN_88 | _GEN_89 | _GEN_90
+          | ~_GEN_91) begin
       end
       else
         columnNum <= wData;
-      if (~commitWrite | _GEN_30 | _GEN_32 | _GEN_33 | _GEN_34 | _GEN_35 | _GEN_36
-          | _GEN_37 | _GEN_38 | _GEN_39 | _GEN_40 | _GEN_41 | _GEN_42 | _GEN_43 | _GEN_44
-          | _GEN_45 | _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_51 | _GEN_52
-          | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_56 | _GEN_57 | _GEN_58 | _GEN_59 | _GEN_60
-          | _GEN_61 | awAddr != 12'hCC) begin
+      if (~commitWrite | _GEN_59 | _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66
+          | _GEN_67 | _GEN_68 | _GEN_69 | _GEN_70 | _GEN_71 | _GEN_72 | _GEN_73 | _GEN_74
+          | _GEN_75 | _GEN_76 | _GEN_77 | _GEN_78 | _GEN_79 | _GEN_80 | _GEN_81 | _GEN_82
+          | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | _GEN_88 | _GEN_89 | _GEN_90
+          | _GEN_91 | awAddr != 12'hCC) begin
       end
       else
         iterationNum <= wData;
       startPending <=
-        (&state) & m_axi_Metrics_BVALID & _GEN_0 & autoRestart | ~_GEN_64
-        & (_GEN_31 | startPending);
-      if (commitWrite & _GEN_30)
+        (|state)
+          ? (_GEN_34 | ~_GEN_95 ? _GEN_61 : autoRestart | _GEN_60 | startPending)
+          : ~startPending & _GEN_61;
+      if (commitWrite & _GEN_59)
         autoRestart <= wData[7];
-      doneSticky <=
-        (&state) & m_axi_Metrics_BVALID & _GEN_0 | ~_GEN_64
-        & (_GEN_63 ? ~(rIsCtrl | _GEN_31) & doneSticky : ~_GEN_31 & doneSticky);
-      awValid <= ~commitWrite & (_GEN_68 | awValid);
-      wValid <= ~commitWrite & (_GEN_69 | wValid);
+      doneSticky <= (|state) ? ~_GEN_34 & _GEN_95 | _GEN_94 : ~startPending & _GEN_94;
+      awValid <= ~commitWrite & (_GEN_96 | awValid);
+      wValid <= ~commitWrite & (_GEN_97 | wValid);
       bValid <= ~(bValid & s_axi_control_BREADY) & (commitWrite | bValid);
-      if (_GEN_67) begin
-        state <= _GEN_0 ? 4'h0 : 4'hD;
-        lastBresp <= m_axi_Metrics_BRESP;
-      end
-      else begin
-        if (|state)
-          state <= casez_tmp;
-        else if (startPending)
-          state <= 4'h1;
-        if (~_GEN_17) begin
-          if (_GEN_16) begin
-            if (m_axi_Y_out_BVALID)
-              lastBresp <= m_axi_Y_out_BRESP;
+      if (|state) begin
+        state <= casez_tmp_1;
+        if (_GEN | ~_GEN_37 | _GEN_1) begin
+        end
+        else
+          ptrIndex <= ptrIndex + 32'h1;
+        if (~_GEN) begin
+          if (_GEN_0) begin
+            if (m_axi_SpElement_list_ptr_RVALID & _GEN_1)
+              xPacketIndex <= 32'h0;
+            if (m_axi_SpElement_list_ptr_RVALID & (|m_axi_SpElement_list_ptr_RRESP))
+              rErrorMask <= {rErrorMask[31:1], 1'h1};
+            if (m_axi_SpElement_list_ptr_RVALID)
+              lastRresp <= m_axi_SpElement_list_ptr_RRESP;
           end
-          else if (_GEN_23 | ~_GEN_66) begin
+          else begin
+            if (_GEN_2 | ~_GEN_40 | _GEN_7) begin
+            end
+            else
+              xPacketIndex <= xPacketIndex + 32'h1;
+            if (~_GEN_2) begin
+              rErrorMask <=
+                _GEN_5
+                  ? {22'h0, m_axi_X_RVALID & (|m_axi_X_RRESP), 9'h0} | rErrorMask
+                  : {32{~_GEN_8}}
+                    & {32{_GEN_13 & selectedMatrixRValid & (|selectedMatrixRResp)}}
+                    & ({30'h0, ~(|matrixIndex), 1'h0}
+                       | {29'h0, _selectedMatrixRMask_T_1, 2'h0}
+                       | {28'h0, _selectedMatrixRMask_T_2, 3'h0}
+                       | {27'h0, _selectedMatrixRMask_T_3, 4'h0}
+                       | {26'h0, _selectedMatrixRMask_T_4, 5'h0}
+                       | {25'h0, _selectedMatrixRMask_T_5, 6'h0}
+                       | {24'h0, _selectedMatrixRMask_T_6, 7'h0}
+                       | {23'h0, &matrixIndex, 8'h0}) | rErrorMask;
+              if (_GEN_5) begin
+                if (m_axi_X_RVALID)
+                  lastRresp <= m_axi_X_RRESP;
+              end
+              else if (_GEN_8 | ~_GEN_57) begin
+              end
+              else
+                lastRresp <= selectedMatrixRResp;
+            end
+          end
+        end
+        if (~_GEN_3) begin
+          if (_GEN_2) begin
+            if (~(|(_xPacketsExpected_T[32:4]))) begin
+              matrixIndex <= 3'h0;
+              matrixBeatIndex <= 32'h0;
+            end
+          end
+          else if (_GEN_5) begin
+            if (m_axi_X_RVALID & _GEN_7) begin
+              matrixIndex <= 3'h0;
+              matrixBeatIndex <= 32'h0;
+            end
+          end
+          else if (_GEN_8) begin
+            if (~_GEN_9 | (&matrixIndex)) begin
+            end
+            else begin
+              matrixIndex <= matrixIndex + 3'h1;
+              matrixBeatIndex <= 32'h0;
+            end
+          end
+          else begin
+            if (~_GEN_58 | (&matrixIndex)) begin
+            end
+            else
+              matrixIndex <= matrixIndex + 3'h1;
+            if (_GEN_57) begin
+              if (_GEN_16) begin
+                if (~(&matrixIndex))
+                  matrixBeatIndex <= 32'h0;
+              end
+              else
+                matrixBeatIndex <= matrixBeatIndex + 32'h1;
+            end
+          end
+        end
+        if (~_GEN_21) begin
+          if (_GEN_20) begin
+            if (m_axi_Y_out_BVALID) begin
+              statusIndex <= 6'h0;
+              lastBresp <= m_axi_Y_out_BRESP;
+            end
+            bErrorMask <=
+              {21'h0, m_axi_Y_out_BVALID & (|m_axi_Y_out_BRESP), 10'h0} | bErrorMask;
+          end
+          else begin
+            if (_GEN_27 | ~(_GEN_26 & m_axi_Status_BVALID) | (&statusIndex)) begin
+            end
+            else
+              statusIndex <= statusIndex + 6'h1;
+            if (~_GEN_27) begin
+              bErrorMask <=
+                _GEN_26
+                  ? {20'h0, m_axi_Status_BVALID & (|m_axi_Status_BRESP), 11'h0}
+                    | bErrorMask
+                  : {32{~_GEN_33}}
+                    & {19'h0,
+                       (&state) & m_axi_Metrics_BVALID & (|m_axi_Metrics_BRESP),
+                       12'h0} | bErrorMask;
+              if (_GEN_26) begin
+                if (m_axi_Status_BVALID)
+                  lastBresp <= m_axi_Status_BRESP;
+              end
+              else if (_GEN_33 | ~_GEN_35) begin
+              end
+              else
+                lastBresp <= m_axi_Metrics_BRESP;
+            end
+          end
+        end
+        if (~_GEN_28) begin
+          if (_GEN_26) begin
+            if (m_axi_Status_BVALID & (&statusIndex))
+              metricIndex <= 6'h0;
+          end
+          else if (_GEN_33 | ~_GEN_35 | (&metricIndex)) begin
           end
           else
-            lastBresp <= m_axi_Status_BRESP;
+            metricIndex <= metricIndex + 6'h1;
         end
-      end
-      if (|state) begin
-        if (_GEN_7 | ~(_GEN_6 & selectedMatrixRValid) | (&matrixIndex)) begin
+        if (_GEN_38) begin
         end
         else
-          matrixIndex <= matrixIndex + 3'h1;
-        if (_GEN_24 | ~_GEN_66 | _GEN) begin
+          ptrWordsRead <= ptrWordsRead + 32'h1;
+        if (_GEN_41) begin
         end
         else
-          statusIndex <= statusIndex + 5'h1;
+          xPacketsRead <= xPacketsRead + 32'h1;
+        if (_GEN_39) begin
+        end
+        else
+          matrixLenPerChannel_0 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h1)) begin
+        end
+        else
+          matrixLenPerChannel_1 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h2)) begin
+        end
+        else
+          matrixLenPerChannel_2 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h3)) begin
+        end
+        else
+          matrixLenPerChannel_3 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h4)) begin
+        end
+        else
+          matrixLenPerChannel_4 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h5)) begin
+        end
+        else
+          matrixLenPerChannel_5 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h6)) begin
+        end
+        else
+          matrixLenPerChannel_6 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN | ~(_GEN_0 & m_axi_SpElement_list_ptr_RVALID & ptrIndex == 32'h7)) begin
+        end
+        else
+          matrixLenPerChannel_7 <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN_42) begin
+        end
+        else
+          matrixBeatsRead_0 <= _matrixBeatsRead_T;
+        if (_GEN_44) begin
+        end
+        else
+          matrixBeatsRead_1 <= _matrixBeatsRead_T;
+        if (_GEN_46) begin
+        end
+        else
+          matrixBeatsRead_2 <= _matrixBeatsRead_T;
+        if (_GEN_48) begin
+        end
+        else
+          matrixBeatsRead_3 <= _matrixBeatsRead_T;
+        if (_GEN_50) begin
+        end
+        else
+          matrixBeatsRead_4 <= _matrixBeatsRead_T;
+        if (_GEN_52) begin
+        end
+        else
+          matrixBeatsRead_5 <= _matrixBeatsRead_T;
+        if (_GEN_54) begin
+        end
+        else
+          matrixBeatsRead_6 <= _matrixBeatsRead_T;
+        if (_GEN_55) begin
+        end
+        else
+          matrixBeatsRead_7 <= _matrixBeatsRead_T;
+        if (~_GEN_11)
+          matrixDoneMask <=
+            _GEN_8
+              ? {32{_GEN_9}} & selectedMatrixMask | matrixDoneMask
+              : {32{_GEN_58}} & selectedMatrixMask | matrixDoneMask;
+        if (_GEN_39) begin
+        end
+        else
+          firstPtr <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN_38) begin
+        end
+        else
+          lastPtr <= m_axi_SpElement_list_ptr_RDATA;
+        if (_GEN_6 | ~(_GEN_5 & m_axi_X_RVALID & xPacketIndex == 32'h0)) begin
+        end
+        else
+          firstXLow64 <= m_axi_X_RDATA[63:0];
+        if (_GEN_41) begin
+        end
+        else
+          lastXLow64 <= m_axi_X_RDATA[63:0];
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & ~(|matrixIndex))) begin
+        end
+        else
+          matrixFirstLow64_0 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_43)) begin
+        end
+        else
+          matrixFirstLow64_1 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_45)) begin
+        end
+        else
+          matrixFirstLow64_2 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_47)) begin
+        end
+        else
+          matrixFirstLow64_3 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_49)) begin
+        end
+        else
+          matrixFirstLow64_4 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_51)) begin
+        end
+        else
+          matrixFirstLow64_5 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & _GEN_53)) begin
+        end
+        else
+          matrixFirstLow64_6 <= selectedMatrixRData;
+        if (_GEN_14 | ~(_GEN_13 & selectedMatrixRValid & _GEN_56 & (&matrixIndex))) begin
+        end
+        else
+          matrixFirstLow64_7 <= selectedMatrixRData;
+        if (_GEN_42) begin
+        end
+        else
+          matrixLastLow64_0 <= selectedMatrixRData;
+        if (_GEN_44) begin
+        end
+        else
+          matrixLastLow64_1 <= selectedMatrixRData;
+        if (_GEN_46) begin
+        end
+        else
+          matrixLastLow64_2 <= selectedMatrixRData;
+        if (_GEN_48) begin
+        end
+        else
+          matrixLastLow64_3 <= selectedMatrixRData;
+        if (_GEN_50) begin
+        end
+        else
+          matrixLastLow64_4 <= selectedMatrixRData;
+        if (_GEN_52) begin
+        end
+        else
+          matrixLastLow64_5 <= selectedMatrixRData;
+        if (_GEN_54) begin
+        end
+        else
+          matrixLastLow64_6 <= selectedMatrixRData;
+        if (_GEN_55) begin
+        end
+        else
+          matrixLastLow64_7 <= selectedMatrixRData;
       end
       else if (startPending) begin
+        state <= 4'h1;
+        ptrIndex <= 32'h0;
+        xPacketIndex <= 32'h0;
         matrixIndex <= 3'h0;
-        statusIndex <= 5'h0;
+        matrixBeatIndex <= 32'h0;
+        statusIndex <= 6'h0;
+        metricIndex <= 6'h0;
+        ptrWordsRead <= 32'h0;
+        xPacketsRead <= 32'h0;
+        matrixLenPerChannel_0 <= 32'h0;
+        matrixLenPerChannel_1 <= 32'h0;
+        matrixLenPerChannel_2 <= 32'h0;
+        matrixLenPerChannel_3 <= 32'h0;
+        matrixLenPerChannel_4 <= 32'h0;
+        matrixLenPerChannel_5 <= 32'h0;
+        matrixLenPerChannel_6 <= 32'h0;
+        matrixLenPerChannel_7 <= 32'h0;
+        matrixBeatsRead_0 <= 32'h0;
+        matrixBeatsRead_1 <= 32'h0;
+        matrixBeatsRead_2 <= 32'h0;
+        matrixBeatsRead_3 <= 32'h0;
+        matrixBeatsRead_4 <= 32'h0;
+        matrixBeatsRead_5 <= 32'h0;
+        matrixBeatsRead_6 <= 32'h0;
+        matrixBeatsRead_7 <= 32'h0;
+        matrixDoneMask <= 32'h0;
+        rErrorMask <= 32'h0;
+        bErrorMask <= 32'h0;
+        firstPtr <= 32'h0;
+        lastPtr <= 32'h0;
+        firstXLow64 <= 64'h0;
+        lastXLow64 <= 64'h0;
+        matrixFirstLow64_0 <= 64'h0;
+        matrixFirstLow64_1 <= 64'h0;
+        matrixFirstLow64_2 <= 64'h0;
+        matrixFirstLow64_3 <= 64'h0;
+        matrixFirstLow64_4 <= 64'h0;
+        matrixFirstLow64_5 <= 64'h0;
+        matrixFirstLow64_6 <= 64'h0;
+        matrixFirstLow64_7 <= 64'h0;
+        matrixLastLow64_0 <= 64'h0;
+        matrixLastLow64_1 <= 64'h0;
+        matrixLastLow64_2 <= 64'h0;
+        matrixLastLow64_3 <= 64'h0;
+        matrixLastLow64_4 <= 64'h0;
+        matrixLastLow64_5 <= 64'h0;
+        matrixLastLow64_6 <= 64'h0;
+        matrixLastLow64_7 <= 64'h0;
+        lastBresp <= 2'h0;
+        lastRresp <= 2'h0;
       end
-      if (~_GEN_67 | _GEN_0) begin
-        if (|state) begin
-          if (_GEN_24 | ~(_GEN_22 & m_axi_Status_BVALID & _GEN)) begin
-          end
-          else
-            metricIndex <= 5'h0;
-        end
-        else if (startPending)
-          metricIndex <= 5'h0;
-      end
-      else
-        metricIndex <= metricIndex + 5'h1;
-      if (_GEN_3 | ~(_GEN_2 & m_axi_SpElement_list_ptr_RVALID)) begin
-      end
-      else
-        ptr0 <= m_axi_SpElement_list_ptr_RDATA;
-      if (_GEN_12 | ~_GEN_65) begin
-      end
-      else
-        x0 <= m_axi_X_RDATA;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & ~(|matrixIndex))) begin
-      end
-      else
-        matrixFirst_0 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h1)) begin
-      end
-      else
-        matrixFirst_1 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h2)) begin
-      end
-      else
-        matrixFirst_2 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h3)) begin
-      end
-      else
-        matrixFirst_3 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h4)) begin
-      end
-      else
-        matrixFirst_4 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h5)) begin
-      end
-      else
-        matrixFirst_5 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & matrixIndex == 3'h6)) begin
-      end
-      else
-        matrixFirst_6 <= selectedMatrixRData;
-      if (_GEN_8 | ~(_GEN_6 & selectedMatrixRValid & (&matrixIndex))) begin
-      end
-      else
-        matrixFirst_7 <= selectedMatrixRData;
-      if (_GEN_64)
+      if (~(|state) & startPending)
         cycleCounter <= 64'h0;
       else if (|state)
         cycleCounter <= cycleCounter + 64'h1;
-      if (~_GEN_3) begin
-        if (_GEN_2) begin
-          if (m_axi_SpElement_list_ptr_RVALID)
-            lastRresp <= m_axi_SpElement_list_ptr_RRESP;
-        end
-        else if (~_GEN_4) begin
-          if (_GEN_6) begin
-            if (selectedMatrixRValid)
-              lastRresp <=
-                ((|matrixIndex) ? 2'h0 : m_axi_Matrix_data_0_RRESP)
-                | (_selectedMatrixRResp_T_1 ? m_axi_Matrix_data_1_RRESP : 2'h0)
-                | (_selectedMatrixRResp_T_2 ? m_axi_Matrix_data_2_RRESP : 2'h0)
-                | (_selectedMatrixRResp_T_3 ? m_axi_Matrix_data_3_RRESP : 2'h0)
-                | (_selectedMatrixRResp_T_4 ? m_axi_Matrix_data_4_RRESP : 2'h0)
-                | (_selectedMatrixRResp_T_5 ? m_axi_Matrix_data_5_RRESP : 2'h0)
-                | (_selectedMatrixRResp_T_6 ? m_axi_Matrix_data_6_RRESP : 2'h0)
-                | ((&matrixIndex) ? m_axi_Matrix_data_7_RRESP : 2'h0);
-          end
-          else if (_GEN_9 | ~_GEN_65) begin
-          end
-          else
-            lastRresp <= m_axi_X_RRESP;
-        end
-      end
-      rValid <= ~_GEN_63 & (_GEN_62 | rValid);
-      if (_GEN_62) begin
+      rValid <= ~_GEN_93 & (_GEN_92 | rValid);
+      if (_GEN_92) begin
         rData <=
           _rIsCtrl_T
             ? {24'h0, autoRestart, 3'h0, doneSticky, ~(|state), doneSticky, startPending}
@@ -1096,9 +1608,9 @@ module CuperSpmvChisel8(
         rIsCtrl <= _rIsCtrl_T;
       end
     end
-    if (_GEN_68)
+    if (_GEN_96)
       awAddr <= s_axi_control_AWADDR;
-    if (_GEN_69) begin
+    if (_GEN_97) begin
       wData <= s_axi_control_WDATA;
       wStrb <= s_axi_control_WSTRB;
     end
@@ -1123,7 +1635,8 @@ module CuperSpmvChisel8(
   assign m_axi_SpElement_list_ptr_AWSIZE = 3'h2;
   assign m_axi_SpElement_list_ptr_AWVALID = 1'h0;
   assign m_axi_SpElement_list_ptr_BREADY = 1'h0;
-  assign m_axi_SpElement_list_ptr_ARADDR = (|state) & _GEN_1 ? argPtr_0 : 64'h0;
+  assign m_axi_SpElement_list_ptr_ARADDR =
+    (|state) & _GEN & (|_ptrWordsExpected_T) ? argPtr_0 + {30'h0, ptrIndex, 2'h0} : 64'h0;
   assign m_axi_SpElement_list_ptr_ARBURST = 2'h1;
   assign m_axi_SpElement_list_ptr_ARCACHE = 4'h3;
   assign m_axi_SpElement_list_ptr_ARID = 1'h0;
@@ -1132,8 +1645,8 @@ module CuperSpmvChisel8(
   assign m_axi_SpElement_list_ptr_ARPROT = 3'h0;
   assign m_axi_SpElement_list_ptr_ARQOS = 4'h0;
   assign m_axi_SpElement_list_ptr_ARSIZE = 3'h2;
-  assign m_axi_SpElement_list_ptr_ARVALID = (|state) & _GEN_1;
-  assign m_axi_SpElement_list_ptr_RREADY = ~_GEN_3 & _GEN_2;
+  assign m_axi_SpElement_list_ptr_ARVALID = (|state) & _GEN & (|_ptrWordsExpected_T);
+  assign m_axi_SpElement_list_ptr_RREADY = ~(~(|state) | _GEN) & _GEN_0;
   assign m_axi_SpElement_list_ptr_WDATA = 32'h0;
   assign m_axi_SpElement_list_ptr_WLAST = 1'h1;
   assign m_axi_SpElement_list_ptr_WSTRB = 4'hF;
@@ -1150,7 +1663,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_0_AWVALID = 1'h0;
   assign m_axi_Matrix_data_0_BREADY = 1'h0;
   assign m_axi_Matrix_data_0_ARADDR =
-    _GEN_5 | ~(_GEN_4 & ~(|matrixIndex)) ? 64'h0 : argPtr_1;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | (|matrixIndex) ? 64'h0 : argPtr_1 + _GEN_10;
   assign m_axi_Matrix_data_0_ARBURST = 2'h1;
   assign m_axi_Matrix_data_0_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_0_ARID = 1'h0;
@@ -1159,8 +1672,8 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_0_ARPROT = 3'h0;
   assign m_axi_Matrix_data_0_ARQOS = 4'h0;
   assign m_axi_Matrix_data_0_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_0_ARVALID = ~_GEN_5 & _GEN_4 & ~(|matrixIndex);
-  assign m_axi_Matrix_data_0_RREADY = ~_GEN_8 & _GEN_6 & ~(|matrixIndex);
+  assign m_axi_Matrix_data_0_ARVALID = ~_GEN_12 & _GEN_8 & ~_GEN_9 & ~(|matrixIndex);
+  assign m_axi_Matrix_data_0_RREADY = ~_GEN_15 & _GEN_13 & ~(|matrixIndex);
   assign m_axi_Matrix_data_0_WDATA = 512'h0;
   assign m_axi_Matrix_data_0_WLAST = 1'h1;
   assign m_axi_Matrix_data_0_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1177,7 +1690,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_1_AWVALID = 1'h0;
   assign m_axi_Matrix_data_1_BREADY = 1'h0;
   assign m_axi_Matrix_data_1_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_1) ? 64'h0 : argPtr_2;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_1 ? 64'h0 : argPtr_2 + _GEN_10;
   assign m_axi_Matrix_data_1_ARBURST = 2'h1;
   assign m_axi_Matrix_data_1_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_1_ARID = 1'h0;
@@ -1186,8 +1699,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_1_ARPROT = 3'h0;
   assign m_axi_Matrix_data_1_ARQOS = 4'h0;
   assign m_axi_Matrix_data_1_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_1_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_1;
-  assign m_axi_Matrix_data_1_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_1;
+  assign m_axi_Matrix_data_1_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_1;
+  assign m_axi_Matrix_data_1_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_1;
   assign m_axi_Matrix_data_1_WDATA = 512'h0;
   assign m_axi_Matrix_data_1_WLAST = 1'h1;
   assign m_axi_Matrix_data_1_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1204,7 +1718,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_2_AWVALID = 1'h0;
   assign m_axi_Matrix_data_2_BREADY = 1'h0;
   assign m_axi_Matrix_data_2_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_2) ? 64'h0 : argPtr_3;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_2 ? 64'h0 : argPtr_3 + _GEN_10;
   assign m_axi_Matrix_data_2_ARBURST = 2'h1;
   assign m_axi_Matrix_data_2_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_2_ARID = 1'h0;
@@ -1213,8 +1727,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_2_ARPROT = 3'h0;
   assign m_axi_Matrix_data_2_ARQOS = 4'h0;
   assign m_axi_Matrix_data_2_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_2_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_2;
-  assign m_axi_Matrix_data_2_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_2;
+  assign m_axi_Matrix_data_2_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_2;
+  assign m_axi_Matrix_data_2_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_2;
   assign m_axi_Matrix_data_2_WDATA = 512'h0;
   assign m_axi_Matrix_data_2_WLAST = 1'h1;
   assign m_axi_Matrix_data_2_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1231,7 +1746,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_3_AWVALID = 1'h0;
   assign m_axi_Matrix_data_3_BREADY = 1'h0;
   assign m_axi_Matrix_data_3_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_3) ? 64'h0 : argPtr_4;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_3 ? 64'h0 : argPtr_4 + _GEN_10;
   assign m_axi_Matrix_data_3_ARBURST = 2'h1;
   assign m_axi_Matrix_data_3_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_3_ARID = 1'h0;
@@ -1240,8 +1755,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_3_ARPROT = 3'h0;
   assign m_axi_Matrix_data_3_ARQOS = 4'h0;
   assign m_axi_Matrix_data_3_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_3_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_3;
-  assign m_axi_Matrix_data_3_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_3;
+  assign m_axi_Matrix_data_3_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_3;
+  assign m_axi_Matrix_data_3_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_3;
   assign m_axi_Matrix_data_3_WDATA = 512'h0;
   assign m_axi_Matrix_data_3_WLAST = 1'h1;
   assign m_axi_Matrix_data_3_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1258,7 +1774,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_4_AWVALID = 1'h0;
   assign m_axi_Matrix_data_4_BREADY = 1'h0;
   assign m_axi_Matrix_data_4_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_4) ? 64'h0 : argPtr_5;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_4 ? 64'h0 : argPtr_5 + _GEN_10;
   assign m_axi_Matrix_data_4_ARBURST = 2'h1;
   assign m_axi_Matrix_data_4_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_4_ARID = 1'h0;
@@ -1267,8 +1783,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_4_ARPROT = 3'h0;
   assign m_axi_Matrix_data_4_ARQOS = 4'h0;
   assign m_axi_Matrix_data_4_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_4_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_4;
-  assign m_axi_Matrix_data_4_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_4;
+  assign m_axi_Matrix_data_4_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_4;
+  assign m_axi_Matrix_data_4_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_4;
   assign m_axi_Matrix_data_4_WDATA = 512'h0;
   assign m_axi_Matrix_data_4_WLAST = 1'h1;
   assign m_axi_Matrix_data_4_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1285,7 +1802,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_5_AWVALID = 1'h0;
   assign m_axi_Matrix_data_5_BREADY = 1'h0;
   assign m_axi_Matrix_data_5_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_5) ? 64'h0 : argPtr_6;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_5 ? 64'h0 : argPtr_6 + _GEN_10;
   assign m_axi_Matrix_data_5_ARBURST = 2'h1;
   assign m_axi_Matrix_data_5_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_5_ARID = 1'h0;
@@ -1294,8 +1811,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_5_ARPROT = 3'h0;
   assign m_axi_Matrix_data_5_ARQOS = 4'h0;
   assign m_axi_Matrix_data_5_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_5_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_5;
-  assign m_axi_Matrix_data_5_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_5;
+  assign m_axi_Matrix_data_5_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_5;
+  assign m_axi_Matrix_data_5_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_5;
   assign m_axi_Matrix_data_5_WDATA = 512'h0;
   assign m_axi_Matrix_data_5_WLAST = 1'h1;
   assign m_axi_Matrix_data_5_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1312,7 +1830,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_6_AWVALID = 1'h0;
   assign m_axi_Matrix_data_6_BREADY = 1'h0;
   assign m_axi_Matrix_data_6_ARADDR =
-    _GEN_5 | ~(_GEN_4 & _selectedMatrixRResp_T_6) ? 64'h0 : argPtr_7;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~_selectedMatrixRMask_T_6 ? 64'h0 : argPtr_7 + _GEN_10;
   assign m_axi_Matrix_data_6_ARBURST = 2'h1;
   assign m_axi_Matrix_data_6_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_6_ARID = 1'h0;
@@ -1321,8 +1839,9 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_6_ARPROT = 3'h0;
   assign m_axi_Matrix_data_6_ARQOS = 4'h0;
   assign m_axi_Matrix_data_6_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_6_ARVALID = ~_GEN_5 & _GEN_4 & _selectedMatrixRResp_T_6;
-  assign m_axi_Matrix_data_6_RREADY = ~_GEN_8 & _GEN_6 & _selectedMatrixRResp_T_6;
+  assign m_axi_Matrix_data_6_ARVALID =
+    ~_GEN_12 & _GEN_8 & ~_GEN_9 & _selectedMatrixRMask_T_6;
+  assign m_axi_Matrix_data_6_RREADY = ~_GEN_15 & _GEN_13 & _selectedMatrixRMask_T_6;
   assign m_axi_Matrix_data_6_WDATA = 512'h0;
   assign m_axi_Matrix_data_6_WLAST = 1'h1;
   assign m_axi_Matrix_data_6_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1339,7 +1858,7 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_7_AWVALID = 1'h0;
   assign m_axi_Matrix_data_7_BREADY = 1'h0;
   assign m_axi_Matrix_data_7_ARADDR =
-    _GEN_5 | ~(_GEN_4 & (&matrixIndex)) ? 64'h0 : argPtr_8;
+    _GEN_12 | ~_GEN_8 | _GEN_9 | ~(&matrixIndex) ? 64'h0 : argPtr_8 + _GEN_10;
   assign m_axi_Matrix_data_7_ARBURST = 2'h1;
   assign m_axi_Matrix_data_7_ARCACHE = 4'h3;
   assign m_axi_Matrix_data_7_ARID = 1'h0;
@@ -1348,8 +1867,8 @@ module CuperSpmvChisel8(
   assign m_axi_Matrix_data_7_ARPROT = 3'h0;
   assign m_axi_Matrix_data_7_ARQOS = 4'h0;
   assign m_axi_Matrix_data_7_ARSIZE = 3'h6;
-  assign m_axi_Matrix_data_7_ARVALID = ~_GEN_5 & _GEN_4 & (&matrixIndex);
-  assign m_axi_Matrix_data_7_RREADY = ~_GEN_8 & _GEN_6 & (&matrixIndex);
+  assign m_axi_Matrix_data_7_ARVALID = ~_GEN_12 & _GEN_8 & ~_GEN_9 & (&matrixIndex);
+  assign m_axi_Matrix_data_7_RREADY = ~_GEN_15 & _GEN_13 & (&matrixIndex);
   assign m_axi_Matrix_data_7_WDATA = 512'h0;
   assign m_axi_Matrix_data_7_WLAST = 1'h1;
   assign m_axi_Matrix_data_7_WSTRB = 64'hFFFFFFFFFFFFFFFF;
@@ -1365,7 +1884,10 @@ module CuperSpmvChisel8(
   assign m_axi_X_AWSIZE = 3'h6;
   assign m_axi_X_AWVALID = 1'h0;
   assign m_axi_X_BREADY = 1'h0;
-  assign m_axi_X_ARADDR = _GEN_10 | ~_GEN_9 ? 64'h0 : argPtr_9;
+  assign m_axi_X_ARADDR =
+    _GEN_4 | ~(_GEN_2 & (|(_xPacketsExpected_T[32:4])))
+      ? 64'h0
+      : argPtr_9 + {26'h0, xPacketIndex, 6'h0};
   assign m_axi_X_ARBURST = 2'h1;
   assign m_axi_X_ARCACHE = 4'h3;
   assign m_axi_X_ARID = 1'h0;
@@ -1374,13 +1896,13 @@ module CuperSpmvChisel8(
   assign m_axi_X_ARPROT = 3'h0;
   assign m_axi_X_ARQOS = 4'h0;
   assign m_axi_X_ARSIZE = 3'h6;
-  assign m_axi_X_ARVALID = ~_GEN_10 & _GEN_9;
-  assign m_axi_X_RREADY = ~_GEN_12 & _GEN_11;
+  assign m_axi_X_ARVALID = ~_GEN_4 & _GEN_2 & (|(_xPacketsExpected_T[32:4]));
+  assign m_axi_X_RREADY = ~(~(|state) | _GEN_6) & _GEN_5;
   assign m_axi_X_WDATA = 512'h0;
   assign m_axi_X_WLAST = 1'h1;
   assign m_axi_X_WSTRB = 64'hFFFFFFFFFFFFFFFF;
   assign m_axi_X_WVALID = 1'h0;
-  assign m_axi_Y_out_AWADDR = _GEN_14 | ~_GEN_13 ? 64'h0 : argPtr_10;
+  assign m_axi_Y_out_AWADDR = _GEN_18 | ~_GEN_17 ? 64'h0 : argPtr_10;
   assign m_axi_Y_out_AWBURST = 2'h1;
   assign m_axi_Y_out_AWCACHE = 4'h3;
   assign m_axi_Y_out_AWID = 1'h0;
@@ -1389,8 +1911,8 @@ module CuperSpmvChisel8(
   assign m_axi_Y_out_AWPROT = 3'h0;
   assign m_axi_Y_out_AWQOS = 4'h0;
   assign m_axi_Y_out_AWSIZE = 3'h2;
-  assign m_axi_Y_out_AWVALID = ~_GEN_14 & _GEN_13;
-  assign m_axi_Y_out_BREADY = ~_GEN_17 & _GEN_16;
+  assign m_axi_Y_out_AWVALID = ~_GEN_18 & _GEN_17;
+  assign m_axi_Y_out_BREADY = ~(~(|state) | _GEN_21) & _GEN_20;
   assign m_axi_Y_out_ARADDR = 64'h0;
   assign m_axi_Y_out_ARBURST = 2'h1;
   assign m_axi_Y_out_ARCACHE = 4'h3;
@@ -1406,10 +1928,9 @@ module CuperSpmvChisel8(
   assign m_axi_Y_out_WLAST = 1'h1;
   assign m_axi_Y_out_WSTRB = 4'hF;
   assign m_axi_Y_out_WVALID =
-    ~(~(|state) | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_6 | _GEN_9 | _GEN_11 | _GEN_13)
-    & _GEN_15;
+    ~(~(|state) | _GEN | _GEN_0 | _GEN_2 | _GEN_5 | _GEN_8 | _GEN_13 | _GEN_17) & _GEN_19;
   assign m_axi_Status_AWADDR =
-    _GEN_19 | ~_GEN_18 ? 64'h0 : argPtr_11 + {57'h0, statusIndex, 2'h0};
+    _GEN_23 | ~_GEN_22 ? 64'h0 : argPtr_11 + {56'h0, statusIndex, 2'h0};
   assign m_axi_Status_AWBURST = 2'h1;
   assign m_axi_Status_AWCACHE = 4'h3;
   assign m_axi_Status_AWID = 1'h0;
@@ -1418,8 +1939,8 @@ module CuperSpmvChisel8(
   assign m_axi_Status_AWPROT = 3'h0;
   assign m_axi_Status_AWQOS = 4'h0;
   assign m_axi_Status_AWSIZE = 3'h2;
-  assign m_axi_Status_AWVALID = ~_GEN_19 & _GEN_18;
-  assign m_axi_Status_BREADY = ~(~(|state) | _GEN_24) & _GEN_22;
+  assign m_axi_Status_AWVALID = ~_GEN_23 & _GEN_22;
+  assign m_axi_Status_BREADY = ~(~(|state) | _GEN_28) & _GEN_26;
   assign m_axi_Status_ARADDR = 64'h0;
   assign m_axi_Status_ARBURST = 2'h1;
   assign m_axi_Status_ARCACHE = 4'h3;
@@ -1432,46 +1953,80 @@ module CuperSpmvChisel8(
   assign m_axi_Status_ARVALID = 1'h0;
   assign m_axi_Status_RREADY = 1'h0;
   assign m_axi_Status_WDATA =
-    _GEN_21 | ~_GEN_20
+    _GEN_25 | ~_GEN_24
       ? 32'h0
-      : statusIndex == 5'h0
+      : statusIndex == 6'h0
           ? 32'h1
-          : statusIndex == 5'h1
+          : statusIndex == 6'h1
               ? 32'h43535056
-              : statusIndex == 5'h2
+              : statusIndex == 6'h2
                   ? rowNum
-                  : statusIndex == 5'h3
+                  : statusIndex == 6'h3
                       ? columnNum
-                      : statusIndex == 5'h4
+                      : statusIndex == 6'h4
                           ? batchNum
-                          : statusIndex == 5'h5
+                          : statusIndex == 6'h5
                               ? matrixLen
-                              : statusIndex == 5'h6
+                              : statusIndex == 6'h6
                                   ? iterationNum
-                                  : statusIndex == 5'h7
-                                      ? ptr0
-                                      : statusIndex == 5'h8
-                                          ? x0[31:0]
-                                          : statusIndex == 5'h9
-                                              ? matrixFirst_0[31:0]
-                                              : statusIndex == 5'hA
-                                                  ? matrixFirst_1[31:0]
-                                                  : statusIndex == 5'hB
-                                                      ? matrixFirst_2[31:0]
-                                                      : statusIndex == 5'hC
-                                                          ? matrixFirst_3[31:0]
-                                                          : statusIndex == 5'hD
-                                                              ? {28'h0, state}
-                                                              : statusIndex == 5'hE
+                                  : statusIndex == 6'h7
+                                      ? {_ptrWordsExpected_T, 3'h0}
+                                      : statusIndex == 6'h8
+                                          ? ptrWordsRead
+                                          : statusIndex == 6'h9
+                                              ? {3'h0, _xPacketsExpected_T[32:4]}
+                                              : statusIndex == 6'hA
+                                                  ? xPacketsRead
+                                                  : statusIndex == 6'hB
+                                                      ? matrixDoneMask
+                                                      : statusIndex == 6'hC
+                                                          ? rErrorMask
+                                                          : statusIndex == 6'hD
+                                                              ? bErrorMask
+                                                              : statusIndex == 6'hE
                                                                   ? {30'h0, lastRresp}
-                                                                  : _GEN
+                                                                  : statusIndex == 6'hF
                                                                       ? {30'h0, lastBresp}
-                                                                      : 32'h0;
+                                                                      : statusIndex == 6'h10
+                                                                          ? matrixLenPerChannel_0
+                                                                          : statusIndex == 6'h11
+                                                                              ? matrixLenPerChannel_1
+                                                                              : statusIndex == 6'h12
+                                                                                  ? matrixLenPerChannel_2
+                                                                                  : statusIndex == 6'h13
+                                                                                      ? matrixLenPerChannel_3
+                                                                                      : statusIndex == 6'h14
+                                                                                          ? matrixLenPerChannel_4
+                                                                                          : statusIndex == 6'h15
+                                                                                              ? matrixLenPerChannel_5
+                                                                                              : statusIndex == 6'h16
+                                                                                                  ? matrixLenPerChannel_6
+                                                                                                  : statusIndex == 6'h17
+                                                                                                      ? matrixLenPerChannel_7
+                                                                                                      : statusIndex == 6'h18
+                                                                                                          ? {28'h0,
+                                                                                                             state}
+                                                                                                          : statusIndex == 6'h19
+                                                                                                              ? {29'h0,
+                                                                                                                 matrixIndex}
+                                                                                                              : statusIndex == 6'h1A
+                                                                                                                  ? matrixBeatIndex
+                                                                                                                  : statusIndex == 6'h1B
+                                                                                                                      ? ptrIndex
+                                                                                                                      : statusIndex == 6'h1C
+                                                                                                                          ? xPacketIndex
+                                                                                                                          : statusIndex == 6'h1D
+                                                                                                                              ? firstPtr
+                                                                                                                              : statusIndex == 6'h1E
+                                                                                                                                  ? lastPtr
+                                                                                                                                  : statusIndex == 6'h1F
+                                                                                                                                      ? 32'h44525042
+                                                                                                                                      : 32'h0;
   assign m_axi_Status_WLAST = 1'h1;
   assign m_axi_Status_WSTRB = 4'hF;
-  assign m_axi_Status_WVALID = ~_GEN_21 & _GEN_20;
+  assign m_axi_Status_WVALID = ~_GEN_25 & _GEN_24;
   assign m_axi_Metrics_AWADDR =
-    _GEN_26 | ~_GEN_25 ? 64'h0 : argPtr_12 + {56'h0, metricIndex, 3'h0};
+    _GEN_30 | ~_GEN_29 ? 64'h0 : argPtr_12 + {55'h0, metricIndex, 3'h0};
   assign m_axi_Metrics_AWBURST = 2'h1;
   assign m_axi_Metrics_AWCACHE = 4'h3;
   assign m_axi_Metrics_AWID = 1'h0;
@@ -1480,8 +2035,8 @@ module CuperSpmvChisel8(
   assign m_axi_Metrics_AWPROT = 3'h0;
   assign m_axi_Metrics_AWQOS = 4'h0;
   assign m_axi_Metrics_AWSIZE = 3'h3;
-  assign m_axi_Metrics_AWVALID = ~_GEN_26 & _GEN_25;
-  assign m_axi_Metrics_BREADY = &state;
+  assign m_axi_Metrics_AWVALID = ~_GEN_30 & _GEN_29;
+  assign m_axi_Metrics_BREADY = ~(~(|state) | _GEN_34) & (&state);
   assign m_axi_Metrics_ARADDR = 64'h0;
   assign m_axi_Metrics_ARBURST = 2'h1;
   assign m_axi_Metrics_ARCACHE = 4'h3;
@@ -1493,43 +2048,8 @@ module CuperSpmvChisel8(
   assign m_axi_Metrics_ARSIZE = 3'h3;
   assign m_axi_Metrics_ARVALID = 1'h0;
   assign m_axi_Metrics_RREADY = 1'h0;
-  assign m_axi_Metrics_WDATA =
-    _GEN_28 | ~_GEN_27
-      ? 64'h0
-      : metricIndex == 5'h0
-          ? 64'h4353504D56384348
-          : metricIndex == 5'h1
-              ? cycleCounter
-              : metricIndex == 5'h2
-                  ? {batchNum, rowNum}
-                  : metricIndex == 5'h3
-                      ? {matrixLen, columnNum}
-                      : metricIndex == 5'h4
-                          ? argPtr_0
-                          : metricIndex == 5'h5
-                              ? argPtr_9
-                              : metricIndex == 5'h6
-                                  ? argPtr_10
-                                  : metricIndex == 5'h7
-                                      ? x0[63:0]
-                                      : metricIndex == 5'h8
-                                          ? matrixFirst_0[63:0]
-                                          : metricIndex == 5'h9
-                                              ? matrixFirst_1[63:0]
-                                              : metricIndex == 5'hA
-                                                  ? matrixFirst_2[63:0]
-                                                  : metricIndex == 5'hB
-                                                      ? matrixFirst_3[63:0]
-                                                      : metricIndex == 5'hC
-                                                          ? matrixFirst_4[63:0]
-                                                          : metricIndex == 5'hD
-                                                              ? matrixFirst_5[63:0]
-                                                              : metricIndex == 5'hE
-                                                                  ? matrixFirst_6[63:0]
-                                                                  : _GEN_0
-                                                                      ? matrixFirst_7[63:0]
-                                                                      : 64'h0;
+  assign m_axi_Metrics_WDATA = _GEN_32 | ~_GEN_31 ? 64'h0 : casez_tmp;
   assign m_axi_Metrics_WLAST = 1'h1;
   assign m_axi_Metrics_WSTRB = 8'hFF;
-  assign m_axi_Metrics_WVALID = ~_GEN_28 & _GEN_27;
+  assign m_axi_Metrics_WVALID = ~_GEN_32 & _GEN_31;
 endmodule

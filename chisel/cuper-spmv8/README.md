@@ -9,9 +9,10 @@ CuperSpmvChisel8
 ```
 
 它使用固定 8-HBM ownerbank ABI，直接暴露 AXI4 master、AXI-Lite control 和
-`Status`/`Metrics`。当前版本是 entry-probe：读取 `ptr[0]`、每路
-`Matrix_data_i[0]` 和 `X[0]`，写 `Y_out[0]`、`Status[0..15]` 和
-`Metrics[0..15]`。它不依赖 `CuperSpmvServiceOnly` 的 TAPA graph。
+`Status`/`Metrics`。当前源码版本是 HBM drain-probe：读取完整 ptr table、
+`ceil(Column_num/16)` 个 X packet，并按 `ptr[channel]` drain
+`Matrix_data_0..7`，最后写 `Y_out[0]`、`Status[0..63]` 和 `Metrics[0..63]`。
+它不依赖 `CuperSpmvServiceOnly` 的 TAPA graph。
 
 常用命令：
 
@@ -73,7 +74,10 @@ chisel/cuper-spmv8/
 
 ## 关键文件
 
-`CuperSpmvOnlyChiselDataPath8.scala` 是顶层实现，保留 8 路 matrix stream 的控制、
+`CuperSpmvChisel8.scala` 是独立 Vitis RTL kernel 顶层。当前只做 HBM drain-probe，
+不计算 SpMV；后续 full SpMV baseline 会在同一 ABI 下接入真正数据通路。
+
+`CuperSpmvOnlyChiselDataPath8.scala` 是 stream 数据通路模块，保留 8 路 matrix stream 的控制、
 slot 解码、batch 调度、状态机和 partial sum 输出。
 
 `CuperSpmvStreamPorts.scala` 放顶层 stream 端口的小结构和工厂方法，把原来

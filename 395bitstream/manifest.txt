@@ -28,3 +28,11 @@ bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xcl
 uuid=3fbc0fc1-7776-ec77-1418-1674584aff18
 sha256=30bd05a8066640fc2a407b04ff2c7a6602a0ac1fc3f0480c3269d9310ca654e0
 status=standalone Chisel RTL entry-probe synced, timing clean, board test pending, not full SpMV
+
+[chisel8-drainprobe]
+base_log=logs/cuper_spmv_chisel8_drainprobe_hw_20260703_213712.log
+date=2026-07-03 23:33:55 CST
+bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin
+uuid=3ea13c75-0ba3-5dbe-0d58-4778e489313b
+sha256=3783f92f2dd0000d009ea5ff98e7be61157fbeb948bfd846ee975bbdc191e80f
+status=standalone Chisel RTL HBM drain-probe synced, timing clean, board test pending, not full SpMV

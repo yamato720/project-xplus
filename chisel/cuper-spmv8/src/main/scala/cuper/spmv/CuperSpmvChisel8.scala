@@ -5,18 +5,20 @@ import chisel3.util._
 
 // Standalone fixed 8-HBM Vitis RTL kernel entry point.
 //
-// This first bring-up top is an AXI entry probe: it uses the final public ABI,
-// reads ptr[0], Matrix_data_i[0], and X[0], writes Y_out[0], then publishes raw
-// Status/Metrics words.  The full SpMV datapath can replace the probe FSM behind
-// the same AXI-Lite register map and m_axi ports.
+// This top keeps the final public ABI while acting as an HBM drain-probe: it
+// reads the complete ptr table, drains all X float_v16 packets, drains every
+// Matrix_data_i beat described by ptr[i], writes Y_out[0], then publishes raw
+// Status/Metrics words.  The full SpMV datapath can replace the drain FSM
+// behind the same AXI-Lite register map and m_axi ports.
 class CuperSpmvChisel8 extends RawModule {
   override def desiredName: String = "CuperSpmvChisel8"
 
   private val hbmChannels = 8
   private val pointerArgs = 13
-  private val statusWords = 16
-  private val metricWords = 16
+  private val statusWords = 64
+  private val metricWords = 64
   private val magic32 = "h43535056".U(32.W) // "CSPV"
+  private val drainMagic32 = "h44525042".U(32.W) // "DRPB"
   private val magic64 = "h4353504d56384348".U(64.W) // "CSPMV8CH"
 
   val ap_clk = IO(Input(Clock())).suggestName("ap_clk")
@@ -192,10 +194,10 @@ class CuperSpmvChisel8 extends RawModule {
     val idle = states(0)
     val readPtrAddr = states(1)
     val readPtrData = states(2)
-    val readMatrixAddr = states(3)
-    val readMatrixData = states(4)
-    val readXAddr = states(5)
-    val readXData = states(6)
+    val readXAddr = states(3)
+    val readXData = states(4)
+    val readMatrixAddr = states(5)
+    val readMatrixData = states(6)
     val writeYAddr = states(7)
     val writeYData = states(8)
     val writeYResp = states(9)
@@ -207,15 +209,34 @@ class CuperSpmvChisel8 extends RawModule {
     val writeMetricsResp = states(15)
 
     val state = RegInit(idle)
+    val ptrIndex = RegInit(0.U(32.W))
+    val xPacketIndex = RegInit(0.U(32.W))
     val matrixIndex = RegInit(0.U(3.W))
-    val statusIndex = RegInit(0.U(5.W))
-    val metricIndex = RegInit(0.U(5.W))
-    val ptr0 = RegInit(0.U(32.W))
-    val x0 = RegInit(0.U(512.W))
-    val matrixFirst = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(512.W))))
+    val matrixBeatIndex = RegInit(0.U(32.W))
+    val statusIndex = RegInit(0.U(6.W))
+    val metricIndex = RegInit(0.U(6.W))
+
+    val ptrWordsRead = RegInit(0.U(32.W))
+    val xPacketsRead = RegInit(0.U(32.W))
+    val matrixLenPerChannel = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(32.W))))
+    val matrixBeatsRead = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(32.W))))
+    val matrixDoneMask = RegInit(0.U(32.W))
+    val rErrorMask = RegInit(0.U(32.W))
+    val bErrorMask = RegInit(0.U(32.W))
+    val firstPtr = RegInit(0.U(32.W))
+    val lastPtr = RegInit(0.U(32.W))
+    val firstXLow64 = RegInit(0.U(64.W))
+    val lastXLow64 = RegInit(0.U(64.W))
+    val matrixFirstLow64 = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(64.W))))
+    val matrixLastLow64 = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(64.W))))
     val cycleCounter = RegInit(0.U(64.W))
     val lastBresp = RegInit(0.U(2.W))
     val lastRresp = RegInit(0.U(2.W))
+
+    val ptrWordsExpected = Wire(UInt(32.W))
+    val xPacketsExpected = Wire(UInt(32.W))
+    ptrWordsExpected := (batchNum +& 2.U(32.W)) << 3
+    xPacketsExpected := (columnNum +& 15.U(32.W)) >> 4
 
     val running = state =/= idle
     when(running) {
@@ -296,6 +317,15 @@ class CuperSpmvChisel8 extends RawModule {
     val selectedMatrixRResp = Mux1H((0 until hbmChannels).map { i =>
       (matrixIndex === i.U) -> matrix(i).RRESP
     })
+    val selectedMatrixExpected = Mux1H((0 until hbmChannels).map { i =>
+      (matrixIndex === i.U) -> matrixLenPerChannel(i)
+    })
+    val selectedMatrixMask = Mux1H((0 until hbmChannels).map { i =>
+      (matrixIndex === i.U) -> (BigInt(1) << i).U(32.W)
+    })
+    val selectedMatrixRMask = Mux1H((0 until hbmChannels).map { i =>
+      (matrixIndex === i.U) -> (BigInt(1) << (i + 1)).U(32.W)
+    })
 
     val statusValue = Wire(UInt(32.W))
     statusValue := 0.U
@@ -307,15 +337,31 @@ class CuperSpmvChisel8 extends RawModule {
       is(4.U) { statusValue := batchNum }
       is(5.U) { statusValue := matrixLen }
       is(6.U) { statusValue := iterationNum }
-      is(7.U) { statusValue := ptr0 }
-      is(8.U) { statusValue := x0(31, 0) }
-      is(9.U) { statusValue := matrixFirst(0)(31, 0) }
-      is(10.U) { statusValue := matrixFirst(1)(31, 0) }
-      is(11.U) { statusValue := matrixFirst(2)(31, 0) }
-      is(12.U) { statusValue := matrixFirst(3)(31, 0) }
-      is(13.U) { statusValue := Cat(0.U(28.W), state) }
+      is(7.U) { statusValue := ptrWordsExpected }
+      is(8.U) { statusValue := ptrWordsRead }
+      is(9.U) { statusValue := xPacketsExpected }
+      is(10.U) { statusValue := xPacketsRead }
+      is(11.U) { statusValue := matrixDoneMask }
+      is(12.U) { statusValue := rErrorMask }
+      is(13.U) { statusValue := bErrorMask }
       is(14.U) { statusValue := Cat(0.U(30.W), lastRresp) }
       is(15.U) { statusValue := Cat(0.U(30.W), lastBresp) }
+      is(16.U) { statusValue := matrixLenPerChannel(0) }
+      is(17.U) { statusValue := matrixLenPerChannel(1) }
+      is(18.U) { statusValue := matrixLenPerChannel(2) }
+      is(19.U) { statusValue := matrixLenPerChannel(3) }
+      is(20.U) { statusValue := matrixLenPerChannel(4) }
+      is(21.U) { statusValue := matrixLenPerChannel(5) }
+      is(22.U) { statusValue := matrixLenPerChannel(6) }
+      is(23.U) { statusValue := matrixLenPerChannel(7) }
+      is(24.U) { statusValue := Cat(0.U(28.W), state.asUInt) }
+      is(25.U) { statusValue := Cat(0.U(29.W), matrixIndex) }
+      is(26.U) { statusValue := matrixBeatIndex }
+      is(27.U) { statusValue := ptrIndex }
+      is(28.U) { statusValue := xPacketIndex }
+      is(29.U) { statusValue := firstPtr }
+      is(30.U) { statusValue := lastPtr }
+      is(31.U) { statusValue := drainMagic32 }
     }
 
     val metricValue = Wire(UInt(64.W))
@@ -323,20 +369,47 @@ class CuperSpmvChisel8 extends RawModule {
     switch(metricIndex) {
       is(0.U) { metricValue := magic64 }
       is(1.U) { metricValue := cycleCounter }
-      is(2.U) { metricValue := Cat(batchNum, rowNum) }
-      is(3.U) { metricValue := Cat(matrixLen, columnNum) }
-      is(4.U) { metricValue := argPtr(0) }
-      is(5.U) { metricValue := argPtr(9) }
-      is(6.U) { metricValue := argPtr(10) }
-      is(7.U) { metricValue := x0(63, 0) }
-      is(8.U) { metricValue := matrixFirst(0)(63, 0) }
-      is(9.U) { metricValue := matrixFirst(1)(63, 0) }
-      is(10.U) { metricValue := matrixFirst(2)(63, 0) }
-      is(11.U) { metricValue := matrixFirst(3)(63, 0) }
-      is(12.U) { metricValue := matrixFirst(4)(63, 0) }
-      is(13.U) { metricValue := matrixFirst(5)(63, 0) }
-      is(14.U) { metricValue := matrixFirst(6)(63, 0) }
-      is(15.U) { metricValue := matrixFirst(7)(63, 0) }
+      is(2.U) { metricValue := Cat(ptrWordsExpected, ptrWordsRead) }
+      is(3.U) { metricValue := Cat(xPacketsExpected, xPacketsRead) }
+      is(4.U) { metricValue := Cat(bErrorMask, rErrorMask) }
+      is(5.U) { metricValue := Cat(0.U(32.W), matrixDoneMask) }
+      is(6.U) { metricValue := firstXLow64 }
+      is(7.U) { metricValue := lastXLow64 }
+      is(8.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(0)) }
+      is(9.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(1)) }
+      is(10.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(2)) }
+      is(11.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(3)) }
+      is(12.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(4)) }
+      is(13.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(5)) }
+      is(14.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(6)) }
+      is(15.U) { metricValue := Cat(0.U(32.W), matrixBeatsRead(7)) }
+      is(16.U) { metricValue := matrixFirstLow64(0) }
+      is(17.U) { metricValue := matrixFirstLow64(1) }
+      is(18.U) { metricValue := matrixFirstLow64(2) }
+      is(19.U) { metricValue := matrixFirstLow64(3) }
+      is(20.U) { metricValue := matrixFirstLow64(4) }
+      is(21.U) { metricValue := matrixFirstLow64(5) }
+      is(22.U) { metricValue := matrixFirstLow64(6) }
+      is(23.U) { metricValue := matrixFirstLow64(7) }
+      is(24.U) { metricValue := matrixLastLow64(0) }
+      is(25.U) { metricValue := matrixLastLow64(1) }
+      is(26.U) { metricValue := matrixLastLow64(2) }
+      is(27.U) { metricValue := matrixLastLow64(3) }
+      is(28.U) { metricValue := matrixLastLow64(4) }
+      is(29.U) { metricValue := matrixLastLow64(5) }
+      is(30.U) { metricValue := matrixLastLow64(6) }
+      is(31.U) { metricValue := matrixLastLow64(7) }
+      is(32.U) { metricValue := argPtr(0) }
+      is(33.U) { metricValue := argPtr(9) }
+      is(34.U) { metricValue := argPtr(10) }
+      is(35.U) { metricValue := argPtr(11) }
+      is(36.U) { metricValue := argPtr(12) }
+      is(37.U) { metricValue := Cat(rowNum, columnNum) }
+      is(38.U) { metricValue := Cat(batchNum, matrixLen) }
+      is(39.U) { metricValue := Cat(0.U(32.W), iterationNum) }
+      is(40.U) { metricValue := Cat(ptrIndex, xPacketIndex) }
+      is(41.U) { metricValue := Cat(0.U(32.W), matrixBeatIndex) }
+      is(42.U) { metricValue := Cat(firstPtr, lastPtr) }
     }
 
     switch(state) {
@@ -345,39 +418,129 @@ class CuperSpmvChisel8 extends RawModule {
           startPending := false.B
           doneSticky := false.B
           cycleCounter := 0.U
+          ptrIndex := 0.U
+          xPacketIndex := 0.U
           matrixIndex := 0.U
+          matrixBeatIndex := 0.U
           statusIndex := 0.U
           metricIndex := 0.U
+          ptrWordsRead := 0.U
+          xPacketsRead := 0.U
+          matrixDoneMask := 0.U
+          rErrorMask := 0.U
+          bErrorMask := 0.U
+          firstPtr := 0.U
+          lastPtr := 0.U
+          firstXLow64 := 0.U
+          lastXLow64 := 0.U
+          lastBresp := 0.U
+          lastRresp := 0.U
+          for (i <- 0 until hbmChannels) {
+            matrixLenPerChannel(i) := 0.U
+            matrixBeatsRead(i) := 0.U
+            matrixFirstLow64(i) := 0.U
+            matrixLastLow64(i) := 0.U
+          }
           state := readPtrAddr
         }
       }
 
       is(readPtrAddr) {
-        m_axi_SpElement_list_ptr.ARADDR := argPtr(0)
-        m_axi_SpElement_list_ptr.ARVALID := true.B
-        when(m_axi_SpElement_list_ptr.ARREADY) {
-          state := readPtrData
+        when(ptrWordsExpected === 0.U) {
+          state := readXAddr
+        }.otherwise {
+          m_axi_SpElement_list_ptr.ARADDR := argPtr(0) + (ptrIndex << 2)
+          m_axi_SpElement_list_ptr.ARVALID := true.B
+          when(m_axi_SpElement_list_ptr.ARREADY) {
+            state := readPtrData
+          }
         }
       }
 
       is(readPtrData) {
         m_axi_SpElement_list_ptr.RREADY := true.B
         when(m_axi_SpElement_list_ptr.RVALID) {
-          ptr0 := m_axi_SpElement_list_ptr.RDATA
+          val ptrData = m_axi_SpElement_list_ptr.RDATA
+          ptrWordsRead := ptrWordsRead + 1.U
+          lastPtr := ptrData
+          when(ptrIndex === 0.U) {
+            firstPtr := ptrData
+          }
+          for (i <- 0 until hbmChannels) {
+            when(ptrIndex === i.U) {
+              matrixLenPerChannel(i) := ptrData
+            }
+          }
           lastRresp := m_axi_SpElement_list_ptr.RRESP
+          when(m_axi_SpElement_list_ptr.RRESP =/= 0.U) {
+            rErrorMask := rErrorMask | 1.U
+          }
+          when(ptrIndex === (ptrWordsExpected - 1.U)) {
+            xPacketIndex := 0.U
+            state := readXAddr
+          }.otherwise {
+            ptrIndex := ptrIndex + 1.U
+            state := readPtrAddr
+          }
+        }
+      }
+
+      is(readXAddr) {
+        when(xPacketsExpected === 0.U) {
+          matrixIndex := 0.U
+          matrixBeatIndex := 0.U
           state := readMatrixAddr
+        }.otherwise {
+          m_axi_X.ARADDR := argPtr(9) + (xPacketIndex << 6)
+          m_axi_X.ARVALID := true.B
+          when(m_axi_X.ARREADY) {
+            state := readXData
+          }
+        }
+      }
+
+      is(readXData) {
+        m_axi_X.RREADY := true.B
+        when(m_axi_X.RVALID) {
+          xPacketsRead := xPacketsRead + 1.U
+          when(xPacketIndex === 0.U) {
+            firstXLow64 := m_axi_X.RDATA(63, 0)
+          }
+          lastXLow64 := m_axi_X.RDATA(63, 0)
+          lastRresp := m_axi_X.RRESP
+          when(m_axi_X.RRESP =/= 0.U) {
+            rErrorMask := rErrorMask | (BigInt(1) << 9).U(32.W)
+          }
+          when(xPacketIndex === (xPacketsExpected - 1.U)) {
+            matrixIndex := 0.U
+            matrixBeatIndex := 0.U
+            state := readMatrixAddr
+          }.otherwise {
+            xPacketIndex := xPacketIndex + 1.U
+            state := readXAddr
+          }
         }
       }
 
       is(readMatrixAddr) {
-        for (i <- 0 until hbmChannels) {
-          when(matrixIndex === i.U) {
-            matrix(i).ARADDR := argPtr(1 + i)
-            matrix(i).ARVALID := true.B
+        when(selectedMatrixExpected === 0.U || matrixBeatIndex >= selectedMatrixExpected) {
+          matrixDoneMask := matrixDoneMask | selectedMatrixMask
+          when(matrixIndex === 7.U) {
+            state := writeYAddr
+          }.otherwise {
+            matrixIndex := matrixIndex + 1.U
+            matrixBeatIndex := 0.U
           }
-        }
-        when(selectedMatrixArReady) {
-          state := readMatrixData
+        }.otherwise {
+          for (i <- 0 until hbmChannels) {
+            when(matrixIndex === i.U) {
+              matrix(i).ARADDR := argPtr(1 + i) + (matrixBeatIndex << 6)
+              matrix(i).ARVALID := true.B
+            }
+          }
+          when(selectedMatrixArReady) {
+            state := readMatrixData
+          }
         }
       }
 
@@ -388,31 +551,28 @@ class CuperSpmvChisel8 extends RawModule {
           }
         }
         when(selectedMatrixRValid) {
-          matrixFirst(matrixIndex) := selectedMatrixRData
+          matrixBeatsRead(matrixIndex) := matrixBeatsRead(matrixIndex) + 1.U
+          when(matrixBeatIndex === 0.U) {
+            matrixFirstLow64(matrixIndex) := selectedMatrixRData(63, 0)
+          }
+          matrixLastLow64(matrixIndex) := selectedMatrixRData(63, 0)
           lastRresp := selectedMatrixRResp
-          when(matrixIndex === 7.U) {
-            state := readXAddr
+          when(selectedMatrixRResp =/= 0.U) {
+            rErrorMask := rErrorMask | selectedMatrixRMask
+          }
+          when(matrixBeatIndex === (selectedMatrixExpected - 1.U)) {
+            matrixDoneMask := matrixDoneMask | selectedMatrixMask
+            when(matrixIndex === 7.U) {
+              state := writeYAddr
+            }.otherwise {
+              matrixIndex := matrixIndex + 1.U
+              matrixBeatIndex := 0.U
+              state := readMatrixAddr
+            }
           }.otherwise {
-            matrixIndex := matrixIndex + 1.U
+            matrixBeatIndex := matrixBeatIndex + 1.U
             state := readMatrixAddr
           }
-        }
-      }
-
-      is(readXAddr) {
-        m_axi_X.ARADDR := argPtr(9)
-        m_axi_X.ARVALID := true.B
-        when(m_axi_X.ARREADY) {
-          state := readXData
-        }
-      }
-
-      is(readXData) {
-        m_axi_X.RREADY := true.B
-        when(m_axi_X.RVALID) {
-          x0 := m_axi_X.RDATA
-          lastRresp := m_axi_X.RRESP
-          state := writeYAddr
         }
       }
 
@@ -438,6 +598,10 @@ class CuperSpmvChisel8 extends RawModule {
         m_axi_Y_out.BREADY := true.B
         when(m_axi_Y_out.BVALID) {
           lastBresp := m_axi_Y_out.BRESP
+          when(m_axi_Y_out.BRESP =/= 0.U) {
+            bErrorMask := bErrorMask | (BigInt(1) << 10).U(32.W)
+          }
+          statusIndex := 0.U
           state := writeStatusAddr
         }
       }
@@ -464,6 +628,9 @@ class CuperSpmvChisel8 extends RawModule {
         m_axi_Status.BREADY := true.B
         when(m_axi_Status.BVALID) {
           lastBresp := m_axi_Status.BRESP
+          when(m_axi_Status.BRESP =/= 0.U) {
+            bErrorMask := bErrorMask | (BigInt(1) << 11).U(32.W)
+          }
           when(statusIndex === (statusWords - 1).U) {
             metricIndex := 0.U
             state := writeMetricsAddr
@@ -491,21 +658,24 @@ class CuperSpmvChisel8 extends RawModule {
           state := writeMetricsResp
         }
       }
-    }
 
-    when(state === writeMetricsResp) {
-      m_axi_Metrics.BREADY := true.B
-      when(m_axi_Metrics.BVALID) {
-        lastBresp := m_axi_Metrics.BRESP
-        when(metricIndex === (metricWords - 1).U) {
-          doneSticky := true.B
-          state := idle
-          when(autoRestart) {
-            startPending := true.B
+      is(writeMetricsResp) {
+        m_axi_Metrics.BREADY := true.B
+        when(m_axi_Metrics.BVALID) {
+          lastBresp := m_axi_Metrics.BRESP
+          when(m_axi_Metrics.BRESP =/= 0.U) {
+            bErrorMask := bErrorMask | (BigInt(1) << 12).U(32.W)
           }
-        }.otherwise {
-          metricIndex := metricIndex + 1.U
-          state := writeMetricsAddr
+          when(metricIndex === (metricWords - 1).U) {
+            doneSticky := true.B
+            state := idle
+            when(autoRestart) {
+              startPending := true.B
+            }
+          }.otherwise {
+            metricIndex := metricIndex + 1.U
+            state := writeMetricsAddr
+          }
         }
       }
     }

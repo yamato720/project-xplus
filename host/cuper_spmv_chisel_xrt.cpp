@@ -25,7 +25,7 @@
 
 // Native XRT host for the standalone Chisel RTL SpMV kernel.
 //
-// The current RTL top is an entry probe, so Y correctness is opt-in.  It still
+// The current RTL top is a drain probe, so Y correctness is opt-in.  It still
 // prepares the final ownerbank8 ABI: 8 Matrix_data HBM ports, lane-static real
 // scalar Y_out, ptr[0..7] per-HBM lengths, and boundary-major batch pointers.
 namespace {
@@ -35,6 +35,11 @@ using aligned_vector = std::vector<T, tapa::aligned_allocator<T>>;
 
 using project_xplus::cgsolver::Dataset;
 using project_xplus::cgsolver::data_t;
+
+constexpr std::uint32_t kStatusMagic = 0x43535056U;
+constexpr std::uint32_t kDrainProbeMagic = 0x44525042U;
+constexpr std::uint64_t kMetricsMagic = 0x4353504d56384348ULL;
+constexpr std::uint32_t kMatrixDoneMask = (1U << HBM_CHANNEL_NUM) - 1U;
 
 struct HostOptions {
     std::filesystem::path xclbin_path;
@@ -52,7 +57,10 @@ struct Chisel8Matrix {
     INDEX_TYPE lane_static_len_total = 0;
     INDEX_TYPE lane_static_len_min = 0;
     INDEX_TYPE lane_static_len_max = 0;
+    INDEX_TYPE ptr_words_expected = 0;
+    INDEX_TYPE x_packets_expected = 0;
     aligned_vector<INDEX_TYPE> ptr;
+    std::vector<INDEX_TYPE> matrix_len_per_hbm;
     std::vector<aligned_vector<unsigned long>> matrix_data;
     double plan_ms = 0.0;
 };
@@ -230,6 +238,10 @@ Chisel8Matrix build_ownerbank8_matrix(const Dataset& dataset) {
     matrix.lane_static_len_min = len_per_hbm.empty() ? 0 : len_per_hbm.front();
     matrix.lane_static_len_max = len_per_hbm.empty() ? 0 : len_per_hbm.front();
     matrix.lane_static_len_total = 0;
+    matrix.matrix_len_per_hbm = len_per_hbm;
+    matrix.ptr_words_expected =
+        static_cast<INDEX_TYPE>(HBM_CHANNEL_NUM) * (matrix.batch_num + 2);
+    matrix.x_packets_expected = Cuper_NumFloatV16Packets(dataset.n());
     for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
         matrix.ptr[static_cast<std::size_t>(channel)] = len_per_hbm[static_cast<std::size_t>(channel)];
         matrix.lane_static_len_total += len_per_hbm[static_cast<std::size_t>(channel)];
@@ -310,6 +322,86 @@ void print_metrics_raw(const std::vector<std::uint64_t>& metrics) {
     std::cout << "\n";
 }
 
+void print_matrix_beats(const char* label, const std::vector<INDEX_TYPE>& values) {
+    std::cout << label;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        std::cout << " " << index << ":" << values[index];
+    }
+    std::cout << "\n";
+}
+
+void print_matrix_beats_u64(const char* label,
+                            const std::vector<std::uint64_t>& metrics,
+                            const std::size_t base) {
+    std::cout << label;
+    for (std::size_t index = 0; index < HBM_CHANNEL_NUM; ++index) {
+        std::cout << " " << index << ":" << metrics[base + index];
+    }
+    std::cout << "\n";
+}
+
+bool validate_drain_probe(const Chisel8Matrix& matrix,
+                          const std::vector<std::uint32_t>& status,
+                          const std::vector<std::uint64_t>& metrics) {
+    bool ok = true;
+    auto require = [&ok](const bool condition, const std::string& message) {
+        if (!condition) {
+            std::cerr << "[probe-check] mismatch: " << message << "\n";
+            ok = false;
+        }
+    };
+
+    require(status.size() >= 64, "status buffer shorter than 64 words");
+    require(metrics.size() >= 64, "metrics buffer shorter than 64 words");
+    if (status.size() < 64 || metrics.size() < 64) {
+        return false;
+    }
+
+    require(status[0] == 1U, "Status[0] != 1");
+    require(status[1] == kStatusMagic, "Status[1] magic mismatch");
+    require(status[7] == static_cast<std::uint32_t>(matrix.ptr_words_expected),
+            "Status[7] ptr expected mismatch");
+    require(status[8] == static_cast<std::uint32_t>(matrix.ptr_words_expected),
+            "Status[8] ptr read mismatch");
+    require(status[9] == static_cast<std::uint32_t>(matrix.x_packets_expected),
+            "Status[9] X expected mismatch");
+    require(status[10] == static_cast<std::uint32_t>(matrix.x_packets_expected),
+            "Status[10] X read mismatch");
+    require(status[11] == kMatrixDoneMask, "Status[11] matrix done mask mismatch");
+    require(status[12] == 0U, "Status[12] R response error mask is nonzero");
+    require(status[13] == 0U, "Status[13] B response error mask is nonzero");
+    require(status[31] == kDrainProbeMagic, "Status[31] drain-probe magic mismatch");
+    require(metrics[0] == kMetricsMagic, "Metrics[0] magic mismatch");
+
+    for (std::size_t channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+        require(status[16 + channel] ==
+                    static_cast<std::uint32_t>(matrix.matrix_len_per_hbm[channel]),
+                "Status[16+channel] matrix length mismatch at channel " +
+                    std::to_string(channel));
+        require(metrics[8 + channel] ==
+                    static_cast<std::uint64_t>(matrix.matrix_len_per_hbm[channel]),
+                "Metrics[8+channel] matrix beats mismatch at channel " +
+                    std::to_string(channel));
+    }
+
+    std::cout << "[probe-check] ptr=" << status[8] << "/" << status[7]
+              << " x_packets=" << status[10] << "/" << status[9]
+              << " matrix_done_mask=0x" << std::hex << status[11]
+              << " r_error_mask=0x" << status[12]
+              << " b_error_mask=0x" << status[13]
+              << " drain_magic=0x" << status[31]
+              << std::dec << " result=" << (ok ? "pass" : "fail") << "\n";
+    print_matrix_beats("[matrix-beats-expected]", matrix.matrix_len_per_hbm);
+    print_matrix_beats_u64("[matrix-beats-read]", metrics, 8);
+    std::cout << "[probe-first-last-low64]"
+              << " x_first=0x" << std::hex << metrics[6]
+              << " x_last=0x" << metrics[7]
+              << " matrix0_first=0x" << metrics[16]
+              << " matrix0_last=0x" << metrics[24]
+              << std::dec << "\n";
+    return ok;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -323,7 +415,7 @@ int main(int argc, char** argv) {
         std::cout << "[xplus-xrt] xclbin=" << options.xclbin_path
                   << " dataset=" << options.dataset_dir
                   << " kernel=" << options.kernel_name
-                  << " mode=cuper-spmv-chisel8-entry-probe"
+                  << " mode=cuper-spmv-chisel8-drain-probe"
                   << " hbm_channels=" << HBM_CHANNEL_NUM
                   << " batches=" << matrix.batch_num
                   << " matrix_len=" << matrix.matrix_len
@@ -331,6 +423,11 @@ int main(int argc, char** argv) {
                   << " per_hbm_len_min=" << matrix.lane_static_len_min
                   << " per_hbm_len_max=" << matrix.lane_static_len_max
                   << "\n";
+        std::cout << "[expected] ptr_words=" << matrix.ptr_words_expected
+                  << " x_packets=" << matrix.x_packets_expected
+                  << " matrix_done_mask=0x" << std::hex << kMatrixDoneMask
+                  << std::dec << "\n";
+        print_matrix_beats("[expected-matrix-beats]", matrix.matrix_len_per_hbm);
 
         const auto xrt_setup_start = std::chrono::steady_clock::now();
         xrt::device device(options.device_index);
@@ -401,7 +498,7 @@ int main(int argc, char** argv) {
         print_status_raw(status);
         print_metrics_raw(metrics);
 
-        int rc = 0;
+        int rc = validate_drain_probe(matrix, status, metrics) ? 0 : 2;
         if (options.check_y) {
             std::vector<data_t> expected;
             dataset.spmv(dataset.b(), expected);
@@ -422,7 +519,7 @@ int main(int argc, char** argv) {
             }
         } else {
             std::cout << "[check] skipped_y_correctness=1"
-                      << " reason=entry_probe_only\n";
+                      << " reason=drain_probe_only\n";
         }
 
         const auto total_end = std::chrono::steady_clock::now();

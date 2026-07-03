@@ -47,3 +47,15 @@ Metrics -> HBM[31]
 保留为 demo/debug artifact，不晋级标准 bitstream。下一步先上板跑
 `thermal2_n16` entry-probe，确认 `Status`/`Metrics` 中的 magic、first-read 和
 `Y_out[0]` 写回后，再进入 HBM drain-probe。
+
+## 2026-07-03 本轮复核
+
+本轮仓库内没有找到 entry-probe 上板通过日志。尝试用当前本机直接跑
+`395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xclbin`
+时，XRT 在设备打开阶段返回 `No such device with index '0'`，因此本轮不能把
+`thermal2` 全套 no-check `rc=0` 或 `CHECK_Y=1 rc=3` 写成已复核事实。
+
+源码后续已推进到下一阶段 HBM drain-probe，并已单独生成/同步
+`395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin`。
+这不改变本文件记录的 entry-probe xclbin 内容；entry-probe 只作为历史 first-read
+artifact 保留。

@@ -19,6 +19,12 @@ YYYY-MM-DD-<主线>-<简短说明>/
 
 ## 已有版本记录
 
+- `2026-07-03-cuper-notapa-spmv-chisel8-drainprobe/`：独立 no-TAPA Chisel RTL
+  kernel `CuperSpmvChisel8` 的 HBM drain-probe demo。该版保持 entry-probe 的
+  ABI/HBM mapping 不变，完整读取 ptr table、X packets 和 8 路 Matrix_data beats，
+  只写 drain 计数和摘要，不计算 SpMV；已生成 timing-clean xclbin 并同步到
+  `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin`，
+  等待有 U55C/XRT device 的服务器侧上板。
 - `2026-07-03-cuper-notapa-spmv-chisel8-entryprobe/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 entry-probe 记录。该版只验证 AXI-Lite、13 路
   AXI master、ownerbank8 HBM mapping、`Status`/`Metrics` 和 scalar `Y_out[0]`

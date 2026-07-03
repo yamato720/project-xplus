@@ -21,7 +21,7 @@ ipx::package_project -force -root_dir $ip_dir -vendor projectx -library rtl -nam
 set core [ipx::current_core]
 set_property name $kernel_name $core
 set_property display_name $kernel_name $core
-set_property description {Project-XPlus standalone 8-HBM Chisel SpMV RTL entry-probe kernel} $core
+set_property description {Project-XPlus standalone 8-HBM Chisel SpMV RTL drain-probe kernel} $core
 set_property vendor_display_name {Project-XPlus} $core
 set_property company_url {https://github.com} $core
 set_property sdx_kernel true $core
