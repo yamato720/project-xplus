@@ -48,6 +48,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260627-lanereal8-scoreboard-donedrain-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL issue scoreboard done-drain 修正版，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，done-drain 未解决旧卡死 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
+| `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
 | 已归档 | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
@@ -615,6 +616,15 @@ ownerbank8-lighttrace:
   Build log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
   Memory monitor: no .memory_abort, swap 0, max RSS about 17 GB
   v++ link elapsed: 2h 33m 11s
+
+ownerbank8-entryprobe-yout:
+  file: 395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin
+  UUID: e0dbc189-228b-3519-0d68-dd541d6bc70a
+  SHA256: f443c729851e7b64e1b87eb59ce613a79de44aacb8d7072b5068a7bb0e4b8d0e
+  DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+  Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+  Build log: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/logs/build_hw_tmux.log
+  v++ link elapsed: 1h 18m 3s
 ```
 
 original8、strip8 和 lanereal8-scoreboard 构建前已完成对应 8-HBM 软件 smoke，结果均为
@@ -669,6 +679,11 @@ output backpressure、write response delay 和小 FIFO 压力。服务器侧上�
 matrix、core、splitter、owner-bank input/output/done 和 scatter 分阶段事件。
 该版本机已完成 `.xclbin` 构建并 timing clean，等待服务器侧只跑 `thermal2_n16` 和
 `thermal2_n1024`；验收目标是 pre-Finish 采样能定位最后推进 stage，而不是性能提升。
+随后又同步 `ownerbank8-entryprobe-yout`：它不运行完整 SpMV datapath，只保持同一
+8-HBM ABI，写 `EPRB` magic 到 `Status/Metrics[8..15]`，顺序读取
+`SpElement_list_ptr[0]`、`Matrix_data_0..7[0]` 和 `X[0]`，并写一次 `Y_out[0]`
+以防 HLS 优化掉 scalar `Y_out` 端口。该版用于验证 kernel entry、mmap 写回、
+HBM first-read 和 host BO mapping，不作为性能候选。
 
 下面几段是此前 Jacobi demo 槽位的历史记录，不对应上面的 SpMV-only 实验文件。
 `20260614` timing-clean light-trace full graph demo UUID 为

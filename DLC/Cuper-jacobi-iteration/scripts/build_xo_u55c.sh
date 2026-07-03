@@ -133,6 +133,18 @@ if [[ "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-0}" != "0" && "${JACOBI_SPMV_OWNERBAN
   fi
 fi
 
+if [[ "${JACOBI_SPMV_ENTRY_PROBE:-0}" != "0" && "${JACOBI_SPMV_ENTRY_PROBE:-}" != "" ]]; then
+  if [[ "$TOP" != "CuperSpmvServiceOnly" ]]; then
+    echo "JACOBI_SPMV_ENTRY_PROBE=1 is only for JACOBI_TOP=CuperSpmvServiceOnly." >&2
+    exit 1
+  fi
+  if [[ "$HBM_CHANNELS" != "8" ]]; then
+    echo "JACOBI_SPMV_ENTRY_PROBE=1 requires JACOBI_HBM_CHANNELS=8." >&2
+    exit 1
+  fi
+  JACOBI_SPMV_LANE_STATIC_REAL=1
+fi
+
 if [[ "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_ACCUMULATE_RTL:-}" != "" ]]; then
   JACOBI_SPMV_LANE_STATIC_REAL=1
   JACOBI_SPMV_OOO_ACCUMULATE=1
@@ -197,6 +209,11 @@ fi
 if [[ "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-0}" != "0" && "${JACOBI_SPMV_OWNERBANK_LIGHTTRACE:-}" != "" ]]; then
   cflags+=("-DJACOBI_SPMV_OWNERBANK_LIGHTTRACE=1")
   echo "Cuper SpMV ownerbank8 lighttrace: enabled"
+fi
+
+if [[ "${JACOBI_SPMV_ENTRY_PROBE:-0}" != "0" && "${JACOBI_SPMV_ENTRY_PROBE:-}" != "" ]]; then
+  cflags+=("-DJACOBI_SPMV_ENTRY_PROBE=1")
+  echo "Cuper SpMV ownerbank8 entry probe: enabled"
 fi
 
 if [[ "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-0}" != "0" && "${JACOBI_SPMV_OOO_SCOREBOARD_RTL:-}" != "" ]]; then

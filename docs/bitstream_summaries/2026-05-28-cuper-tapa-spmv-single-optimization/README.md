@@ -819,8 +819,101 @@ Timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
 Build log: cuper-tapa-spmv-ownerbank8-lighttrace-build/logs/ownerbank8_lighttrace_hw_tmux.log
 ```
 
-这版仍是 debug artifact，等待服务器侧最小上板；在 `thermal2_n1024` 边界定位前不替代
-`strip8`，也不更新正式 `source.diff`。
+这版仍是 debug artifact；服务器侧最小上板已完成：`thermal2_n16` PASS，
+`stage=final(15)`，但 `thermal2_n1024` 300s timeout，pre-Finish 采样中
+`Status/Metrics[8..15]` 仍是初始化哨兵，`Y[0..15]=0`。这说明 full lighttrace
+在 n1024 上仍没有给 host 暴露出 progress writer 结果，下一步需要先证伪
+kernel entry / Status mmap / HBM first-read 边界，而不是直接推进全 Chisel datapath。
+在 `thermal2_n1024` 边界定位前不替代 `strip8`，也不更新正式 `source.diff`。
+
+## 2026-07-02 补充：ownerbank8-entryprobe 源码调试构建
+
+本轮新增 `ownerbank8-entryprobe` 源码开关，但按用户要求不生成新的 XO/xclbin/bitstream。
+它继续复用 `CuperSpmvServiceOnly` host ABI 和 8-HBM bank mapping：
+
+```text
+Matrix_data_0..7 -> HBM[0..7]
+SpElement_list_ptr -> HBM[8]
+X -> HBM[9]
+Y_out -> HBM[10]
+Status -> HBM[30]
+Metrics -> HBM[31]
+```
+
+新增开关：
+
+```text
+JACOBI_SPMV_ENTRY_PROBE=1
+```
+
+约束：
+
+```text
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=8
+```
+
+entry-probe 会强制使用 `JACOBI_SPMV_LANE_STATIC_REAL=1`，保持 ownerbank8 的 scalar
+`Y_out` ABI。kernel 分支不启动 matrix/vector/core/owner-bank/scatter dataflow，只做：
+
+- 写 `Status/Metrics[8..15]`，其中 magic 为 `0x45505242` (`EPRB`)；
+- 记录 `Row_num`、`Batch_num`、`Matrix_len`、`Column_num`、stage、event count 和 last value；
+- 读取 `SpElement_list_ptr[0]`、每路 `Matrix_data_i[0]` 和 `X[0]`；
+- 最终写 `stage=entryprobe_final(63)` 后正常返回；
+- `Status[0..3]` / `Metrics[0..7]` 仍按普通 SpMV-only 完成状态写回，便于 host 判断 kernel 已返回。
+
+host 侧识别 `EPRB` magic 后打印 entry-probe stage，并跳过 Y 正确性校验，因为该 probe
+故意不计算 `Y=A*X`。本地软件 smoke 已覆盖 `thermal2_n16` 和 `thermal2_n1024`，两者
+均到达 `entryprobe_final(63)`；本轮没有生成 bitstream，也不更新正式 `source.diff`。
+
+## 2026-07-03 补充：ownerbank8-entryprobe tmux 硬件构建
+
+用户随后要求补起 entry-probe bitstream 构建。第一次 tmux 硬件构建在 TAPA pack
+阶段失败：entry-probe 没有触碰 `Y_out`，HLS 优化掉 `m_axi_Y_out`，但 TAPA/Vitis
+仍按原 host ABI 和 connectivity 期待 `Y_out -> HBM[10]`。
+
+修复方式是在 `CuperSpmvOnly_EntryProbeWriter` 中保持 scalar `Y_out` ABI：写
+`Y_out[0]=0.0f` 并等待一次 write response，再写 final stage。修复后软件 smoke 的
+`thermal2_n16` / `thermal2_n1024` 仍均到达 `entryprobe_final(63)`。
+
+第二次构建目录为：
+
+```text
+cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/
+```
+
+当前状态：第二次 tmux 构建已完成，VPL `impl Complete`，最终 `.xclbin` 已同步为：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin.info
+```
+
+构建结果：
+
+```text
+Kernel: CuperSpmvServiceOnly
+UUID: e0dbc189-228b-3519-0d68-dd541d6bc70a
+SHA256: f443c729851e7b64e1b87eb59ce613a79de44aacb8d7072b5068a7bb0e4b8d0e
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+Build dir: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/
+Build log: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/logs/build_hw_tmux.log
+v++ link elapsed: 1h 18m 3s
+```
+
+HBM 映射保持 ownerbank8 8 路 ABI：`Matrix_data_0..7 -> HBM[0..7]`，
+`SpElement_list_ptr -> HBM[8]`，`X -> HBM[9]`，`Y_out -> HBM[10]`，
+`Status -> HBM[30]`，`Metrics -> HBM[31]`。该版仍是 debug probe，尚未上板，
+不替代 `strip8` / `ownerbank8-lighttrace` 的结论，也不更新正式 `source.diff`。
+
+判定策略保持：
+
+- 若后续真正生成的 `entryprobe_n1024` 仍无 `EPRB` magic，停止 datapath/Chisel 讨论，
+  优先查 TAPA invoke、Status/Metrics mmap 写回、host pre-Finish sync 和 BO mapping；
+- 若 entry magic 可见但 first-read stage 不推进，再查 HBM read、数据打包和 BO migration；
+- 只有 entry/first-read probe 都通过后，才继续考虑 loader-probe 或 Chisel datapath-in-TAPA。
 
 ## 当前基线
 

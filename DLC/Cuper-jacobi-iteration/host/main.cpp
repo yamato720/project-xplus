@@ -80,6 +80,7 @@ static constexpr INDEX_TYPE kJacobiTraceHbmWriter = kJacobiTracePackWriter + 1;
 static constexpr INDEX_TYPE kJacobiTraceSourceMax = kJacobiTraceHbmWriter;
 static constexpr double kJacobiMetricsSentinelBase = -1000000.0;
 static constexpr INDEX_TYPE kSpmvOnlyProgressMagic = 0x53504d56;  // "SPMV"
+static constexpr INDEX_TYPE kSpmvOnlyEntryProbeMagic = 0x45505242;  // "EPRB"
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
 static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugMagic = 0x53424447;  // "SBDG"
 static constexpr INDEX_TYPE kSpmvOnlyScoreboardDebugWords =
@@ -110,6 +111,19 @@ const char* SpmvOnlyProgressStageName(const INDEX_TYPE stage) {
     case 15: return "final";
     case 16: return "ownerbank_first_output";
     case 17: return "ownerbank_done_drain";
+    case 20: return "entryprobe_after_status";
+    case 21: return "entryprobe_after_metrics";
+    case 22: return "entryprobe_ptr0";
+    case 32: return "entryprobe_matrix0";
+    case 33: return "entryprobe_matrix1";
+    case 34: return "entryprobe_matrix2";
+    case 35: return "entryprobe_matrix3";
+    case 36: return "entryprobe_matrix4";
+    case 37: return "entryprobe_matrix5";
+    case 38: return "entryprobe_matrix6";
+    case 39: return "entryprobe_matrix7";
+    case 48: return "entryprobe_x0";
+    case 63: return "entryprobe_final";
     default: return "unknown";
     }
 }
@@ -480,7 +494,21 @@ void PrintSpmvOnlyPrefinishSnapshot(const char* label,
     }
     cout << endl;
 
-    if (status_data.size() >= 16) {
+    if (status_data.size() >= 16 &&
+        status_data[8] == kSpmvOnlyEntryProbeMagic) {
+        cout << "[" << label << "] entryprobe_magic="
+             << status_data[8]
+             << " valid=1"
+             << " row_num=" << status_data[9]
+             << " batch_num=" << status_data[10]
+             << " matrix_len=" << status_data[11]
+             << " column_num=" << status_data[12]
+             << " stage=" << SpmvOnlyProgressStageName(status_data[13])
+             << "(" << status_data[13] << ")"
+             << " event_count=" << status_data[14]
+             << " last_value=" << status_data[15]
+             << endl;
+    } else if (status_data.size() >= 16) {
         cout << "[" << label << "] progress_magic="
              << status_data[8]
              << " valid=" << (status_data[8] == kSpmvOnlyProgressMagic ? 1 : 0)
@@ -1440,6 +1468,24 @@ int RunSpmvServiceOnly(const std::string& bitstream,
          << " slice_width=" << Metrics_fpga_data[7] << endl;
 #ifdef JACOBI_SPMV_SCOREBOARD_DEBUG
     PrintSpmvOnlyScoreboardDebugSummary("spmv-final", Debug_fpga_data);
+#endif
+
+#ifdef JACOBI_SPMV_ENTRY_PROBE
+    cout << "[spmv-only-entry-probe] enabled=1"
+         << " magic=" << Status_fpga_data[8]
+         << " stage=" << SpmvOnlyProgressStageName(Status_fpga_data[13])
+         << "(" << Status_fpga_data[13] << ")"
+         << " events=" << Status_fpga_data[14]
+         << " last_value=" << Status_fpga_data[15]
+         << endl;
+    PrintSpmvOnlyPrefinishSnapshot("spmv-entryprobe-final",
+                                   Y_fpga_data,
+                                   Y_ref,
+                                   Status_fpga_data,
+                                   Metrics_fpga_data,
+                                   m);
+    cout << "[spmv-only-entry-probe] skip Y correctness: probe top does not run SpMV datapath" << endl;
+    return 0;
 #endif
 
     cout << "[" << setw(18) << "Verification" << "] Extracting Device Data...";

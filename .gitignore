@@ -1,5 +1,6 @@
 build/
 obj_dir/
+chisel/**/target/
 *-build/
 build_control_probe/
 cuper-pcg-notapa/

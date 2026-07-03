@@ -1900,5 +1900,230 @@ tmux run finished with exit code: 0
 
 硬件只跑 `thermal2_n16` 和 `thermal2_n1024`。验收标准不是性能提升，而是在
 pre-Finish 采样里至少看到一个明确阶段 counter，并定位最后推进到 entry/mmap、
-loader/core、owner-bank 或 scatter writer 哪一段。若 progress writer 自身仍不可见，
-下一步再做 mmap-only 或 entry-probe xclbin。
+loader/core、owner-bank 或 scatter writer 哪一段。服务器侧结果为：
+
+| 数据集 | 结果 | 关键现象 |
+| --- | --- | --- |
+| `thermal2_n16` | PASS | `stage=final(15)` |
+| `thermal2_n1024` | timeout | 300s timeout，`Status/Metrics[8..15]` 仍是哨兵，`Y[0..15]=0` |
+
+full lighttrace 在 n1024 上仍没有暴露 progress writer 状态。下一步先做 entry-probe
+隔离 kernel entry / Status mmap / HBM first-read，不先做全流程 Chisel。
+
+## 2026-07-02：ownerbank8-entryprobe 本地源码验证
+
+本轮按用户要求不生成新的 XO/xclbin/bitstream，只实现并验证同 ABI 的
+`ownerbank8-entryprobe` 源码路径。
+
+构建/运行宏：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly
+JACOBI_SPMV_ONLY=1
+JACOBI_HBM_CHANNELS=8
+JACOBI_SPMV_ENTRY_PROBE=1
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build
+SPMV_PREFINISH_POLL_COUNT=1
+```
+
+host build：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+make cuper-jacobi-build-host
+```
+
+结果：PASS。CMake 输出确认：
+
+```text
+Cuper SpMV-only lane-static real packing is ENABLED
+Cuper SpMV-only ownerbank8 entry probe is ENABLED
+```
+
+software smoke：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+SPMV_PREFINISH_POLL_COUNT=1 \
+make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+SPMV_PREFINISH_POLL_COUNT=1 \
+make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+关键结果：
+
+| 数据集 | 结果 | Status/Metrics probe |
+| --- | --- | --- |
+| `thermal2_n16` | PASS | `magic=1162891842`, `stage=entryprobe_final(63)`, `events=12`, `last_value=10` |
+| `thermal2_n1024` | PASS | `magic=1162891842`, `stage=entryprobe_final(63)`, `events=12`, `last_value=10` |
+
+`1162891842` 是 `0x45505242` (`EPRB`)。两个 smoke 都正常写回
+`Status/Metrics[8..15]`，且 host 打印：
+
+```text
+[spmv-only-entry-probe] skip Y correctness: probe top does not run SpMV datapath
+```
+
+这是预期行为；entry-probe 不计算 `Y=A*X`，所以 `Y[0..15]=0` 不作为错误。
+
+本轮非 bitstream 检查：
+
+```bash
+make -C verilog tapa-bank-lint
+make -C verilog tapa-bank-sim
+git diff --check
+```
+
+结果：
+
+- `tapa-bank-lint` PASS，保留既有 `SHORTREAL` / `DECLFILENAME` warning；
+- `tapa-bank-sim` PASS，输出 `PASS: TAPA owner-bank RTL accumulator cycles=65 real_events=40 outputs=16`；
+- `git diff --check` PASS。
+
+本轮没有生成 bitstream，也没有更新正式 `source.diff`。
+
+## 2026-07-03：ownerbank8-entryprobe tmux 硬件构建
+
+用户要求补起硬件构建后，先启动第一次 tmux 构建：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CLOCK_PERIOD=4.0 \
+JACOBI_KERNEL_FREQUENCY=150 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-build \
+make cuper-jacobi-hw-tmux
+```
+
+失败结果：
+
+```text
+Build dir: cuper-tapa-spmv-ownerbank8-entryprobe-build/
+Main log: cuper-tapa-spmv-ownerbank8-entryprobe-build/logs/build_hw_tmux.log
+Stage: TAPA pack
+Root cause: entry-probe did not use Y_out, so HLS optimized away m_axi_Y_out.
+```
+
+该失败说明 first-read/status probe 分支虽然保持了 host 参数列表，但没有实际触碰
+`Y_out`，导致 IP packaging 时找不到原 ABI 的 `m_axi_Y_out` 接口。
+
+修复后先复跑软件 smoke：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+make cuper-jacobi-build-host
+
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+SPMV_PREFINISH_POLL_COUNT=1 \
+make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n16
+
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-smoke-build \
+SPMV_PREFINISH_POLL_COUNT=1 \
+make cuper-jacobi-run-sw MATRIX=data/suitesparse/Schmid/csr/thermal2_n1024
+```
+
+结果：
+
+| 数据集 | 结果 | Status/Metrics probe |
+| --- | --- | --- |
+| `thermal2_n16` | PASS | `magic=1162891842`, `stage=entryprobe_final(63)`, `events=12`, `last_value=10` |
+| `thermal2_n1024` | PASS | `magic=1162891842`, `stage=entryprobe_final(63)`, `events=12`, `last_value=10` |
+
+修复版第二次 tmux 构建：
+
+```bash
+JACOBI_TOP=CuperSpmvServiceOnly \
+JACOBI_SPMV_ONLY=1 \
+JACOBI_HBM_CHANNELS=8 \
+JACOBI_SPMV_ENTRY_PROBE=1 \
+CLOCK_PERIOD=4.0 \
+JACOBI_KERNEL_FREQUENCY=150 \
+CUPER_JACOBI_BUILD_DIR=$PWD/cuper-tapa-spmv-ownerbank8-entryprobe-yout-build \
+make cuper-jacobi-hw-tmux
+```
+
+当前检查点：
+
+```text
+Build dir: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/
+Main log: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/logs/build_hw_tmux.log
+XO: cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/CuperSpmvServiceOnly.xo
+TAPA pack: PASS
+Vitis system_link/cfgen/cf2bd: PASS
+VPL: started at 2026-07-03 13:30:29 CST
+```
+
+关键日志确认：
+
+```text
+generated the v++ xo file at .../CuperSpmvServiceOnly.xo
+cfgen ... -sp CuperSpmvServiceOnly_1.Y_out:HBM[10]
+Run run_link: Step vpl: Started
+```
+
+最终构建结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Run completed
+Total elapsed time: 1h 18m 3s
+```
+
+同步文件：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin.info
+```
+
+同步后校验：
+
+```text
+UUID: e0dbc189-228b-3519-0d68-dd541d6bc70a
+xclbin SHA256: f443c729851e7b64e1b87eb59ce613a79de44aacb8d7072b5068a7bb0e4b8d0e
+info SHA256: 2c70ba0517b4f73160fd1f0fae4743ffded87ed61e31ff88bb4132c53d6cec1e
+DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
+Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0
+```
+
+HBM 映射：
+
+```text
+Matrix_data_0..7 -> HBM[0..7]
+SpElement_list_ptr -> HBM[8]
+X -> HBM[9]
+Y_out -> HBM[10]
+Status -> HBM[30]
+Metrics -> HBM[31]
+```
+
+这轮 probe 仍是 debug 边界验证，尚未跑服务器侧 `thermal2_n16` /
+`thermal2_n1024` 上板测试，不更新正式 `source.diff`。

@@ -931,6 +931,73 @@ v++ link elapsed: 2h 33m 11s
 
 内存监控未触发 `.memory_abort`，swap 为 0，最大 RSS 约 17 GB。该版只作为上板定位
 debug xclbin，不作为性能候选；服务器侧只跑 `thermal2_n16` 和 `thermal2_n1024`。
+服务器侧结果已经补齐：`thermal2_n16` PASS，progress 最终为 `stage=final(15)`；
+`thermal2_n1024` 300s timeout，pre-Finish 采样里 `Status/Metrics[8..15]` 仍是哨兵，
+`Y[0..15]=0`。这说明当前 full lighttrace 在 n1024 边界仍没有把 entry/progress
+写回暴露给 host。下一步先做同 ABI 的 entry-probe，而不是直接全流程 Chisel。
+
+## 2026-07-02：ownerbank8-entryprobe 源码开关
+
+本轮新增 `JACOBI_SPMV_ENTRY_PROBE=1`，用于在 ownerbank8 失败边界上先证伪
+kernel entry、Status/Metrics mmap 写回和最小 HBM first-read，而不是继续放大 datapath。
+按用户要求，本轮不生成新的 XO/xclbin/bitstream。
+
+改动范围：
+
+- 根 `Makefile` 和 `DLC/Cuper-jacobi-iteration/Makefile` 传播
+  `JACOBI_SPMV_ENTRY_PROBE`；
+- `scripts/build_xo_u55c.sh` 对 probe 做约束检查，并在打开时强制
+  `JACOBI_SPMV_LANE_STATIC_REAL=1`；
+- `scripts/launcher.py` 把 probe 开关带入 tmux 环境；
+- `CMakeLists.txt` 让 host/software 编译路径也带上 probe 宏；
+- `cuper_spmv_service_only_top_graphs.hpp` 在 `CuperSpmvServiceOnly` 顶层增加
+  compile-time entry-probe 分支；
+- `host/main.cpp` 新增 `EPRB` magic 和 entry-probe stage 名称，probe 模式下打印
+  `Status/Metrics[8..15]` 并跳过 Y 正确性校验。
+
+probe 分支的设计边界：
+
+- 只允许 `JACOBI_TOP=CuperSpmvServiceOnly` 和 `JACOBI_HBM_CHANNELS=8`；
+- 保持 ownerbank8 的 host ABI、8-HBM bank mapping 和 scalar `float* Y_out` ABI；
+- 不实例化 matrix/vector/core/owner-bank/scatter datapath；
+- entry 后立即写 `Status/Metrics[8..15]`，magic 为 `0x45505242` (`EPRB`)；
+- 顺序读取 `SpElement_list_ptr[0]`、`Matrix_data_0..7[0]` 和 `X[0]` 后更新 stage；
+- final stage 为 `entryprobe_final(63)`，随后正常返回。
+
+本轮目的不是性能优化，也不替代 `strip8` 或 `ownerbank8-lighttrace` 的失败边界。
+正式 `source.diff` 继续不更新；只有后续 entry-probe 上板证明 entry/mmap/HBM first-read
+都可见后，才考虑 loader-probe 或 Chisel datapath-in-TAPA。
+
+## 2026-07-03：ownerbank8-entryprobe 硬件构建修正
+
+用户要求补生成 entry-probe bitstream 后，第一次 tmux 构建在 TAPA pack 阶段失败。
+失败点不是 host/software smoke，而是 ABI 端口被优化：
+
+- `JACOBI_SPMV_ENTRY_PROBE=1` 分支只写 `Status/Metrics` 并读取 ptr/matrix/X；
+- `Y_out` 没有被使用，HLS 优化掉顶层 `m_axi_Y_out`；
+- TAPA graph / kernel XML 和 connectivity 仍保留原 `CuperSpmvServiceOnly` ABI，
+  pack 脚本在 `m_axi_Y_out` 上设置 bus parameter 时找不到接口。
+
+修正：
+
+- `CuperSpmvOnly_EntryProbeWriter` 增加 `tapa::async_mmap<VALUE_TYPE>& Y_out`；
+- 在 final stage 前写 `Y_out[0] = 0.0f` 并等待一次 write response；
+- 保持 ownerbank8 的 scalar `float* Y_out` ABI 和 `Y_out -> HBM[10]` bank mapping；
+- probe 仍不启动完整 SpMV datapath，host 继续跳过 Y 正确性校验。
+
+修正后 `thermal2_n16` / `thermal2_n1024` software smoke 均通过，第二次 tmux 构建已
+生成 `CuperSpmvServiceOnly.xo`，`cfgen` 也确认 `Y_out -> HBM[10]`。VPL 最终完成
+`impl Complete`，已同步新的 demo artifact：
+
+```text
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin
+395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin.info
+```
+
+该版不是 Chisel datapath，也不是 core/accumulator scoreboard 版本；它只是
+ownerbank8 同 ABI 的 entry/first-read/yout probe，用来确认 `Status/Metrics` mmap、
+HBM first-read 和 scalar `Y_out` 端口在硬件上是否可见。本轮仍是 debug probe，
+尚未上板，不更新正式 `source.diff`。
 
 ## source.diff 规则
 

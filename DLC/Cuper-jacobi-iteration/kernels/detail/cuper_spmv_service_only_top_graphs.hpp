@@ -28,6 +28,13 @@ static constexpr INDEX_TYPE kCuperSpmvOnlyProgressScatterDone = 14;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressFinal = 15;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankFirstOutput = 16;
 static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankDoneDrain = 17;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeMagic = 0x45505242;  // "EPRB"
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeAfterStatus = 20;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeAfterMetrics = 21;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbePtr0 = 22;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeMatrixBase = 32;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeX0 = 48;
+static constexpr INDEX_TYPE kCuperSpmvOnlyEntryProbeFinal = 63;
 
 #if defined(JACOBI_SPMV_OWNERBANK_LIGHTTRACE) && \
     (!defined(JACOBI_SPMV_LANE_STATIC_REAL) || \
@@ -36,6 +43,14 @@ static constexpr INDEX_TYPE kCuperSpmvOnlyProgressOwnerBankDoneDrain = 17;
 #endif
 #if defined(JACOBI_SPMV_OWNERBANK_LIGHTTRACE) && !defined(JACOBI_HBM_CHANNELS_8)
 #error "JACOBI_SPMV_OWNERBANK_LIGHTTRACE is currently scoped to ownerbank8 debug builds."
+#endif
+
+#if defined(JACOBI_SPMV_ENTRY_PROBE) && !defined(JACOBI_HBM_CHANNELS_8)
+#error "JACOBI_SPMV_ENTRY_PROBE is currently scoped to ownerbank8 debug builds."
+#endif
+
+#if defined(JACOBI_SPMV_ENTRY_PROBE) && !defined(JACOBI_SPMV_LANE_STATIC_REAL)
+#error "JACOBI_SPMV_ENTRY_PROBE keeps the ownerbank8 scalar Y_out ABI; compile with JACOBI_SPMV_LANE_STATIC_REAL."
 #endif
 
 #if defined(JACOBI_SPMV_SCOREBOARD_DEBUG) && !defined(JACOBI_SPMV_OOO_SCOREBOARD_RTL)
@@ -1197,6 +1212,255 @@ write_spmv_metrics_resp:
         }
     }
 }
+
+#ifdef JACOBI_SPMV_ENTRY_PROBE
+struct CuperSpmvOnlyEntryProbeEvent {
+    INDEX_TYPE stage;
+    INDEX_TYPE value;
+};
+
+inline CuperSpmvOnlyEntryProbeEvent CuperSpmvOnly_MakeEntryProbeEvent(
+    const INDEX_TYPE stage,
+    const INDEX_TYPE value) {
+#pragma HLS inline
+    CuperSpmvOnlyEntryProbeEvent event;
+    event.stage = stage;
+    event.value = value;
+    return event;
+}
+
+inline void CuperSpmvOnly_EntryProbeWriteHeader(
+    tapa::async_mmap<INDEX_TYPE> &Status,
+    tapa::async_mmap<double> &Metrics,
+    const INDEX_TYPE Row_num,
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Matrix_len,
+    const INDEX_TYPE Column_num,
+    const INDEX_TYPE stage,
+    const INDEX_TYPE event_count,
+    const INDEX_TYPE last_value) {
+#pragma HLS inline
+    Status.write_addr.write(8);
+    Status.write_data.write(kCuperSpmvOnlyEntryProbeMagic);
+    Status.write_addr.write(9);
+    Status.write_data.write(Row_num);
+    Status.write_addr.write(10);
+    Status.write_data.write(Batch_num);
+    Status.write_addr.write(11);
+    Status.write_data.write(Matrix_len);
+    Status.write_addr.write(12);
+    Status.write_data.write(Column_num);
+    Status.write_addr.write(13);
+    Status.write_data.write(stage);
+    Status.write_addr.write(14);
+    Status.write_data.write(event_count);
+    Status.write_addr.write(15);
+    Status.write_data.write(last_value);
+
+write_entry_probe_status_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 8;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Status.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+
+    Metrics.write_addr.write(8);
+    Metrics.write_data.write(static_cast<double>(kCuperSpmvOnlyEntryProbeMagic));
+    Metrics.write_addr.write(9);
+    Metrics.write_data.write(static_cast<double>(Row_num));
+    Metrics.write_addr.write(10);
+    Metrics.write_data.write(static_cast<double>(Batch_num));
+    Metrics.write_addr.write(11);
+    Metrics.write_data.write(static_cast<double>(Matrix_len));
+    Metrics.write_addr.write(12);
+    Metrics.write_data.write(static_cast<double>(Column_num));
+    Metrics.write_addr.write(13);
+    Metrics.write_data.write(static_cast<double>(stage));
+    Metrics.write_addr.write(14);
+    Metrics.write_data.write(static_cast<double>(event_count));
+    Metrics.write_addr.write(15);
+    Metrics.write_data.write(static_cast<double>(last_value));
+
+write_entry_probe_metrics_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 8;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Metrics.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+
+inline void CuperSpmvOnly_EntryProbeUpdateStage(
+    tapa::async_mmap<INDEX_TYPE> &Status,
+    tapa::async_mmap<double> &Metrics,
+    const INDEX_TYPE stage,
+    const INDEX_TYPE event_count,
+    const INDEX_TYPE last_value) {
+#pragma HLS inline
+    Status.write_addr.write(13);
+    Status.write_data.write(stage);
+    Status.write_addr.write(14);
+    Status.write_data.write(event_count);
+    Status.write_addr.write(15);
+    Status.write_data.write(last_value);
+
+write_entry_probe_stage_status_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 3;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Status.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+
+    Metrics.write_addr.write(13);
+    Metrics.write_data.write(static_cast<double>(stage));
+    Metrics.write_addr.write(14);
+    Metrics.write_data.write(static_cast<double>(event_count));
+    Metrics.write_addr.write(15);
+    Metrics.write_data.write(static_cast<double>(last_value));
+
+write_entry_probe_stage_metrics_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 3;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Metrics.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+}
+
+void CuperSpmvOnly_EntryProbePtrReader(
+    tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
+    tapa::ostream<CuperSpmvOnlyEntryProbeEvent> &Event_out) {
+    SpElement_list_ptr.read_addr.write(0);
+    INDEX_TYPE value = 0;
+wait_entry_probe_ptr0:
+    while (!SpElement_list_ptr.read_data.try_read(value)) {
+#pragma HLS pipeline II=1
+    }
+    Event_out.write(CuperSpmvOnly_MakeEntryProbeEvent(
+        kCuperSpmvOnlyEntryProbePtr0,
+        value));
+}
+
+void CuperSpmvOnly_EntryProbeMatrixReader(
+    tapa::async_mmap<ap_uint<512>> &Matrix_data,
+    tapa::ostream<CuperSpmvOnlyEntryProbeEvent> &Event_out,
+    const INDEX_TYPE Channel_id) {
+    Matrix_data.read_addr.write(0);
+    ap_uint<512> beat = 0;
+wait_entry_probe_matrix0:
+    while (!Matrix_data.read_data.try_read(beat)) {
+#pragma HLS pipeline II=1
+    }
+    const ap_uint<32> low_bits = beat(31, 0);
+    Event_out.write(CuperSpmvOnly_MakeEntryProbeEvent(
+        kCuperSpmvOnlyEntryProbeMatrixBase + Channel_id,
+        static_cast<INDEX_TYPE>(low_bits.to_uint())));
+}
+
+void CuperSpmvOnly_EntryProbeXReader(
+    tapa::async_mmap<float_v16> &X,
+    tapa::ostream<CuperSpmvOnlyEntryProbeEvent> &Event_out) {
+    X.read_addr.write(0);
+    float_v16 packet;
+wait_entry_probe_x0:
+    while (!X.read_data.try_read(packet)) {
+#pragma HLS pipeline II=1
+    }
+    const ap_uint<32> x0_bits = tapa::bit_cast<ap_uint<32>>(packet[0]);
+    Event_out.write(CuperSpmvOnly_MakeEntryProbeEvent(
+        kCuperSpmvOnlyEntryProbeX0,
+        static_cast<INDEX_TYPE>(x0_bits.to_uint())));
+}
+
+void CuperSpmvOnly_EntryProbeWriter(
+    const INDEX_TYPE Batch_num,
+    const INDEX_TYPE Matrix_len,
+    const INDEX_TYPE Row_num,
+    const INDEX_TYPE Column_num,
+    const INDEX_TYPE Iteration_num,
+    tapa::istream<CuperSpmvOnlyEntryProbeEvent> &Ptr_Event_in,
+    tapa::istreams<CuperSpmvOnlyEntryProbeEvent, HBM_CHANNEL_NUM> &Matrix_Event_in,
+    tapa::istream<CuperSpmvOnlyEntryProbeEvent> &X_Event_in,
+    tapa::async_mmap<VALUE_TYPE> &Y_out,
+    tapa::async_mmap<INDEX_TYPE> &Status,
+    tapa::async_mmap<double> &Metrics) {
+    INDEX_TYPE event_count = 1;
+
+    CuperSpmvOnly_EntryProbeWriteHeader(Status,
+                                        Metrics,
+                                        Row_num,
+                                        Batch_num,
+                                        Matrix_len,
+                                        Column_num,
+                                        kCuperSpmvOnlyProgressEntry,
+                                        event_count,
+                                        Iteration_num);
+
+    CuperSpmvOnlyEntryProbeEvent event = Ptr_Event_in.read();
+    ++event_count;
+    CuperSpmvOnly_EntryProbeUpdateStage(Status,
+                                        Metrics,
+                                        event.stage,
+                                        event_count,
+                                        event.value);
+
+entry_probe_matrix_event_loop:
+    for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+#pragma HLS loop_tripcount min=8 max=8
+#pragma HLS pipeline off
+        event = Matrix_Event_in[channel].read();
+        ++event_count;
+        CuperSpmvOnly_EntryProbeUpdateStage(Status,
+                                            Metrics,
+                                            event.stage,
+                                            event_count,
+                                            event.value);
+    }
+
+    event = X_Event_in.read();
+    ++event_count;
+    CuperSpmvOnly_EntryProbeUpdateStage(Status,
+                                        Metrics,
+                                        event.stage,
+                                        event_count,
+                                        event.value);
+
+    // entry-probe 不计算 SpMV，但必须触碰 Y_out，防止 HLS 优化掉原 ABI 的
+    // m_axi_Y_out 端口，导致 TAPA pack/Vitis connectivity 与 host ABI 不一致。
+    Y_out.write_addr.write(0);
+    Y_out.write_data.write(0.0f);
+write_entry_probe_yout_resp:
+    for (INDEX_TYPE response_count = 0; response_count < 1;) {
+#pragma HLS pipeline II=1
+        uint8_t num_responses = 0;
+        if (Y_out.write_resp.try_read(num_responses)) {
+            response_count += int(num_responses) + 1;
+        }
+    }
+
+    ++event_count;
+    CuperSpmvOnly_EntryProbeUpdateStage(Status,
+                                        Metrics,
+                                        kCuperSpmvOnlyEntryProbeFinal,
+                                        event_count,
+                                        HBM_CHANNEL_NUM + 2);
+    CuperSpmvOnly_WriteStatus(Status,
+                              Iteration_num == 0 ? 1 : Iteration_num,
+                              Row_num);
+    CuperSpmvOnly_WriteMetrics(Metrics,
+                               Batch_num,
+                               Matrix_len,
+                               Row_num,
+                               Column_num,
+                               Iteration_num == 0 ? 1 : Iteration_num);
+}
+#endif
 
 #if defined(JACOBI_SPMV_STRIP_PADDING) || \
     defined(JACOBI_SPMV_COMPACT_PE) || \
@@ -4781,6 +5045,41 @@ void CuperSpmvServiceOnly(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                           const INDEX_TYPE Column_num,
                           const INDEX_TYPE Iteration_num
                          ) {
+#ifdef JACOBI_SPMV_ENTRY_PROBE
+    tapa::stream<CuperSpmvOnlyEntryProbeEvent, 8>
+        EntryProbe_Ptr_Event_Stream("EntryProbe_Ptr_Event_Stream");
+    tapa::streams<CuperSpmvOnlyEntryProbeEvent, HBM_CHANNEL_NUM, 2>
+        EntryProbe_Matrix_Event_Stream("EntryProbe_Matrix_Event_Stream");
+    tapa::stream<CuperSpmvOnlyEntryProbeEvent, 8>
+        EntryProbe_X_Event_Stream("EntryProbe_X_Event_Stream");
+
+    tapa::task()
+        .invoke(CuperSpmvOnly_EntryProbeWriter,
+                Batch_num,
+                Matrix_len,
+                Row_num,
+                Column_num,
+                Iteration_num,
+                EntryProbe_Ptr_Event_Stream,
+                EntryProbe_Matrix_Event_Stream,
+                EntryProbe_X_Event_Stream,
+                Y_out,
+                Status,
+                Metrics)
+        .invoke(CuperSpmvOnly_EntryProbePtrReader,
+                SpElement_list_ptr,
+                EntryProbe_Ptr_Event_Stream)
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(CuperSpmvOnly_EntryProbeMatrixReader,
+                                             Matrix_data,
+                                             EntryProbe_Matrix_Event_Stream,
+                                             tapa::seq())
+        .invoke(CuperSpmvOnly_EntryProbeXReader,
+                X,
+                EntryProbe_X_Event_Stream)
+    ;
+    return;
+#endif
+
     // 参数和 X 仍采用 Cuper 原始串接方式：每个 Core 只消费自己的 Matrix_data
     // HBM channel，同时把 PE 参数和 X 向量转发给下一级 Core。
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM + 1, 128>    PE_Param("PE_Param");

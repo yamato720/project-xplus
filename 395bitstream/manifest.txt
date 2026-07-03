@@ -12,3 +12,11 @@ bitfile=395bitstream/cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xc
 uuid=b0ded244-a8a1-dc8f-3cbf-a62cdf2a9867
 sha256=5b4bd6b4439ba651df67a1bd384d1149d29d7d8d361be98186fbdf9866c6b227
 status=build synced, local sim passed, timing clean, board test pending
+
+[ownerbank8-entryprobe-yout]
+base_log=cuper-tapa-spmv-ownerbank8-entryprobe-yout-build/logs/build_hw_tmux.log
+date=2026-07-03 14:48:15 CST
+bitfile=395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin
+uuid=e0dbc189-228b-3519-0d68-dd541d6bc70a
+sha256=f443c729851e7b64e1b87eb59ce613a79de44aacb8d7072b5068a7bb0e4b8d0e
+status=debug entry-probe/yout artifact synced, timing clean, board test pending
