@@ -1,6 +1,29 @@
 # Cuper SpMV 8-HBM Chisel 数据通路
 
-这个子工程用 Chisel 生成一个固定 8-HBM 的 SpMV-only RTL 数据通路模块：
+这个子工程现在有两条 Chisel 生成路径。
+
+第一条是独立 Vitis RTL kernel：
+
+```text
+CuperSpmvChisel8
+```
+
+它使用固定 8-HBM ownerbank ABI，直接暴露 AXI4 master、AXI-Lite control 和
+`Status`/`Metrics`。当前版本是 entry-probe：读取 `ptr[0]`、每路
+`Matrix_data_i[0]` 和 `X[0]`，写 `Y_out[0]`、`Status[0..15]` 和
+`Metrics[0..15]`。它不依赖 `CuperSpmvServiceOnly` 的 TAPA graph。
+
+常用命令：
+
+```bash
+make cuper-spmv-chisel8-generate
+make cuper-spmv-chisel8-xrt-host
+make build-cuper-spmv-chisel8-xo
+make cuper-spmv-chisel8-hw-tmux
+make run-cuper-spmv-chisel8-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/thermal2_n16
+```
+
+第二条是原有固定 8-HBM 的 SpMV-only RTL 数据通路模块：
 
 ```text
 CuperSpmvOnly_ChiselDataPath8
@@ -27,8 +50,15 @@ chisel/cuper-spmv8/
   README.md
   build.sbt
   project/build.properties
+  packaging/CuperSpmvChisel8.kernel.xml
   scripts/generate.sh
+  scripts/generate_kernel.sh
+  scripts/package_kernel_xo.sh
+  scripts/package_kernel_xo.tcl
+  scripts/link_kernel_xclbin.sh
   src/main/scala/cuper/spmv/
+    AxiPorts.scala
+    CuperSpmvChisel8.scala
     CuperSpmvOnlyChiselDataPath8.scala
     CuperSpmvStreamPorts.scala
     FloatingPointBlackBoxes.scala

@@ -20,3 +20,11 @@ bitfile=395bitstream/cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-de
 uuid=e0dbc189-228b-3519-0d68-dd541d6bc70a
 sha256=f443c729851e7b64e1b87eb59ce613a79de44aacb8d7072b5068a7bb0e4b8d0e
 status=debug entry-probe/yout artifact synced, timing clean, board test pending
+
+[chisel8-entryprobe]
+base_log=logs/cuper_spmv_chisel8_hw_20260703_183507.log
+date=2026-07-03 19:57:31 CST
+bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xclbin
+uuid=3fbc0fc1-7776-ec77-1418-1674584aff18
+sha256=30bd05a8066640fc2a407b04ff2c7a6602a0ac1fc3f0480c3269d9310ca654e0
+status=standalone Chisel RTL entry-probe synced, timing clean, board test pending, not full SpMV

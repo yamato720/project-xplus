@@ -41,3 +41,12 @@ object GenerateCuperSpmvOnlyChiselDataPath8 extends App {
     fileName = "CuperSpmvOnly_ChiselDataPath8.v"
   )
 }
+
+object GenerateCuperSpmvChisel8 extends App {
+  val targetDir = args.headOption.getOrElse("generated")
+  CuperSpmv8Emitter.emitVerilog(
+    gen = new CuperSpmvChisel8,
+    targetDir = targetDir,
+    fileName = "CuperSpmvChisel8.sv"
+  )
+}

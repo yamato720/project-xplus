@@ -19,6 +19,11 @@ YYYY-MM-DD-<主线>-<简短说明>/
 
 ## 已有版本记录
 
+- `2026-07-03-cuper-notapa-spmv-chisel8-entryprobe/`：独立 no-TAPA Chisel RTL
+  kernel `CuperSpmvChisel8` 的 entry-probe 记录。该版只验证 AXI-Lite、13 路
+  AXI master、ownerbank8 HBM mapping、`Status`/`Metrics` 和 scalar `Y_out[0]`
+  ABI；已经生成 timing-clean xclbin 并同步到 `395bitstream/`，但未上板、不是完整
+  SpMV bitstream。
 - `2026-06-10-cuper-tapa-jacobi-iteration/`：第五条 Cuper 主线
   `cuper-tapa-jacobi` 的起始记录。
   目标是用 `DLC/Cuper-jacobi-iteration` 复用 TAPA Cuper SpMV service，在 FPGA kernel
