@@ -75,21 +75,25 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     // 顶层顺序控制：
     // idle -> 读 header -> 清零 partial -> 对每个 batch 读 start/X/end/矩阵 ->
     // 等待累加器 drain -> 逐 source-pair/group 输出 tagged Y -> 下一轮或 done。
-    val states = Enum(14)
+    val states = Enum(18)
     val idle = states(0)
     val readHeader = states(1)
     val initPartial = states(2)
     val readStart = states(3)
     val loadX = states(4)
-    val readEnd = states(5)
-    val consumeBatch = states(6)
-    val drainAccum = states(7)
-    val outputRead = states(8)
-    val outputWait = states(9)
-    val outputEmit = states(10)
-    val nextOutput = states(11)
-    val nextIter = states(12)
-    val doneState = states(13)
+    val loadXWrite = states(5)
+    val readEnd = states(6)
+    val consumeBatch = states(7)
+    val issueSlotRead = states(8)
+    val issueSlotWait = states(9)
+    val issueSlotSend = states(10)
+    val drainAccum = states(11)
+    val outputRead = states(12)
+    val outputWait = states(13)
+    val outputEmit = states(14)
+    val nextOutput = states(15)
+    val nextIter = states(16)
+    val doneState = states(17)
 
     val state = RegInit(idle)
     val donePulse = RegInit(false.B)
@@ -107,11 +111,21 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val xPacketIdx = RegInit(0.U(10.W))
     val xPacketLimit = Reg(UInt(10.W))
     val xPacketBase = Reg(UInt(32.W))
+    val xWriteWord = Reg(UInt(512.W))
+    val xWriteLane = RegInit(0.U(4.W))
 
     // 每个 HBM channel 当前 batch 的 [start, end) matrix beat 范围。
     val start = Reg(Vec(hbmChannels, UInt(32.W)))
     val end = Reg(Vec(hbmChannels, UInt(32.W)))
     val remaining = Reg(Vec(hbmChannels, UInt(32.W)))
+    val issueSource = RegInit(0.U(3.W))
+    val issueOwner = RegInit(0.U(3.W))
+    val issueWord = Reg(UInt(512.W))
+    val issuePrevCol = RegInit("h3fff".U(14.W))
+    val issuePrevVal = RegInit(0.U(32.W))
+    val issueRow = Reg(UInt(18.W))
+    val issueValue = Reg(UInt(32.W))
+    val issueX = Reg(UInt(32.W))
 
     // 输出扫描坐标：outPair 选择 source-HBM，outGroup/owner 合成最终 output packet id。
     val outGroup = RegInit(0.U(groupBits.W))
@@ -121,7 +135,16 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val outValid = RegInit(VecInit(Seq.fill(hbmChannels)(false.B)))
     val outPacket = Reg(Vec(hbmChannels, UInt(32.W)))
 
-    val xMem = Reg(Vec(xWords, UInt(32.W)))
+    val xMem = SyncReadMem(xWords, UInt(32.W))
+    val xReadEn = WireDefault(false.B)
+    val xReadAddr = WireDefault(0.U(xAddrBits.W))
+    val xReadData = xMem.read(xReadAddr, xReadEn)
+    val xWriteEn = WireDefault(false.B)
+    val xWriteAddr = WireDefault(0.U(xAddrBits.W))
+    val xWriteData = WireDefault(0.U(32.W))
+    when(xWriteEn) {
+      xMem.write(xWriteAddr, xWriteData)
+    }
     // 8x8 Core/Accumulator lane 矩阵：source 维度来自 Matrix_A_Stream_i，
     // owner 维度来自 beat 内 slot。Core 和 Accumulator 之间的 Decoupled product
     // stream 是后续插入 scoreboard/乱序调度的位置。
@@ -160,6 +183,8 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       Mux(base >= totalVectorPackets, 0.U, minUInt(512.U, totalVectorPackets - base)(9, 0))
     def xBits(word: UInt, lane: Int): UInt = word(31 + lane * 32, lane * 32)
     def slotBits(word: UInt, lane: Int): UInt = word(63 + lane * 64, lane * 64)
+    def selectSlot(word: UInt, lane: UInt): UInt =
+      Mux1H((0 until hbmChannels).map(i => (lane === i.U) -> slotBits(word, i)))
 
     // 默认所有 stream 不读不写，只在具体状态中拉高握手信号。
     PE_Param_in_s_read := false.B
@@ -220,61 +245,40 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       }
     }
 
-    val decodedRow = Wire(Vec(hbmChannels, Vec(hbmChannels, UInt(18.W))))
-    val decodedCol = Wire(Vec(hbmChannels, Vec(hbmChannels, UInt(14.W))))
-    val decodedVal = Wire(Vec(hbmChannels, Vec(hbmChannels, UInt(32.W))))
-    val decodedValid = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
-    val sourceReady = Wire(Vec(hbmChannels, Bool()))
-    val sourceIssue = Wire(Vec(hbmChannels, Bool()))
-    val allLaneFires = Wire(Vec(hbmChannels * hbmChannels, Bool()))
-    val allLanePads = Wire(Vec(hbmChannels * hbmChannels, Bool()))
+    val issueSlot = selectSlot(issueWord, issueOwner)
+    val issueSlotRow = issueSlot(49, 32)
+    val issueSlotCol = issueSlot(63, 50)
+    val issueSlotRawVal = issueSlot(31, 0)
+    val issueSlotReuse = (issuePrevCol & issueSlotCol) === "h3fff".U
+    val issueSlotValue = Mux(issueSlotReuse, issuePrevVal, issueSlotRawVal)
+    val issueSlotValid = !issueSlotRow(17)
 
-    // Matrix beat 低 512 bit 拆为 8 个 64-bit slot：
-    //   [31:0]  float value
-    //   [49:32] row/tag，row(17)=padding，row(14,1)=group，row(0)=ping/pong
-    //   [63:50] col
-    // value 带有复用编码，reuse 命中时沿用前一个有效 value，匹配现有 strip 数据格式。
+    val sourceCanRead = VecInit((0 until hbmChannels).map { source =>
+      remaining(source) =/= 0.U && matrixValid(source)
+    })
+    val anySourceCanRead = sourceCanRead.asUInt.orR
+    val selectedSource = PriorityEncoder(sourceCanRead)
+    val selectedMatrixWord = Mux1H((0 until hbmChannels).map { source =>
+      (selectedSource === source.U) -> matrixDout(source)(511, 0)
+    })
     for (source <- 0 until hbmChannels) {
-      val word = matrixDout(source)(511, 0)
-      var prevCol: UInt = "h3fff".U(14.W)
-      var prevVal: UInt = 0.U(32.W)
-      var ready: Bool = true.B
-      for (owner <- 0 until hbmChannels) {
-        val slot = slotBits(word, owner)
-        val row = slot(49, 32)
-        val col = slot(63, 50)
-        val rawVal = slot(31, 0)
-        val reuse = (prevCol & col) === "h3fff".U
-        val value = Mux(reuse, prevVal, rawVal)
-        val valid = !row(17)
-        val group = row(14, 1)
+      matrixRead(source) := state === consumeBatch && anySourceCanRead && selectedSource === source.U
+    }
 
-        decodedRow(source)(owner) := row
-        decodedCol(source)(owner) := col
-        decodedVal(source)(owner) := value
-        decodedValid(source)(owner) := valid
-
-        coreLanes(source)(owner).io.inGroup := group
-        coreLanes(source)(owner).io.inPong := row(0)
-        coreLanes(source)(owner).io.inValue := value
-        coreLanes(source)(owner).io.inX := xMem(col(xAddrBits - 1, 0))
-
-        // 同一 source beat 中任一有效 owner lane 不 ready 时，整个 beat 暂不读取，
-        // 避免部分 slot 消费后无法重放。
-        ready = ready && (!valid || coreLanes(source)(owner).io.inReady)
-        prevCol = col
-        prevVal = Mux(reuse, prevVal, rawVal)
+    val activeCoreReady = Mux1H((0 until hbmChannels).flatMap { source =>
+      (0 until hbmChannels).map { owner =>
+        (issueSource === source.U && issueOwner === owner.U) -> coreLanes(source)(owner).io.inReady
       }
-      sourceReady(source) := ready
-      sourceIssue(source) :=
-        state === consumeBatch && remaining(source) =/= 0.U &&
-          matrixValid(source) && sourceReady(source)
-      matrixRead(source) := sourceIssue(source)
-
+    })
+    for (source <- 0 until hbmChannels) {
       for (owner <- 0 until hbmChannels) {
-        coreLanes(source)(owner).io.inValid := sourceIssue(source) && decodedValid(source)(owner)
-        allLaneFires(source * hbmChannels + owner) := sourceIssue(source) && decodedValid(source)(owner)
-        allLanePads(source * hbmChannels + owner) := sourceIssue(source) && !decodedValid(source)(owner)
+        when(state === issueSlotSend && issueSource === source.U && issueOwner === owner.U) {
+          coreLanes(source)(owner).io.inValid := true.B
+          coreLanes(source)(owner).io.inGroup := issueRow(14, 1)
+          coreLanes(source)(owner).io.inPong := issueRow(0)
+          coreLanes(source)(owner).io.inValue := issueValue
+          coreLanes(source)(owner).io.inX := issueX
+        }
       }
     }
 
@@ -282,8 +286,6 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val anyRemaining = remaining.map(_ =/= 0.U).reduce(_ || _)
     val anyLaneBusy = laneBusy.asUInt.orR
     val anyRawStall = laneRawStall.asUInt.orR
-    val totalValidIssued = PopCount(allLaneFires.asUInt)
-    val totalPaddingIssued = PopCount(allLanePads.asUInt)
     val totalOutputWrites = PopCount(taggedWrite.asUInt)
     val anyOutputBlocked =
       outValid.zip(yFullN).map { case (valid, ready) => valid && !ready }.reduce(_ || _)
@@ -303,12 +305,6 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     donePulse := false.B
 
     // 性能/健康计数：有效 slot、padding slot、RAW 停顿、写出数量和 writer 背压。
-    when(totalValidIssued =/= 0.U) {
-      counterValidSlots := counterValidSlots + totalValidIssued
-    }
-    when(totalPaddingIssued =/= 0.U) {
-      counterPaddingSlots := counterPaddingSlots + totalPaddingIssued
-    }
     when(anyRawStall) {
       counterRawStall := counterRawStall + 1.U
     }
@@ -379,19 +375,31 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       }
 
       is(loadX) {
-        // 只加载当前 batch 需要的 X packet 窗口，减少片上寄存器使用。
+        // 只加载当前 batch 需要的 X packet 窗口。为避免 16 写/64 读的超大
+        // 多端口寄存器阵列，每个 float_v16 packet 分 16 拍写入单端口 SRAM。
         when(xPacketIdx >= xPacketLimit) {
           boundaryCount := 0.U
           state := readEnd
         }.elsewhen(Vector_X_Stream_in_s_empty_n) {
           Vector_X_Stream_in_s_read := true.B
-          val xWord = Vector_X_Stream_in_s_dout(511, 0)
-          for (lane <- 0 until 16) {
-            val addr = ((xPacketIdx << 4) + lane.U)(xAddrBits - 1, 0)
-            xMem(addr) := xBits(xWord, lane)
-          }
+          xWriteWord := Vector_X_Stream_in_s_dout(511, 0)
+          xWriteLane := 0.U
+          state := loadXWrite
+        }
+      }
+
+      is(loadXWrite) {
+        xWriteEn := true.B
+        xWriteAddr := ((xPacketIdx << 4) + xWriteLane)(xAddrBits - 1, 0)
+        xWriteData := Mux1H((0 until 16).map { lane =>
+          (xWriteLane === lane.U) -> xBits(xWriteWord, lane)
+        })
+        when(xWriteLane === 15.U) {
           xPacketIdx := xPacketIdx + 1.U
           counterXPackets := counterXPackets + 1.U
+          state := loadX
+        }.otherwise {
+          xWriteLane := xWriteLane + 1.U
         }
       }
 
@@ -410,13 +418,8 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       }
 
       is(consumeBatch) {
-        // 各 HBM source 独立发射；只有该 source 的 8 个 owner lane 全部可接收时才读 beat。
-        for (source <- 0 until hbmChannels) {
-          when(sourceIssue(source)) {
-            remaining(source) := remaining(source) - 1.U
-            counterMatrixBeats(source) := counterMatrixBeats(source) + 1.U
-          }
-        }
+        // 每次只取一路 Matrix beat，然后按 8 个 owner slot 串行读 X/送 Core。
+        // 这保留 8-HBM ABI，但避免对 X SRAM 建 64 个组合读端口。
         when(!anyRemaining) {
           when(batchIdx + 1.U >= Batch_num) {
             state := drainAccum
@@ -432,6 +435,53 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
             xPacketLimit := vectorPacketLimit(nextBase)
             xPacketIdx := 0.U
             state := loadX
+          }
+        }.elsewhen(anySourceCanRead) {
+          issueSource := selectedSource
+          issueOwner := 0.U
+          issueWord := selectedMatrixWord
+          issuePrevCol := "h3fff".U
+          issuePrevVal := 0.U
+          state := issueSlotRead
+        }
+      }
+
+      is(issueSlotRead) {
+        issuePrevCol := issueSlotCol
+        issuePrevVal := issueSlotValue
+        when(issueSlotValid) {
+          issueRow := issueSlotRow
+          issueValue := issueSlotValue
+          xReadEn := true.B
+          xReadAddr := issueSlotCol(xAddrBits - 1, 0)
+          state := issueSlotWait
+        }.otherwise {
+          counterPaddingSlots := counterPaddingSlots + 1.U
+          when(issueOwner === 7.U) {
+            remaining(issueSource) := remaining(issueSource) - 1.U
+            counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            state := consumeBatch
+          }.otherwise {
+            issueOwner := issueOwner + 1.U
+          }
+        }
+      }
+
+      is(issueSlotWait) {
+        issueX := xReadData
+        state := issueSlotSend
+      }
+
+      is(issueSlotSend) {
+        when(activeCoreReady) {
+          counterValidSlots := counterValidSlots + 1.U
+          when(issueOwner === 7.U) {
+            remaining(issueSource) := remaining(issueSource) - 1.U
+            counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            state := consumeBatch
+          }.otherwise {
+            issueOwner := issueOwner + 1.U
+            state := issueSlotRead
           }
         }
       }

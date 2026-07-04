@@ -35,4 +35,12 @@ date=2026-07-03 23:33:55 CST
 bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin
 uuid=3ea13c75-0ba3-5dbe-0d58-4778e489313b
 sha256=3783f92f2dd0000d009ea5ff98e7be61157fbeb948bfd846ee975bbdc191e80f
-status=standalone Chisel RTL HBM drain-probe synced, timing clean, board test pending, not full SpMV
+status=standalone Chisel RTL HBM drain-probe synced, timing clean, server no-check thermal2 sweep passed, --check-y expected fail, not full SpMV
+
+[chisel8-spmvbaseline]
+base_log=logs/cuper_spmv_chisel8_hw_20260704_014807.log
+date=2026-07-04 04:09:12 CST
+bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+uuid=c36bff4e-7efc-805f-b6a0-ccfd1677cda0
+sha256=5da1df03f85077185ad1ab787e95e3f71cd064308b739ddfd4f711e209fd9907
+status=standalone Chisel RTL full SpMV baseline synced, impl complete, DATA clock lowered to 119 MHz due 150 MHz timing violation, board test pending

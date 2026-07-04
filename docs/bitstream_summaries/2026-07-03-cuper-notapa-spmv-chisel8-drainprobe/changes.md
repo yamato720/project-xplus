@@ -30,6 +30,8 @@
 
 - 未接入 `StripCoreLane` / `StripAccumLane` full SpMV datapath。
 - 未插入 scoreboard。
-- 已生成新的 drain-probe `.xclbin` 并同步到 `395bitstream/`，但本机没有 U55C/XRT
-  device，尚未做 demo-only 上板 sweep。
-- 未更新正式 `source.diff`：本版还没有 demo-only 上板测试，也没有 SpMV 正确性或性能收益。
+- 已生成新的 drain-probe `.xclbin` 并同步到 `395bitstream/`。本机没有 U55C/XRT
+  device；服务器侧用户结果显示 no-check 全 `thermal2` sweep 已通过，
+  `--check-y` 抽样按预期失败。
+- 未更新正式 `source.diff`：本版虽已通过 drain-probe 上板 no-check，但不计算 SpMV，
+  没有 SpMV 正确性或性能收益结论。

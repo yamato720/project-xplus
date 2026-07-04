@@ -9,10 +9,10 @@ CuperSpmvChisel8
 ```
 
 它使用固定 8-HBM ownerbank ABI，直接暴露 AXI4 master、AXI-Lite control 和
-`Status`/`Metrics`。当前源码版本是 HBM drain-probe：读取完整 ptr table、
-`ceil(Column_num/16)` 个 X packet，并按 `ptr[channel]` drain
-`Matrix_data_0..7`，最后写 `Y_out[0]`、`Status[0..63]` 和 `Metrics[0..63]`。
-它不依赖 `CuperSpmvServiceOnly` 的 TAPA graph。
+`Status`/`Metrics`。当前源码版本是 full SpMV baseline：读取完整 ptr table，
+把 boundary-major ptr 转成内部 PE 参数流，读取 X 和 8 路 Matrix HBM，接入
+`CuperSpmvOnly_ChiselDataPath8`，再把 tagged 输出写回 scalar `Y_out`。它不依赖
+`CuperSpmvServiceOnly` 的 TAPA graph。
 
 常用命令：
 
@@ -23,6 +23,16 @@ make build-cuper-spmv-chisel8-xo
 make cuper-spmv-chisel8-hw-tmux
 make run-cuper-spmv-chisel8-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/thermal2_n16
 ```
+
+当前已同步的 full SpMV baseline demo：
+
+```text
+395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+```
+
+构建日志为 `logs/cuper_spmv_chisel8_hw_20260704_014807.log`。该 xclbin 已完成
+Vitis `impl Complete`，但 150 MHz DATA timing 未收敛，最终 DATA clock 为
+119 MHz；它用于 correctness 上板验证，不作为性能结论。
 
 第二条是原有固定 8-HBM 的 SpMV-only RTL 数据通路模块：
 
@@ -74,8 +84,9 @@ chisel/cuper-spmv8/
 
 ## 关键文件
 
-`CuperSpmvChisel8.scala` 是独立 Vitis RTL kernel 顶层。当前只做 HBM drain-probe，
-不计算 SpMV；后续 full SpMV baseline 会在同一 ABI 下接入真正数据通路。
+`CuperSpmvChisel8.scala` 是独立 Vitis RTL kernel 顶层。当前在同一 ABI 下接入
+ptr/X/matrix loaders、内部 stream FIFO、`CuperSpmvOnly_ChiselDataPath8`、tagged
+到 scalar 的 `Y_out` writer，以及 `Status`/`Metrics` writer。
 
 `CuperSpmvOnlyChiselDataPath8.scala` 是 stream 数据通路模块，保留 8 路 matrix stream 的控制、
 slot 解码、batch 调度、状态机和 partial sum 输出。
@@ -114,11 +125,12 @@ PE_Param_in
 
 Vector_X_Stream_in
   -> 当前 batch 的 X 向量窗口
-  -> xMem
+  -> xMem（low-memory 版为单读/单写 SyncReadMem）
 
 Matrix_A_Stream_0..7
   -> 每路 matrix beat 拆成 8 个 slot
-  -> 8 x 8 StripCoreLane 做 value * X[col]
+  -> 每次选择一路 source beat，并按 owner slot 串行读 X
+  -> 对应 StripCoreLane 做 value * X[col]
   -> Decoupled StripProduct stream
   -> 后续可插 scoreboard / 乱序调度
   -> 8 x 8 StripAccumLane 做 partial sum 累加
@@ -135,8 +147,10 @@ Vector_Y_Tagged_Stream_0..7
 - `owner`：一个 512-bit matrix beat 内的第几个 64-bit slot，对应输出 owner bank。
 
 所以顶层会实例化 `8 x 8` 个 `StripCoreLane` 和 `8 x 8` 个 `StripAccumLane`。
-每个 lane 只处理一个 `source -> owner` 组合。当前 Core 和 Accumulator 之间先直连；
-后续如果要做乱序，可以在 `StripProduct` stream 上插入 scoreboard。
+每个 lane 只处理一个 `source -> owner` 组合。为降低 Vivado 综合内存压力，当前
+baseline 不再同周期发射 64 个 slot；它每次读取一路 matrix beat，再按 8 个 owner
+slot 串行读 X/送 Core。当前 Core 和 Accumulator 之间先直连；后续如果要做乱序，
+可以在 `StripProduct` stream 上插入 scoreboard。
 
 ## Matrix Slot 格式
 
@@ -227,14 +241,21 @@ readStart
   读取当前 batch 的 8 个 per-HBM start offset。
 
 loadX
-  从 Vector_X_Stream_in 读取当前 batch 的 X 向量窗口，写入 xMem。
+  从 Vector_X_Stream_in 读取当前 batch 的 X 向量窗口。
+
+loadXWrite
+  把一个 float_v16 packet 分 16 拍写入单读/单写 xMem，避免综合成 16 写/64 读的
+  多端口寄存器阵列。
 
 readEnd
   读取当前 batch 的 8 个 per-HBM end offset，并计算 remaining beat 数。
 
 consumeBatch
-  对 8 路 Matrix_A_Stream 独立发射 matrix beat。
-  只有某一路 source 的 8 个 owner lane 都 ready 时，才真正读取该 source beat。
+  选择一路有数据且 remaining 非零的 Matrix_A_Stream，读取一个 beat。
+
+issueSlotRead / issueSlotWait / issueSlotSend
+  对当前 beat 的 8 个 owner slot 串行处理：解码 slot、读 xMem、等待同步读返回，
+  再发送到对应 Core lane。
 
 drainAccum
   等待所有 Core fmul 和 Accumulator read/fadd 流水线写回完成。

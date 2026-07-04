@@ -87,9 +87,22 @@ No such device with index '0'
 因此本轮暂不能在本机执行 drain-probe 上板 smoke。新的 drain-probe xclbin 已经生成
 并同步，需要在有 U55C/XRT device 的服务器侧跑 no-check sweep。
 
-## 待上板
+## 服务器侧上板结果
 
-待测试 bitfile：
+用户给出的 drain-probe 上板结果已经覆盖 full `thermal2` 套件：
+
+| 数据集范围 | 模式 | 结果 |
+| --- | --- | --- |
+| `thermal2_n16` 到完整 `thermal2` | no-check | 全部 `rc=0` |
+| `thermal2_n16` 到完整 `thermal2` | no-check status/metrics | ptr/X/matrix 计数匹配，`Status[11]=0xff`，`Status[12]=0`，`Status[13]=0` |
+| 抽样点 | `--check-y` | `rc=3`，预期失败，因为 drain-probe 只写 `Y_out[0]=0` |
+
+结论：AXI-Lite、ptr/X/8 路 Matrix HBM 读链路、Status/Metrics 写回链路和 HBM mapping
+已经通过 drain-probe 板测；下一步可以进入 full SpMV baseline。
+
+## 原待上板命令
+
+已测试 bitfile：
 
 ```text
 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin
@@ -120,5 +133,5 @@ done
 
 ## source.diff
 
-未生成/更新正式 `source.diff`。原因：本轮只是 drain-probe demo 候选，虽已完成构建
-和同步，但尚未完成 demo-only 上板测试，也没有性能提升结论。
+未生成/更新正式 `source.diff`。原因：本轮只是 drain-probe demo 候选，虽已完成构建、
+同步和 no-check 上板，但不计算 SpMV，没有 SpMV 正确性或性能提升结论。

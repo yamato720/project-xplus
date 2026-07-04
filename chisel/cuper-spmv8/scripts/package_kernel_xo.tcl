@@ -13,7 +13,24 @@ file delete -force $project_dir
 file delete -force $ip_dir
 
 create_project -force package_cuper_spmv_chisel8 $project_dir -part $part_name
+set repo_root [file dirname [file dirname [file dirname $rtl_file]]]
+set tapa_rtl_dir [file join $repo_root verilog tapa]
+set fmul_rtl [file join $tapa_rtl_dir CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v]
+set fmul_ip_tcl [file join $tapa_rtl_dir CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1_ip.tcl]
+set fadd_rtl [file join $tapa_rtl_dir CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v]
+set fadd_ip_tcl [file join $tapa_rtl_dir CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1_ip.tcl]
+
+foreach required [list $fmul_rtl $fmul_ip_tcl $fadd_rtl $fadd_ip_tcl] {
+  if {![file exists $required]} {
+    error "missing required floating-point RTL/IP file: $required"
+  }
+}
+
+source $fmul_ip_tcl
+source $fadd_ip_tcl
 add_files -norecurse $rtl_file
+add_files -norecurse $fmul_rtl
+add_files -norecurse $fadd_rtl
 set_property top $kernel_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -21,7 +38,7 @@ ipx::package_project -force -root_dir $ip_dir -vendor projectx -library rtl -nam
 set core [ipx::current_core]
 set_property name $kernel_name $core
 set_property display_name $kernel_name $core
-set_property description {Project-XPlus standalone 8-HBM Chisel SpMV RTL drain-probe kernel} $core
+set_property description {Project-XPlus standalone 8-HBM Chisel SpMV RTL baseline kernel} $core
 set_property vendor_display_name {Project-XPlus} $core
 set_property company_url {https://github.com} $core
 set_property sdx_kernel true $core

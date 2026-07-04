@@ -27,7 +27,8 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | 已归档 | TAPA Cuper / FPGA-PCG | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | 原 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | 已归档 | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 原 `cuper-notapa-spmv-u55c-20260524.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xclbin` | no-TAPA Chisel / single SpMV experiment | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel entry-probe 历史 artifact，只验证 AXI-Lite、13 路 AXI master、HBM mapping、`Status`/`Metrics` 和 scalar `Y_out[0]` ABI；不执行完整 SpMV，150 MHz routed timing clean，未上板 |
-| `cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin` | no-TAPA Chisel / single SpMV experiment | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel HBM drain-probe，完整读取 ptr table、X packets 和 8 路 `Matrix_data` beats，只写 drain 计数和摘要；不执行完整 SpMV，150 MHz routed timing clean，已同步等待服务器上板 |
+| `cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin` | no-TAPA Chisel / single SpMV experiment | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel HBM drain-probe，完整读取 ptr table、X packets 和 8 路 `Matrix_data` beats，只写 drain 计数和摘要；不执行完整 SpMV，150 MHz routed timing clean，服务器侧 no-check 全 `thermal2` sweep 已通过，`--check-y` 按预期失败 |
+| `cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin` | no-TAPA Chisel / single SpMV demo | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel full SpMV baseline，接入 ptr/X/matrix loaders、Chisel Core/Accumulator datapath、scalar `Y_out` writer 和 Status/Metrics writer；Vitis link `impl Complete`，但 150 MHz DATA timing 未收敛，xclbin DATA clock 降到 119 MHz，等待服务器上板 correctness |
 | 已归档 | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 原 `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | 已归档 | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | 原 `cuper-tapa-spmv-u55c-20260528-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
@@ -86,7 +87,7 @@ DATA/KERNEL/HBM clock: 150 / 500 / 450 MHz
 Routed timing: WNS 0.003 ns, TNS 0.000 ns, setup failing endpoints 0, hold WHS 0.009 ns
 Build dir: cuper-spmv-chisel8-build/
 Build log: logs/cuper_spmv_chisel8_drainprobe_hw_20260703_213712.log
-Status: Vitis link `impl Complete`，已同步；本机无 U55C/XRT device，未上板，不做 SpMV 正确性或性能结论
+Status: Vitis link `impl Complete`，已同步；服务器侧 no-check 从 `thermal2_n16` 到完整 `thermal2` 全部 `rc=0`，ptr/X/matrix 计数匹配，done mask `0xff`，R/B error mask `0`；`--check-y` 抽样 `rc=3` 为预期失败，不做 SpMV 正确性或性能结论
 ```
 
 no-check 上板验收只采信 magic、ptr/X/matrix 计数、8 路 done mask 和 response error
@@ -103,8 +104,41 @@ Status: entry-probe first-read 历史 artifact，未上板；当前 Chisel8 后�
 ```
 
 本轮在当前机器尝试复测 entry-probe xclbin 时，XRT 返回 `No such device with index '0'`。
-drain-probe xclbin 也因为本机没有 U55C/XRT device 尚未做板上 sweep。后续需要在有
-U55C/XRT device 的服务器侧补跑 drain-probe no-check 全套 `thermal2` sweep。
+drain-probe xclbin 的服务器侧 no-check 全套 `thermal2` sweep 已通过；当前 Chisel8
+测试已转向下面的 full SpMV baseline demo。
+
+no-TAPA Chisel / SpMV baseline demo 文件：
+
+```text
+cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+```
+
+这版仍是独立 Vitis RTL kernel `CuperSpmvChisel8`，ABI、AXI-Lite offsets、13 路
+`m_axi_*` 端口和 HBM 分配沿用 drain-probe。内部改为 full SpMV baseline：
+ptr loader 读取每路 matrix length 和 boundary table，X loader 读取
+`ceil(Column_num/16)` 个 packet，8 路 Matrix loader 顺序读各自 HBM，随后接入
+`CuperSpmvOnly_ChiselDataPath8`、8 路 tagged output FIFO、scalar `Y_out` writer
+和 Status/Metrics writer。为避免前一版 Vivado OOC synth 后的极端内存使用，datapath
+中的 X cache 已从多端口 `Reg(Vec(8192))` 改为单读/单写 `SyncReadMem`，matrix slot
+按 source/owner 串行 issue。
+
+同步版本信息：
+
+```text
+file: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+kernel: CuperSpmvChisel8
+UUID: c36bff4e-7efc-805f-b6a0-ccfd1677cda0
+SHA256: 5da1df03f85077185ad1ab787e95e3f71cd064308b739ddfd4f711e209fd9907
+DATA/KERNEL/HBM clock: 119 / 500 / 450 MHz
+Routed timing: WNS -1.719 ns, TNS -3059.849 ns, setup failing endpoints 10198, hold WHS 0.009 ns
+Build dir: cuper-spmv-chisel8-build/
+Build log: logs/cuper_spmv_chisel8_hw_20260704_014807.log
+Status: Vitis link `impl Complete`，已同步；150 MHz DATA timing 未收敛，Vitis xclbin info 记录 DATA clock 为 119 MHz；尚未上板，需优先跑 no-check 和 `--check-y` correctness sweep
+```
+
+baseline 上板验收首先采信 SpMV magic `0x53504d56`、ptr/X/matrix/tagged/Y-write
+计数、datapath/writer done、done mask `0xff`、R/B error mask 和 scalar write
+response 计数；`CHECK_Y=1` 目标从 drain-probe 的预期失败变为通过。
 
 TAPA Cuper / Jacobi iteration 当前主线记录：
 

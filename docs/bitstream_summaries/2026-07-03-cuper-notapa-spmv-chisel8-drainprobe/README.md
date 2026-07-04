@@ -81,5 +81,7 @@ log: logs/cuper_spmv_chisel8_drainprobe_hw_20260703_213712.log
 result: Run completed, VPL impl Complete
 ```
 
-本机没有 U55C/XRT device，尚未上板。服务器侧上板验收只采信 no-check drain 计数和
-response mask，不采信 Y correctness。
+本机没有 U55C/XRT device，构建机未上板。服务器侧已按用户给出的结果完成
+demo-only no-check sweep：`thermal2_n16` 到完整 `thermal2` 全部 `rc=0`，
+ptr/X/matrix 计数匹配，done mask 为 `0xff`，R/B response error mask 为 0。
+`--check-y` 抽样返回 `rc=3`，符合 drain-probe 不计算 SpMV 的预期。

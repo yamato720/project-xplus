@@ -25,9 +25,10 @@
 
 // Native XRT host for the standalone Chisel RTL SpMV kernel.
 //
-// The current RTL top is a drain probe, so Y correctness is opt-in.  It still
-// prepares the final ownerbank8 ABI: 8 Matrix_data HBM ports, lane-static real
-// scalar Y_out, ptr[0..7] per-HBM lengths, and boundary-major batch pointers.
+// The RTL top prepares the ownerbank8 ABI: 8 Matrix_data HBM ports,
+// lane-static real scalar Y_out, ptr[0..7] per-HBM lengths, and boundary-major
+// batch pointers.  Y correctness remains opt-in for quick bring-up runs, but
+// --check-y is expected to pass for the full SpMV baseline.
 namespace {
 
 template <typename T>
@@ -37,7 +38,7 @@ using project_xplus::cgsolver::Dataset;
 using project_xplus::cgsolver::data_t;
 
 constexpr std::uint32_t kStatusMagic = 0x43535056U;
-constexpr std::uint32_t kDrainProbeMagic = 0x44525042U;
+constexpr std::uint32_t kSpmvBaselineMagic = 0x53504d56U;
 constexpr std::uint64_t kMetricsMagic = 0x4353504d56384348ULL;
 constexpr std::uint32_t kMatrixDoneMask = (1U << HBM_CHANNEL_NUM) - 1U;
 
@@ -59,6 +60,8 @@ struct Chisel8Matrix {
     INDEX_TYPE lane_static_len_max = 0;
     INDEX_TYPE ptr_words_expected = 0;
     INDEX_TYPE x_packets_expected = 0;
+    INDEX_TYPE tagged_pairs_expected = 0;
+    INDEX_TYPE scalar_writes_expected = 0;
     aligned_vector<INDEX_TYPE> ptr;
     std::vector<INDEX_TYPE> matrix_len_per_hbm;
     std::vector<aligned_vector<unsigned long>> matrix_data;
@@ -242,6 +245,9 @@ Chisel8Matrix build_ownerbank8_matrix(const Dataset& dataset) {
     matrix.ptr_words_expected =
         static_cast<INDEX_TYPE>(HBM_CHANNEL_NUM) * (matrix.batch_num + 2);
     matrix.x_packets_expected = Cuper_NumFloatV16Packets(dataset.n());
+    matrix.tagged_pairs_expected =
+        Cuper_NumFloatV16Packets(dataset.n()) * HBM_CHANNEL_NUM;
+    matrix.scalar_writes_expected = matrix.tagged_pairs_expected * 2;
     for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
         matrix.ptr[static_cast<std::size_t>(channel)] = len_per_hbm[static_cast<std::size_t>(channel)];
         matrix.lane_static_len_total += len_per_hbm[static_cast<std::size_t>(channel)];
@@ -340,9 +346,9 @@ void print_matrix_beats_u64(const char* label,
     std::cout << "\n";
 }
 
-bool validate_drain_probe(const Chisel8Matrix& matrix,
-                          const std::vector<std::uint32_t>& status,
-                          const std::vector<std::uint64_t>& metrics) {
+bool validate_spmv_baseline(const Chisel8Matrix& matrix,
+                            const std::vector<std::uint32_t>& status,
+                            const std::vector<std::uint64_t>& metrics) {
     bool ok = true;
     auto require = [&ok](const bool condition, const std::string& message) {
         if (!condition) {
@@ -370,7 +376,17 @@ bool validate_drain_probe(const Chisel8Matrix& matrix,
     require(status[11] == kMatrixDoneMask, "Status[11] matrix done mask mismatch");
     require(status[12] == 0U, "Status[12] R response error mask is nonzero");
     require(status[13] == 0U, "Status[13] B response error mask is nonzero");
-    require(status[31] == kDrainProbeMagic, "Status[31] drain-probe magic mismatch");
+    require(status[31] == kSpmvBaselineMagic, "Status[31] SpMV magic mismatch");
+    require(status[32] == static_cast<std::uint32_t>(matrix.tagged_pairs_expected),
+            "Status[32] tagged pairs expected mismatch");
+    require(status[33] == static_cast<std::uint32_t>(matrix.tagged_pairs_expected),
+            "Status[33] tagged pairs read mismatch");
+    require(status[34] == static_cast<std::uint32_t>(matrix.scalar_writes_expected),
+            "Status[34] scalar writes expected mismatch");
+    require(status[35] == static_cast<std::uint32_t>(matrix.scalar_writes_expected),
+            "Status[35] scalar write response mismatch");
+    require(status[36] == 1U, "Status[36] datapath done flag mismatch");
+    require(status[37] == 1U, "Status[37] writer done flag mismatch");
     require(metrics[0] == kMetricsMagic, "Metrics[0] magic mismatch");
 
     for (std::size_t channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
@@ -384,12 +400,14 @@ bool validate_drain_probe(const Chisel8Matrix& matrix,
                     std::to_string(channel));
     }
 
-    std::cout << "[probe-check] ptr=" << status[8] << "/" << status[7]
+    std::cout << "[baseline-check] ptr=" << status[8] << "/" << status[7]
               << " x_packets=" << status[10] << "/" << status[9]
+              << " tagged_pairs=" << status[33] << "/" << status[32]
+              << " scalar_writes=" << status[35] << "/" << status[34]
               << " matrix_done_mask=0x" << std::hex << status[11]
               << " r_error_mask=0x" << status[12]
               << " b_error_mask=0x" << status[13]
-              << " drain_magic=0x" << status[31]
+              << " spmv_magic=0x" << status[31]
               << std::dec << " result=" << (ok ? "pass" : "fail") << "\n";
     print_matrix_beats("[matrix-beats-expected]", matrix.matrix_len_per_hbm);
     print_matrix_beats_u64("[matrix-beats-read]", metrics, 8);
@@ -415,7 +433,7 @@ int main(int argc, char** argv) {
         std::cout << "[xplus-xrt] xclbin=" << options.xclbin_path
                   << " dataset=" << options.dataset_dir
                   << " kernel=" << options.kernel_name
-                  << " mode=cuper-spmv-chisel8-drain-probe"
+                  << " mode=cuper-spmv-chisel8-spmv-baseline"
                   << " hbm_channels=" << HBM_CHANNEL_NUM
                   << " batches=" << matrix.batch_num
                   << " matrix_len=" << matrix.matrix_len
@@ -425,6 +443,8 @@ int main(int argc, char** argv) {
                   << "\n";
         std::cout << "[expected] ptr_words=" << matrix.ptr_words_expected
                   << " x_packets=" << matrix.x_packets_expected
+                  << " tagged_pairs=" << matrix.tagged_pairs_expected
+                  << " scalar_writes=" << matrix.scalar_writes_expected
                   << " matrix_done_mask=0x" << std::hex << kMatrixDoneMask
                   << std::dec << "\n";
         print_matrix_beats("[expected-matrix-beats]", matrix.matrix_len_per_hbm);
@@ -498,7 +518,7 @@ int main(int argc, char** argv) {
         print_status_raw(status);
         print_metrics_raw(metrics);
 
-        int rc = validate_drain_probe(matrix, status, metrics) ? 0 : 2;
+        int rc = validate_spmv_baseline(matrix, status, metrics) ? 0 : 2;
         if (options.check_y) {
             std::vector<data_t> expected;
             dataset.spmv(dataset.b(), expected);
@@ -519,7 +539,7 @@ int main(int argc, char** argv) {
             }
         } else {
             std::cout << "[check] skipped_y_correctness=1"
-                      << " reason=drain_probe_only\n";
+                      << " reason=skip_requested\n";
         }
 
         const auto total_end = std::chrono::steady_clock::now();
