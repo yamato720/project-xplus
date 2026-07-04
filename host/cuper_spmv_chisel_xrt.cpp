@@ -77,6 +77,12 @@ double elapsed_ms(const std::chrono::steady_clock::time_point start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+float bits_to_float(const std::uint32_t bits) {
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 unsigned int parse_uint(const char* text, const char* name) {
     char* end = nullptr;
     const unsigned long value = std::strtoul(text, &end, 10);
@@ -346,6 +352,63 @@ void print_matrix_beats_u64(const char* label,
     std::cout << "\n";
 }
 
+template <typename FloatVector>
+void print_debug_summary(const std::vector<std::uint32_t>& status,
+                         const std::vector<std::uint64_t>& metrics,
+                         const FloatVector& y,
+                         const int valid_size) {
+    if (status.size() < 56 || metrics.size() < 62) {
+        return;
+    }
+
+    std::cout << "[debug-datapath]"
+              << " valid_slots=" << metrics[47]
+              << " padding_slots=" << metrics[48]
+              << " nonzero_x_reads=" << metrics[49]
+              << " nonzero_products=" << metrics[50]
+              << " accum_accepts=" << metrics[51]
+              << " tagged_writes=" << metrics[52]
+              << " nonzero_tagged_writes=" << metrics[53]
+              << " raw_stall_cycles=" << metrics[58]
+              << " writer_backpressure_cycles=" << metrics[59]
+              << "\n";
+
+    std::cout << "[debug-first-tagged]"
+              << " datapath_packet=" << status[48]
+              << " datapath_pair=" << status[49]
+              << " datapath_ping_bits=0x" << std::hex << status[50]
+              << " datapath_pong_bits=0x" << status[51]
+              << " writer_packet=" << status[52]
+              << " writer_pair=" << status[53]
+              << " writer_ping_bits=0x" << status[54]
+              << " writer_pong_bits=0x" << status[55]
+              << std::dec
+              << " datapath_ping=" << static_cast<double>(bits_to_float(status[50]))
+              << " datapath_pong=" << static_cast<double>(bits_to_float(status[51]))
+              << " writer_ping=" << static_cast<double>(bits_to_float(status[54]))
+              << " writer_pong=" << static_cast<double>(bits_to_float(status[55]))
+              << "\n";
+
+    std::cout << "[debug-first-y-write]"
+              << " nonzero_scalar_writes=" << status[45]
+              << " first_addr=" << status[46]
+              << " first_bits=0x" << std::hex << status[47] << std::dec
+              << " first_value=" << static_cast<double>(bits_to_float(status[47]))
+              << "\n";
+
+    const int scan_limit = std::min<int>(valid_size, static_cast<int>(y.size()));
+    for (int index = 0; index < scan_limit; ++index) {
+        if (y[static_cast<std::size_t>(index)] != 0.0f) {
+            std::cout << "[debug-first-nonzero-y]"
+                      << " index=" << index
+                      << " value=" << static_cast<double>(y[static_cast<std::size_t>(index)])
+                      << "\n";
+            return;
+        }
+    }
+    std::cout << "[debug-first-nonzero-y] none_in_valid_rows=1\n";
+}
+
 bool validate_spmv_baseline(const Chisel8Matrix& matrix,
                             const std::vector<std::uint32_t>& status,
                             const std::vector<std::uint64_t>& metrics) {
@@ -517,6 +580,7 @@ int main(int argc, char** argv) {
                   << "\n";
         print_status_raw(status);
         print_metrics_raw(metrics);
+        print_debug_summary(status, metrics, y, dataset.n());
 
         int rc = validate_spmv_baseline(matrix, status, metrics) ? 0 : 2;
         if (options.check_y) {
@@ -524,15 +588,35 @@ int main(int argc, char** argv) {
             dataset.spmv(dataset.b(), expected);
             double max_abs_diff = 0.0;
             double max_rel_diff = 0.0;
+            std::size_t max_abs_index = 0;
+            int mismatch_printed = 0;
+            constexpr int kMismatchPrintLimit = 16;
             for (std::size_t index = 0; index < expected.size(); ++index) {
                 const double actual = y[index];
                 const double abs_diff = std::fabs(actual - expected[index]);
                 const double rel_diff = abs_diff / std::max(std::fabs(expected[index]), 1.0e-12);
-                max_abs_diff = std::max(max_abs_diff, abs_diff);
+                if (abs_diff > max_abs_diff) {
+                    max_abs_diff = abs_diff;
+                    max_abs_index = index;
+                }
                 max_rel_diff = std::max(max_rel_diff, rel_diff);
+                if (abs_diff > options.diff_tol && rel_diff > options.diff_tol &&
+                    mismatch_printed < kMismatchPrintLimit) {
+                    std::cout << "[check-mismatch]"
+                              << " index=" << index
+                              << " actual=" << actual
+                              << " expected=" << expected[index]
+                              << " abs_diff=" << abs_diff
+                              << " rel_diff=" << rel_diff
+                              << "\n";
+                    ++mismatch_printed;
+                }
             }
             std::cout << "[check] max_abs_diff=" << max_abs_diff
                       << " max_rel_diff=" << max_rel_diff
+                      << " max_abs_index=" << max_abs_index
+                      << " actual_at_max=" << y[max_abs_index]
+                      << " expected_at_max=" << expected[max_abs_index]
                       << " diff_tol=" << options.diff_tol << "\n";
             if (max_abs_diff > options.diff_tol && max_rel_diff > options.diff_tol) {
                 rc = 3;

@@ -116,3 +116,42 @@ Metrics[44] packed scalar expected/responses
 Metrics[45] done flags
 Metrics[46] scalar writes issued
 ```
+
+correctness-debug 追加的观测槽位：
+
+```text
+Status[40] valid slots
+Status[41] nonzero X reads
+Status[42] nonzero products
+Status[43] accumulator accepts
+Status[44] nonzero tagged writes
+Status[45] nonzero scalar Y writes
+Status[46] first nonzero scalar Y addr
+Status[47] first nonzero scalar Y data bits
+Status[48..51] datapath first nonzero tagged packet/pair/ping/pong
+Status[52..55] writer first nonzero tagged packet/pair/ping/pong
+Metrics[47] valid slots
+Metrics[48] padding slots
+Metrics[49] nonzero X reads
+Metrics[50] nonzero products
+Metrics[51] accumulator accepts
+Metrics[52] tagged writes
+Metrics[53] nonzero tagged writes
+Metrics[54..55] datapath first nonzero tagged sample
+Metrics[56] first nonzero scalar Y data/addr packed
+Metrics[57] nonzero scalar Y writes
+Metrics[58] raw stall cycles
+Metrics[59] writer backpressure cycles
+Metrics[60..61] writer first nonzero tagged sample
+```
+
+上板 debug 判断口径：
+
+```text
+valid/product 为 0        -> 先看 matrix slot decode、padding/reuse、X read 地址或 FP wrapper
+product 非零 tagged 为 0 -> 先看 StripAccumLane read/write 或 fadd latency 对齐
+tagged 非零 Y 为 0/错位 -> 先看 scalar writer handshake/address/data 或 host BO sync/索引
+```
+
+Host 侧 `--check-y` 失败会打印首批 mismatch、最大 diff、上述 debug 摘要和首批非零
+Y，no-check 仍只校验 magic/count/done/error mask。

@@ -28,7 +28,7 @@ class HlsFmul32 extends BlackBox(Map(
 // 调度读写和相关性检查，真正的 IEEE-754 加法仍交给 HLS 浮点核。
 class HlsFadd32 extends BlackBox(Map(
   "ID" -> 1,
-  "NUM_STAGE" -> 13,
+  "NUM_STAGE" -> 12,
   "din0_WIDTH" -> 32,
   "din1_WIDTH" -> 32,
   "dout_WIDTH" -> 32

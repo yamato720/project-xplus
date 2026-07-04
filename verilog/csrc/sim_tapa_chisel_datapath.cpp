@@ -2,6 +2,7 @@
 
 #include "verilated.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -17,7 +18,9 @@ namespace {
 constexpr int kChannels = 8;
 constexpr int kWideWords = 17;
 constexpr int kTaggedWords = 5;
-constexpr int kColumns = 1024;
+constexpr int kDefaultColumns = 1024;
+constexpr int kBatchColumns = 8192;
+constexpr int kBatchPackets = kBatchColumns / 16;
 
 using Wide513 = std::array<uint32_t, kWideWords>;
 using Tagged129 = std::array<uint32_t, kTaggedWords>;
@@ -33,6 +36,7 @@ struct SlotSpec {
 struct SimCase {
   std::string name;
   int rows = 128;
+  int columns = kDefaultColumns;
   int iteration_num = 1;
   std::vector<std::array<std::vector<Wide513>, kChannels>> batches;
 };
@@ -148,17 +152,17 @@ void set_reuse_slot(std::array<SlotSpec, kChannels>& slots,
 }
 
 std::vector<Wide513> x_packets_for_case(const SimCase& sim_case) {
-  const int packets = num_packets(kColumns);
+  const int packets = num_packets(sim_case.columns);
   std::vector<Wide513> packets_out;
   packets_out.reserve(static_cast<size_t>(packets) *
-                      static_cast<size_t>(sim_case.batches.size()) *
                       static_cast<size_t>(std::max(1, sim_case.iteration_num)));
   for (int iter = 0; iter < std::max(1, sim_case.iteration_num); ++iter) {
     (void)iter;
     for (size_t batch = 0; batch < sim_case.batches.size(); ++batch) {
-      (void)batch;
-      for (int packet = 0; packet < packets; ++packet) {
-        packets_out.push_back(pack_x_packet(packet));
+      const int base_packet = static_cast<int>(batch) * kBatchPackets;
+      const int limit = std::min(kBatchPackets, packets - base_packet);
+      for (int packet = 0; packet < limit; ++packet) {
+        packets_out.push_back(pack_x_packet(base_packet + packet));
       }
     }
   }
@@ -167,6 +171,7 @@ std::vector<Wide513> x_packets_for_case(const SimCase& sim_case) {
 
 void accumulate_expected_for_slot(
     const SlotSpec& slot,
+    int batch,
     int source,
     int owner,
     std::vector<std::array<std::array<float, 2>, kChannels>>& expected,
@@ -192,8 +197,8 @@ void accumulate_expected_for_slot(
   if (packet >= static_cast<int>(expected.size())) {
     return;
   }
-  const int col_idx = static_cast<int>(col);
-  const float x = static_cast<float>(col_idx + 1);
+  const int global_col = batch * kBatchColumns + static_cast<int>(col);
+  const float x = static_cast<float>(global_col + 1);
   expected[static_cast<size_t>(packet)][static_cast<size_t>(source)]
           [static_cast<size_t>(scalar_lane)] += value * x;
 }
@@ -211,7 +216,8 @@ expected_outputs(const SimCase& sim_case) {
 
   for (int iter = 0; iter < std::max(1, sim_case.iteration_num); ++iter) {
     (void)iter;
-    for (const auto& batch : sim_case.batches) {
+    for (size_t batch_index = 0; batch_index < sim_case.batches.size(); ++batch_index) {
+      const auto& batch = sim_case.batches[batch_index];
       for (int source = 0; source < kChannels; ++source) {
         for (const Wide513& beat : batch[static_cast<size_t>(source)]) {
           uint32_t col_old = 0x3fffU;
@@ -225,7 +231,8 @@ expected_outputs(const SimCase& sim_case) {
             slot.col = static_cast<int>((raw_meta >> 18) & 0x3fffU);
             slot.padding = ((slot.row >> 17) & 1) != 0;
             accumulate_expected_for_slot(
-                slot, source, owner, expected, col_old, val_old);
+                slot, static_cast<int>(batch_index), source, owner, expected,
+                col_old, val_old);
           }
         }
       }
@@ -239,15 +246,15 @@ std::deque<uint64_t> pe_stream_for_case(const SimCase& sim_case) {
   pe.push_back(static_cast<uint64_t>(sim_case.batches.size()));
   pe.push_back(static_cast<uint64_t>(sim_case.rows));
   pe.push_back(static_cast<uint64_t>(sim_case.iteration_num));
-  pe.push_back(kColumns);
+  pe.push_back(static_cast<uint64_t>(sim_case.columns));
 
   for (int iter = 0; iter < std::max(1, sim_case.iteration_num); ++iter) {
     (void)iter;
     std::array<uint32_t, kChannels> start{};
+    for (int channel = 0; channel < kChannels; ++channel) {
+      pe.push_back(start[static_cast<size_t>(channel)]);
+    }
     for (const auto& batch : sim_case.batches) {
-      for (int channel = 0; channel < kChannels; ++channel) {
-        pe.push_back(start[static_cast<size_t>(channel)]);
-      }
       for (int channel = 0; channel < kChannels; ++channel) {
         start[static_cast<size_t>(channel)] +=
             static_cast<uint32_t>(batch[static_cast<size_t>(channel)].size());
@@ -427,7 +434,7 @@ bool run_case(const SimCase& sim_case, CaseResult& result) {
     top.Row_num = static_cast<uint32_t>(sim_case.rows);
     top.Batch_num = static_cast<uint32_t>(sim_case.batches.size());
     top.Matrix_len = 0;
-    top.Column_num = kColumns;
+    top.Column_num = static_cast<uint32_t>(sim_case.columns);
 
     clear_peek_ports(top);
     drive_stream_inputs(top, pe, x, matrix);
@@ -645,6 +652,25 @@ SimCase make_all_padding_case() {
   return sim_case;
 }
 
+SimCase make_cross_batch_case() {
+  SimCase sim_case;
+  sim_case.name = "cross-8192-column-batch";
+  sim_case.rows = 128;
+  sim_case.columns = kBatchColumns + 16;
+  sim_case.batches.resize(2);
+
+  auto b0 = padded_slots();
+  set_slot(b0, 0, 0, 0, 7, 2.0f);
+  sim_case.batches[0][0].push_back(pack_matrix_beat(b0));
+
+  auto b1 = padded_slots();
+  set_slot(b1, 0, 0, 0, 0, 3.0f);
+  set_slot(b1, 1, 1, 1, 15, 4.0f);
+  sim_case.batches[1][0].push_back(pack_matrix_beat(b1));
+
+  return sim_case;
+}
+
 }  // namespace
 
 extern "C" int cuper_verilator_fmul32(int a, int b) {
@@ -663,11 +689,12 @@ int main(int argc, char** argv) {
   VerilatedContext context;
   context.commandArgs(argc, argv);
 
-  const std::array<SimCase, 4> cases = {
+  const std::array<SimCase, 5> cases = {
       make_basic_case(),
       make_raw_reuse_case(),
       make_multi_group_case(),
       make_all_padding_case(),
+      make_cross_batch_case(),
   };
 
   int total_tagged = 0;

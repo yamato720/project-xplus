@@ -9,7 +9,9 @@ import chisel3.util._
 // partial sum SRAM，并执行 partial += product。乘法已经从这里拆出，后续 scoreboard
 // 可以插在 Core lane 和 Accumulator lane 之间。
 class StripAccumLane(groupBits: Int, depth: Int) extends Module {
-  private val faddLatency = 13
+  // Keep this aligned with the existing RTL owner-lane accumulator wrapper:
+  // FADD_PIPE_LATENCY=12 and NUM_STAGE=12 for the same Vivado floating-point IP.
+  private val faddLatency = 12
 
   val io = IO(new Bundle {
     // 每轮开始时逐地址清零 partial sum。

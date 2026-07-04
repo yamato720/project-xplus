@@ -184,8 +184,12 @@ CUPER_SPMV_XCLBIN := $(TARGET_BUILD_DIR)/cuper_packed_spmv_kernel.xclbin
 CUPER_SPMV_4CH_XO := $(TARGET_BUILD_DIR)/cuper_packed_spmv_4ch_kernel.xo
 CUPER_SPMV_4CH_XCLBIN := $(TARGET_BUILD_DIR)/cuper_packed_spmv_4ch_kernel.xclbin
 CUPER_SPMV_CHISEL8_RTL := $(ROOT_DIR)/verilog/chisel/CuperSpmvChisel8.sv
+CUPER_SPMV_CHISEL8_DATAPATH_RTL := $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_ChiselDataPath8.v
 CUPER_SPMV_CHISEL8_XO := $(TARGET_BUILD_DIR)/CuperSpmvChisel8.xo
 CUPER_SPMV_CHISEL8_XCLBIN := $(TARGET_BUILD_DIR)/CuperSpmvChisel8.xclbin
+CUPER_SPMV_CHISEL8_VERILATOR_DIR := $(CUPER_SPMV_CHISEL8_BUILD_DIR)/verilator
+CUPER_SPMV_CHISEL8_DATAPATH_SMOKE := $(CUPER_SPMV_CHISEL8_VERILATOR_DIR)/cuper_spmv_chisel8_datapath_smoke
+CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE := $(CUPER_SPMV_CHISEL8_VERILATOR_DIR)/cuper_spmv_chisel8_axi_top_smoke
 CUPER_SPMV_CHISEL8_KERNEL_FREQUENCY ?= 150
 CUPER_SPMV_CHISEL8_CHISEL_SRCS := \
 	$(wildcard $(ROOT_DIR)/chisel/cuper-spmv8/src/main/scala/cuper/spmv/*.scala) \
@@ -250,7 +254,7 @@ export XILINX_VITIS := $(VITIS_ROOT)
 endif
 export XILINX_XRT := $(XILINX_XRT)
 
-.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-spmv-chisel8-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-spmv-chisel8-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw cuper-spmv-chisel8-generate build-cuper-spmv-chisel8-xo build-cuper-spmv-chisel8 build-cuper-spmv-chisel8-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-spmv-chisel8-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-build-mmap-probe-xrt-host cuper-jacobi-pack-profile cuper-jacobi-run-pack-profile cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-pack-hotpatch-xo cuper-jacobi-link-xclbin cuper-jacobi-build-mmap-probe-xo cuper-jacobi-link-mmap-probe-xclbin cuper-jacobi-link-mmap-probe-xclbin-split cuper-jacobi-run-mmap-probe-xrt cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
+.PHONY: all help env tapa-env vivado-env generate download-suitesparse-data list-suitesparse-data local-host cuper-pcg-host cuper-tapa-pcg-host cuper-tapa-pcg-fpga-host cuper-notapa-pcg-xrt-host cuper-spmv-chisel8-xrt-host cuper-control-local-host cuper-control-xrt-host xrt-host launch launcher menu run run-local run-cuper-pcg run-cuper-pcg-tapa run-cuper-tapa-spmv run-cuper-tapa-pcg-spmv run-cuper-pcg-tapa-fpga run-cuper-notapa-pcg-xrt run-cuper-notapa-spmv-xrt run-cuper-notapa-spmv-4ch-xrt run-cuper-spmv-chisel8-xrt run-cuper-control-local run-cuper-control-xrt run-cuper-pcg-notapa-xrt run-xrt run-sw-report run-sw-report-existing run-hw-report run-hw-report-existing _run-hw-report render-report render-hw-report vivado-power-report vivado-analysis xrt-power-snapshot vivado-package-full build build-sw build-hw build-cuper-control build-cuper-control-sw build-cuper-control-hw build-cuper-pcg-notapa build-cuper-pcg-notapa-sw build-cuper-pcg-notapa-hw build-cuper-pcg-notapa-spmv build-cuper-pcg-notapa-spmv-sw build-cuper-pcg-notapa-spmv-hw build-cuper-pcg-notapa-spmv-4ch build-cuper-pcg-notapa-spmv-4ch-sw build-cuper-pcg-notapa-spmv-4ch-hw cuper-spmv-chisel8-generate cuper-spmv-chisel8-datapath-generate cuper-spmv-chisel8-datapath-smoke cuper-spmv-chisel8-axi-top-smoke build-cuper-spmv-chisel8-xo build-cuper-spmv-chisel8 build-cuper-spmv-chisel8-hw build-cuper-tapa-pcg build-cuper-tapa-pcg-hw build-cuper-tapa-pcg-slr-split-hw build-cuper-tapa-pcg-spmv build-cuper-tapa-pcg-spmv-sw build-cuper-tapa-pcg-spmv-hw cuper-pcg-notapa-hw-tmux cuper-pcg-notapa-spmv-hw-tmux cuper-pcg-notapa-spmv-4ch-hw-tmux cuper-spmv-chisel8-hw-tmux cuper-control-hw-tmux cuper-tapa-pcg-hw-tmux cuper-tapa-pcg-slr-split-hw-tmux cuper-tapa-pcg-spmv-hw-tmux cuper-launch cuper-launcher cuper-build-host cuper-run-sw cuper-build-xo cuper-link-xclbin cuper-hw-tmux cuper-run-hw cuper-jacobi-launch cuper-jacobi-launcher cuper-jacobi-build-host cuper-jacobi-build-mmap-probe-xrt-host cuper-jacobi-pack-profile cuper-jacobi-run-pack-profile cuper-jacobi-run-sw cuper-jacobi-regression-sw cuper-jacobi-build-xo cuper-jacobi-pack-hotpatch-xo cuper-jacobi-link-xclbin cuper-jacobi-build-mmap-probe-xo cuper-jacobi-link-mmap-probe-xclbin cuper-jacobi-link-mmap-probe-xclbin-split cuper-jacobi-run-mmap-probe-xrt cuper-jacobi-hw-tmux cuper-jacobi-run-hw clean clean-reports
 
 all: run-local
 
@@ -524,6 +528,19 @@ $(CUPER_SPMV_4CH_XO): $(KERNEL_DIR)/cuper_pcg_control_kernel.cpp $(INCLUDE_DIR)/
 $(CUPER_SPMV_CHISEL8_RTL): $(CUPER_SPMV_CHISEL8_CHISEL_SRCS) $(ROOT_DIR)/chisel/cuper-spmv8/scripts/generate_kernel.sh
 	$(ROOT_DIR)/chisel/cuper-spmv8/scripts/generate_kernel.sh "$(@D)"
 
+$(CUPER_SPMV_CHISEL8_DATAPATH_RTL): $(CUPER_SPMV_CHISEL8_CHISEL_SRCS) $(ROOT_DIR)/chisel/cuper-spmv8/scripts/generate.sh
+	$(ROOT_DIR)/chisel/cuper-spmv8/scripts/generate.sh "$(@D)"
+
+$(CUPER_SPMV_CHISEL8_DATAPATH_SMOKE): $(CUPER_SPMV_CHISEL8_DATAPATH_RTL) $(ROOT_DIR)/verilog/csrc/sim_tapa_chisel_datapath.cpp $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v
+	mkdir -p "$(@D)"
+	rm -rf "$(@D)/datapath_obj"
+	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/datapath_obj" --top-module CuperSpmvOnly_ChiselDataPath8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_DATAPATH_RTL) $(ROOT_DIR)/verilog/csrc/sim_tapa_chisel_datapath.cpp -o "$@"
+
+$(CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE): $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/verilog/csrc/sim_cuper_spmv_chisel8_axi_top.cpp $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v
+	mkdir -p "$(@D)"
+	rm -rf "$(@D)/axi_top_obj"
+	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/axi_top_obj" --top-module CuperSpmvChisel8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/verilog/csrc/sim_cuper_spmv_chisel8_axi_top.cpp -o "$@"
+
 $(CUPER_SPMV_CHISEL8_XO): $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/chisel/cuper-spmv8/packaging/CuperSpmvChisel8.kernel.xml $(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.sh $(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.tcl | $(TARGET_BUILD_DIR) vivado-env
 	$(VITIS_ENV_CMD) VIVADO="$(VIVADO)" BUILD_DIR="$(TARGET_BUILD_DIR)" RTL_FILE="$(CUPER_SPMV_CHISEL8_RTL)" XO_PATH="$@" "$(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.sh"
 
@@ -603,6 +620,14 @@ build-cuper-pcg-notapa-spmv-4ch-hw:
 	$(MAKE) $(CUPER_NOTAPA_SPMV_4CH_BUILD_DIR)/hw/cuper_packed_spmv_4ch_kernel.xclbin TARGET=hw BUILD_DIR="$(CUPER_NOTAPA_SPMV_4CH_BUILD_DIR)"
 
 cuper-spmv-chisel8-generate: $(CUPER_SPMV_CHISEL8_RTL)
+
+cuper-spmv-chisel8-datapath-generate: $(CUPER_SPMV_CHISEL8_DATAPATH_RTL)
+
+cuper-spmv-chisel8-datapath-smoke: $(CUPER_SPMV_CHISEL8_DATAPATH_SMOKE)
+	$(CUPER_SPMV_CHISEL8_DATAPATH_SMOKE)
+
+cuper-spmv-chisel8-axi-top-smoke: $(CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE)
+	$(CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE)
 
 build-cuper-spmv-chisel8-xo:
 	$(MAKE) $(CUPER_SPMV_CHISEL8_BUILD_DIR)/hw/CuperSpmvChisel8.xo TARGET=hw BUILD_DIR="$(CUPER_SPMV_CHISEL8_BUILD_DIR)"

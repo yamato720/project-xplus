@@ -19,6 +19,15 @@ YYYY-MM-DD-<主线>-<简短说明>/
 
 ## 已有版本记录
 
+- `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
+  kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
+  `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，
+  当前 UUID 为 `0f31be8c-e77e-4e25-d85a-1498693befbb`，DATA/KERNEL/HBM 为
+  `139/500/450 MHz`。该版增加 fadd latency 对齐、debug Status/Metrics、host
+  mismatch 输出、本地 Verilator/datapath/AXI smokes，并已完成完整 hw link；服务器侧
+  `CHECK_Y=1` correctness sweep 待跑。上一 UUID `c36bff4e-...` no-check 可跑到完整
+  `thermal2`，但 `CHECK_Y=1` 失败、`Y` mostly zeros/错误，用户提供的 `477.6 ms`
+  不作为有效 SpMV 性能成绩。
 - `2026-07-03-cuper-notapa-spmv-chisel8-drainprobe/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 HBM drain-probe demo。该版保持 entry-probe 的
   ABI/HBM mapping 不变，完整读取 ptr table、X packets 和 8 路 Matrix_data beats，

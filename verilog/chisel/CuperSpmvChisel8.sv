@@ -164,7 +164,8 @@ module StripAccumLane(
   output [31:0] io_outPing,
                 io_outPong,
   output        io_busy,
-                io_rawStall
+                io_rawStall,
+                io_accept
 );
 
   wire [31:0] _fadd_dout;
@@ -186,7 +187,6 @@ module StripAccumLane(
   reg         addValid_9;
   reg         addValid_10;
   reg         addValid_11;
-  reg         addValid_12;
   reg  [13:0] addGroup_0;
   reg  [13:0] addGroup_1;
   reg  [13:0] addGroup_2;
@@ -199,7 +199,6 @@ module StripAccumLane(
   reg  [13:0] addGroup_9;
   reg  [13:0] addGroup_10;
   reg  [13:0] addGroup_11;
-  reg  [13:0] addGroup_12;
   reg         addPong_0;
   reg         addPong_1;
   reg         addPong_2;
@@ -212,7 +211,6 @@ module StripAccumLane(
   reg         addPong_9;
   reg         addPong_10;
   reg         addPong_11;
-  reg         addPong_12;
   wire        hazard =
     rdValid & rdGroup == io_in_bits_group & rdPong == io_in_bits_pong | addValid_0
     & addGroup_0 == io_in_bits_group & addPong_0 == io_in_bits_pong | addValid_1
@@ -226,11 +224,10 @@ module StripAccumLane(
     & addGroup_8 == io_in_bits_group & addPong_8 == io_in_bits_pong | addValid_9
     & addGroup_9 == io_in_bits_group & addPong_9 == io_in_bits_pong | addValid_10
     & addGroup_10 == io_in_bits_group & addPong_10 == io_in_bits_pong | addValid_11
-    & addGroup_11 == io_in_bits_group & addPong_11 == io_in_bits_pong | addValid_12
-    & addGroup_12 == io_in_bits_group & addPong_12 == io_in_bits_pong;
+    & addGroup_11 == io_in_bits_group & addPong_11 == io_in_bits_pong;
   wire        fire = io_in_valid & ~hazard;
   wire [13:0] pingReadAddr = io_outRead ? io_outAddr : io_in_bits_group;
-  wire [13:0] pingWriteAddr = io_initValid ? io_initAddr : addGroup_12;
+  wire [13:0] pingWriteAddr = io_initValid ? io_initAddr : addGroup_11;
   wire [31:0] pingWriteData = io_initValid ? 32'h0 : _fadd_dout;
   always @(posedge clock) begin
     if (reset) begin
@@ -247,7 +244,6 @@ module StripAccumLane(
       addValid_9 <= 1'h0;
       addValid_10 <= 1'h0;
       addValid_11 <= 1'h0;
-      addValid_12 <= 1'h0;
     end
     else begin
       rdValid <= fire;
@@ -263,7 +259,6 @@ module StripAccumLane(
       addValid_9 <= addValid_8;
       addValid_10 <= addValid_9;
       addValid_11 <= addValid_10;
-      addValid_12 <= addValid_11;
     end
     rdGroup <= io_in_bits_group;
     rdPong <= io_in_bits_pong;
@@ -280,7 +275,6 @@ module StripAccumLane(
     addGroup_9 <= addGroup_8;
     addGroup_10 <= addGroup_9;
     addGroup_11 <= addGroup_10;
-    addGroup_12 <= addGroup_11;
     addPong_0 <= rdPong;
     addPong_1 <= addPong_0;
     addPong_2 <= addPong_1;
@@ -293,7 +287,6 @@ module StripAccumLane(
     addPong_9 <= addPong_8;
     addPong_10 <= addPong_9;
     addPong_11 <= addPong_10;
-    addPong_12 <= addPong_11;
   end // always @(posedge)
   p_12288x32 pingMem_ext (
     .R0_addr (pingReadAddr),
@@ -301,7 +294,7 @@ module StripAccumLane(
     .R0_clk  (clock),
     .R0_data (_pingMem_ext_R0_data),
     .W0_addr (pingWriteAddr),
-    .W0_en   (io_initValid | addValid_12 & ~addPong_12),
+    .W0_en   (io_initValid | addValid_11 & ~addPong_11),
     .W0_clk  (clock),
     .W0_data (pingWriteData)
   );
@@ -311,13 +304,13 @@ module StripAccumLane(
     .R0_clk  (clock),
     .R0_data (_pongMem_ext_R0_data),
     .W0_addr (pingWriteAddr),
-    .W0_en   (io_initValid | addValid_12 & addPong_12),
+    .W0_en   (io_initValid | addValid_11 & addPong_11),
     .W0_clk  (clock),
     .W0_data (pingWriteData)
   );
   CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1 #(
     .ID(1),
-    .NUM_STAGE(13),
+    .NUM_STAGE(12),
     .din0_WIDTH(32),
     .din1_WIDTH(32),
     .dout_WIDTH(32)
@@ -334,7 +327,6 @@ module StripAccumLane(
   assign io_outPong = _pongMem_ext_R0_data;
   assign io_busy =
     |{rdValid,
-      addValid_12,
       addValid_11,
       addValid_10,
       addValid_9,
@@ -348,6 +340,7 @@ module StripAccumLane(
       addValid_1,
       addValid_0};
   assign io_rawStall = io_in_valid & hazard;
+  assign io_accept = fire;
 endmodule
 
 // VCS coverage exclude_file
@@ -385,6 +378,19 @@ module CuperSpmvOnly_ChiselDataPath8(
                  Batch_num,
                  Matrix_len,
                  Column_num,
+  output [63:0]  Debug_valid_slots,
+                 Debug_padding_slots,
+                 Debug_nonzero_x_reads,
+                 Debug_nonzero_products,
+                 Debug_accum_accepts,
+                 Debug_tagged_writes,
+                 Debug_nonzero_tagged_writes,
+                 Debug_raw_stall_cycles,
+                 Debug_writer_backpressure_cycles,
+  output [31:0]  Debug_first_nonzero_tagged_packet,
+                 Debug_first_nonzero_tagged_pair,
+                 Debug_first_nonzero_tagged_ping,
+                 Debug_first_nonzero_tagged_pong,
   input  [32:0]  PE_Param_in_s_dout,
   input          PE_Param_in_s_empty_n,
   output         PE_Param_in_s_read,
@@ -466,321 +472,385 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _accumLanes_7_7_io_outPong;
   wire         _accumLanes_7_7_io_busy;
   wire         _accumLanes_7_7_io_rawStall;
+  wire         _accumLanes_7_7_io_accept;
   wire         _accumLanes_7_6_io_in_ready;
   wire [31:0]  _accumLanes_7_6_io_outPing;
   wire [31:0]  _accumLanes_7_6_io_outPong;
   wire         _accumLanes_7_6_io_busy;
   wire         _accumLanes_7_6_io_rawStall;
+  wire         _accumLanes_7_6_io_accept;
   wire         _accumLanes_7_5_io_in_ready;
   wire [31:0]  _accumLanes_7_5_io_outPing;
   wire [31:0]  _accumLanes_7_5_io_outPong;
   wire         _accumLanes_7_5_io_busy;
   wire         _accumLanes_7_5_io_rawStall;
+  wire         _accumLanes_7_5_io_accept;
   wire         _accumLanes_7_4_io_in_ready;
   wire [31:0]  _accumLanes_7_4_io_outPing;
   wire [31:0]  _accumLanes_7_4_io_outPong;
   wire         _accumLanes_7_4_io_busy;
   wire         _accumLanes_7_4_io_rawStall;
+  wire         _accumLanes_7_4_io_accept;
   wire         _accumLanes_7_3_io_in_ready;
   wire [31:0]  _accumLanes_7_3_io_outPing;
   wire [31:0]  _accumLanes_7_3_io_outPong;
   wire         _accumLanes_7_3_io_busy;
   wire         _accumLanes_7_3_io_rawStall;
+  wire         _accumLanes_7_3_io_accept;
   wire         _accumLanes_7_2_io_in_ready;
   wire [31:0]  _accumLanes_7_2_io_outPing;
   wire [31:0]  _accumLanes_7_2_io_outPong;
   wire         _accumLanes_7_2_io_busy;
   wire         _accumLanes_7_2_io_rawStall;
+  wire         _accumLanes_7_2_io_accept;
   wire         _accumLanes_7_1_io_in_ready;
   wire [31:0]  _accumLanes_7_1_io_outPing;
   wire [31:0]  _accumLanes_7_1_io_outPong;
   wire         _accumLanes_7_1_io_busy;
   wire         _accumLanes_7_1_io_rawStall;
+  wire         _accumLanes_7_1_io_accept;
   wire         _accumLanes_7_0_io_in_ready;
   wire [31:0]  _accumLanes_7_0_io_outPing;
   wire [31:0]  _accumLanes_7_0_io_outPong;
   wire         _accumLanes_7_0_io_busy;
   wire         _accumLanes_7_0_io_rawStall;
+  wire         _accumLanes_7_0_io_accept;
   wire         _accumLanes_6_7_io_in_ready;
   wire [31:0]  _accumLanes_6_7_io_outPing;
   wire [31:0]  _accumLanes_6_7_io_outPong;
   wire         _accumLanes_6_7_io_busy;
   wire         _accumLanes_6_7_io_rawStall;
+  wire         _accumLanes_6_7_io_accept;
   wire         _accumLanes_6_6_io_in_ready;
   wire [31:0]  _accumLanes_6_6_io_outPing;
   wire [31:0]  _accumLanes_6_6_io_outPong;
   wire         _accumLanes_6_6_io_busy;
   wire         _accumLanes_6_6_io_rawStall;
+  wire         _accumLanes_6_6_io_accept;
   wire         _accumLanes_6_5_io_in_ready;
   wire [31:0]  _accumLanes_6_5_io_outPing;
   wire [31:0]  _accumLanes_6_5_io_outPong;
   wire         _accumLanes_6_5_io_busy;
   wire         _accumLanes_6_5_io_rawStall;
+  wire         _accumLanes_6_5_io_accept;
   wire         _accumLanes_6_4_io_in_ready;
   wire [31:0]  _accumLanes_6_4_io_outPing;
   wire [31:0]  _accumLanes_6_4_io_outPong;
   wire         _accumLanes_6_4_io_busy;
   wire         _accumLanes_6_4_io_rawStall;
+  wire         _accumLanes_6_4_io_accept;
   wire         _accumLanes_6_3_io_in_ready;
   wire [31:0]  _accumLanes_6_3_io_outPing;
   wire [31:0]  _accumLanes_6_3_io_outPong;
   wire         _accumLanes_6_3_io_busy;
   wire         _accumLanes_6_3_io_rawStall;
+  wire         _accumLanes_6_3_io_accept;
   wire         _accumLanes_6_2_io_in_ready;
   wire [31:0]  _accumLanes_6_2_io_outPing;
   wire [31:0]  _accumLanes_6_2_io_outPong;
   wire         _accumLanes_6_2_io_busy;
   wire         _accumLanes_6_2_io_rawStall;
+  wire         _accumLanes_6_2_io_accept;
   wire         _accumLanes_6_1_io_in_ready;
   wire [31:0]  _accumLanes_6_1_io_outPing;
   wire [31:0]  _accumLanes_6_1_io_outPong;
   wire         _accumLanes_6_1_io_busy;
   wire         _accumLanes_6_1_io_rawStall;
+  wire         _accumLanes_6_1_io_accept;
   wire         _accumLanes_6_0_io_in_ready;
   wire [31:0]  _accumLanes_6_0_io_outPing;
   wire [31:0]  _accumLanes_6_0_io_outPong;
   wire         _accumLanes_6_0_io_busy;
   wire         _accumLanes_6_0_io_rawStall;
+  wire         _accumLanes_6_0_io_accept;
   wire         _accumLanes_5_7_io_in_ready;
   wire [31:0]  _accumLanes_5_7_io_outPing;
   wire [31:0]  _accumLanes_5_7_io_outPong;
   wire         _accumLanes_5_7_io_busy;
   wire         _accumLanes_5_7_io_rawStall;
+  wire         _accumLanes_5_7_io_accept;
   wire         _accumLanes_5_6_io_in_ready;
   wire [31:0]  _accumLanes_5_6_io_outPing;
   wire [31:0]  _accumLanes_5_6_io_outPong;
   wire         _accumLanes_5_6_io_busy;
   wire         _accumLanes_5_6_io_rawStall;
+  wire         _accumLanes_5_6_io_accept;
   wire         _accumLanes_5_5_io_in_ready;
   wire [31:0]  _accumLanes_5_5_io_outPing;
   wire [31:0]  _accumLanes_5_5_io_outPong;
   wire         _accumLanes_5_5_io_busy;
   wire         _accumLanes_5_5_io_rawStall;
+  wire         _accumLanes_5_5_io_accept;
   wire         _accumLanes_5_4_io_in_ready;
   wire [31:0]  _accumLanes_5_4_io_outPing;
   wire [31:0]  _accumLanes_5_4_io_outPong;
   wire         _accumLanes_5_4_io_busy;
   wire         _accumLanes_5_4_io_rawStall;
+  wire         _accumLanes_5_4_io_accept;
   wire         _accumLanes_5_3_io_in_ready;
   wire [31:0]  _accumLanes_5_3_io_outPing;
   wire [31:0]  _accumLanes_5_3_io_outPong;
   wire         _accumLanes_5_3_io_busy;
   wire         _accumLanes_5_3_io_rawStall;
+  wire         _accumLanes_5_3_io_accept;
   wire         _accumLanes_5_2_io_in_ready;
   wire [31:0]  _accumLanes_5_2_io_outPing;
   wire [31:0]  _accumLanes_5_2_io_outPong;
   wire         _accumLanes_5_2_io_busy;
   wire         _accumLanes_5_2_io_rawStall;
+  wire         _accumLanes_5_2_io_accept;
   wire         _accumLanes_5_1_io_in_ready;
   wire [31:0]  _accumLanes_5_1_io_outPing;
   wire [31:0]  _accumLanes_5_1_io_outPong;
   wire         _accumLanes_5_1_io_busy;
   wire         _accumLanes_5_1_io_rawStall;
+  wire         _accumLanes_5_1_io_accept;
   wire         _accumLanes_5_0_io_in_ready;
   wire [31:0]  _accumLanes_5_0_io_outPing;
   wire [31:0]  _accumLanes_5_0_io_outPong;
   wire         _accumLanes_5_0_io_busy;
   wire         _accumLanes_5_0_io_rawStall;
+  wire         _accumLanes_5_0_io_accept;
   wire         _accumLanes_4_7_io_in_ready;
   wire [31:0]  _accumLanes_4_7_io_outPing;
   wire [31:0]  _accumLanes_4_7_io_outPong;
   wire         _accumLanes_4_7_io_busy;
   wire         _accumLanes_4_7_io_rawStall;
+  wire         _accumLanes_4_7_io_accept;
   wire         _accumLanes_4_6_io_in_ready;
   wire [31:0]  _accumLanes_4_6_io_outPing;
   wire [31:0]  _accumLanes_4_6_io_outPong;
   wire         _accumLanes_4_6_io_busy;
   wire         _accumLanes_4_6_io_rawStall;
+  wire         _accumLanes_4_6_io_accept;
   wire         _accumLanes_4_5_io_in_ready;
   wire [31:0]  _accumLanes_4_5_io_outPing;
   wire [31:0]  _accumLanes_4_5_io_outPong;
   wire         _accumLanes_4_5_io_busy;
   wire         _accumLanes_4_5_io_rawStall;
+  wire         _accumLanes_4_5_io_accept;
   wire         _accumLanes_4_4_io_in_ready;
   wire [31:0]  _accumLanes_4_4_io_outPing;
   wire [31:0]  _accumLanes_4_4_io_outPong;
   wire         _accumLanes_4_4_io_busy;
   wire         _accumLanes_4_4_io_rawStall;
+  wire         _accumLanes_4_4_io_accept;
   wire         _accumLanes_4_3_io_in_ready;
   wire [31:0]  _accumLanes_4_3_io_outPing;
   wire [31:0]  _accumLanes_4_3_io_outPong;
   wire         _accumLanes_4_3_io_busy;
   wire         _accumLanes_4_3_io_rawStall;
+  wire         _accumLanes_4_3_io_accept;
   wire         _accumLanes_4_2_io_in_ready;
   wire [31:0]  _accumLanes_4_2_io_outPing;
   wire [31:0]  _accumLanes_4_2_io_outPong;
   wire         _accumLanes_4_2_io_busy;
   wire         _accumLanes_4_2_io_rawStall;
+  wire         _accumLanes_4_2_io_accept;
   wire         _accumLanes_4_1_io_in_ready;
   wire [31:0]  _accumLanes_4_1_io_outPing;
   wire [31:0]  _accumLanes_4_1_io_outPong;
   wire         _accumLanes_4_1_io_busy;
   wire         _accumLanes_4_1_io_rawStall;
+  wire         _accumLanes_4_1_io_accept;
   wire         _accumLanes_4_0_io_in_ready;
   wire [31:0]  _accumLanes_4_0_io_outPing;
   wire [31:0]  _accumLanes_4_0_io_outPong;
   wire         _accumLanes_4_0_io_busy;
   wire         _accumLanes_4_0_io_rawStall;
+  wire         _accumLanes_4_0_io_accept;
   wire         _accumLanes_3_7_io_in_ready;
   wire [31:0]  _accumLanes_3_7_io_outPing;
   wire [31:0]  _accumLanes_3_7_io_outPong;
   wire         _accumLanes_3_7_io_busy;
   wire         _accumLanes_3_7_io_rawStall;
+  wire         _accumLanes_3_7_io_accept;
   wire         _accumLanes_3_6_io_in_ready;
   wire [31:0]  _accumLanes_3_6_io_outPing;
   wire [31:0]  _accumLanes_3_6_io_outPong;
   wire         _accumLanes_3_6_io_busy;
   wire         _accumLanes_3_6_io_rawStall;
+  wire         _accumLanes_3_6_io_accept;
   wire         _accumLanes_3_5_io_in_ready;
   wire [31:0]  _accumLanes_3_5_io_outPing;
   wire [31:0]  _accumLanes_3_5_io_outPong;
   wire         _accumLanes_3_5_io_busy;
   wire         _accumLanes_3_5_io_rawStall;
+  wire         _accumLanes_3_5_io_accept;
   wire         _accumLanes_3_4_io_in_ready;
   wire [31:0]  _accumLanes_3_4_io_outPing;
   wire [31:0]  _accumLanes_3_4_io_outPong;
   wire         _accumLanes_3_4_io_busy;
   wire         _accumLanes_3_4_io_rawStall;
+  wire         _accumLanes_3_4_io_accept;
   wire         _accumLanes_3_3_io_in_ready;
   wire [31:0]  _accumLanes_3_3_io_outPing;
   wire [31:0]  _accumLanes_3_3_io_outPong;
   wire         _accumLanes_3_3_io_busy;
   wire         _accumLanes_3_3_io_rawStall;
+  wire         _accumLanes_3_3_io_accept;
   wire         _accumLanes_3_2_io_in_ready;
   wire [31:0]  _accumLanes_3_2_io_outPing;
   wire [31:0]  _accumLanes_3_2_io_outPong;
   wire         _accumLanes_3_2_io_busy;
   wire         _accumLanes_3_2_io_rawStall;
+  wire         _accumLanes_3_2_io_accept;
   wire         _accumLanes_3_1_io_in_ready;
   wire [31:0]  _accumLanes_3_1_io_outPing;
   wire [31:0]  _accumLanes_3_1_io_outPong;
   wire         _accumLanes_3_1_io_busy;
   wire         _accumLanes_3_1_io_rawStall;
+  wire         _accumLanes_3_1_io_accept;
   wire         _accumLanes_3_0_io_in_ready;
   wire [31:0]  _accumLanes_3_0_io_outPing;
   wire [31:0]  _accumLanes_3_0_io_outPong;
   wire         _accumLanes_3_0_io_busy;
   wire         _accumLanes_3_0_io_rawStall;
+  wire         _accumLanes_3_0_io_accept;
   wire         _accumLanes_2_7_io_in_ready;
   wire [31:0]  _accumLanes_2_7_io_outPing;
   wire [31:0]  _accumLanes_2_7_io_outPong;
   wire         _accumLanes_2_7_io_busy;
   wire         _accumLanes_2_7_io_rawStall;
+  wire         _accumLanes_2_7_io_accept;
   wire         _accumLanes_2_6_io_in_ready;
   wire [31:0]  _accumLanes_2_6_io_outPing;
   wire [31:0]  _accumLanes_2_6_io_outPong;
   wire         _accumLanes_2_6_io_busy;
   wire         _accumLanes_2_6_io_rawStall;
+  wire         _accumLanes_2_6_io_accept;
   wire         _accumLanes_2_5_io_in_ready;
   wire [31:0]  _accumLanes_2_5_io_outPing;
   wire [31:0]  _accumLanes_2_5_io_outPong;
   wire         _accumLanes_2_5_io_busy;
   wire         _accumLanes_2_5_io_rawStall;
+  wire         _accumLanes_2_5_io_accept;
   wire         _accumLanes_2_4_io_in_ready;
   wire [31:0]  _accumLanes_2_4_io_outPing;
   wire [31:0]  _accumLanes_2_4_io_outPong;
   wire         _accumLanes_2_4_io_busy;
   wire         _accumLanes_2_4_io_rawStall;
+  wire         _accumLanes_2_4_io_accept;
   wire         _accumLanes_2_3_io_in_ready;
   wire [31:0]  _accumLanes_2_3_io_outPing;
   wire [31:0]  _accumLanes_2_3_io_outPong;
   wire         _accumLanes_2_3_io_busy;
   wire         _accumLanes_2_3_io_rawStall;
+  wire         _accumLanes_2_3_io_accept;
   wire         _accumLanes_2_2_io_in_ready;
   wire [31:0]  _accumLanes_2_2_io_outPing;
   wire [31:0]  _accumLanes_2_2_io_outPong;
   wire         _accumLanes_2_2_io_busy;
   wire         _accumLanes_2_2_io_rawStall;
+  wire         _accumLanes_2_2_io_accept;
   wire         _accumLanes_2_1_io_in_ready;
   wire [31:0]  _accumLanes_2_1_io_outPing;
   wire [31:0]  _accumLanes_2_1_io_outPong;
   wire         _accumLanes_2_1_io_busy;
   wire         _accumLanes_2_1_io_rawStall;
+  wire         _accumLanes_2_1_io_accept;
   wire         _accumLanes_2_0_io_in_ready;
   wire [31:0]  _accumLanes_2_0_io_outPing;
   wire [31:0]  _accumLanes_2_0_io_outPong;
   wire         _accumLanes_2_0_io_busy;
   wire         _accumLanes_2_0_io_rawStall;
+  wire         _accumLanes_2_0_io_accept;
   wire         _accumLanes_1_7_io_in_ready;
   wire [31:0]  _accumLanes_1_7_io_outPing;
   wire [31:0]  _accumLanes_1_7_io_outPong;
   wire         _accumLanes_1_7_io_busy;
   wire         _accumLanes_1_7_io_rawStall;
+  wire         _accumLanes_1_7_io_accept;
   wire         _accumLanes_1_6_io_in_ready;
   wire [31:0]  _accumLanes_1_6_io_outPing;
   wire [31:0]  _accumLanes_1_6_io_outPong;
   wire         _accumLanes_1_6_io_busy;
   wire         _accumLanes_1_6_io_rawStall;
+  wire         _accumLanes_1_6_io_accept;
   wire         _accumLanes_1_5_io_in_ready;
   wire [31:0]  _accumLanes_1_5_io_outPing;
   wire [31:0]  _accumLanes_1_5_io_outPong;
   wire         _accumLanes_1_5_io_busy;
   wire         _accumLanes_1_5_io_rawStall;
+  wire         _accumLanes_1_5_io_accept;
   wire         _accumLanes_1_4_io_in_ready;
   wire [31:0]  _accumLanes_1_4_io_outPing;
   wire [31:0]  _accumLanes_1_4_io_outPong;
   wire         _accumLanes_1_4_io_busy;
   wire         _accumLanes_1_4_io_rawStall;
+  wire         _accumLanes_1_4_io_accept;
   wire         _accumLanes_1_3_io_in_ready;
   wire [31:0]  _accumLanes_1_3_io_outPing;
   wire [31:0]  _accumLanes_1_3_io_outPong;
   wire         _accumLanes_1_3_io_busy;
   wire         _accumLanes_1_3_io_rawStall;
+  wire         _accumLanes_1_3_io_accept;
   wire         _accumLanes_1_2_io_in_ready;
   wire [31:0]  _accumLanes_1_2_io_outPing;
   wire [31:0]  _accumLanes_1_2_io_outPong;
   wire         _accumLanes_1_2_io_busy;
   wire         _accumLanes_1_2_io_rawStall;
+  wire         _accumLanes_1_2_io_accept;
   wire         _accumLanes_1_1_io_in_ready;
   wire [31:0]  _accumLanes_1_1_io_outPing;
   wire [31:0]  _accumLanes_1_1_io_outPong;
   wire         _accumLanes_1_1_io_busy;
   wire         _accumLanes_1_1_io_rawStall;
+  wire         _accumLanes_1_1_io_accept;
   wire         _accumLanes_1_0_io_in_ready;
   wire [31:0]  _accumLanes_1_0_io_outPing;
   wire [31:0]  _accumLanes_1_0_io_outPong;
   wire         _accumLanes_1_0_io_busy;
   wire         _accumLanes_1_0_io_rawStall;
+  wire         _accumLanes_1_0_io_accept;
   wire         _accumLanes_0_7_io_in_ready;
   wire [31:0]  _accumLanes_0_7_io_outPing;
   wire [31:0]  _accumLanes_0_7_io_outPong;
   wire         _accumLanes_0_7_io_busy;
   wire         _accumLanes_0_7_io_rawStall;
+  wire         _accumLanes_0_7_io_accept;
   wire         _accumLanes_0_6_io_in_ready;
   wire [31:0]  _accumLanes_0_6_io_outPing;
   wire [31:0]  _accumLanes_0_6_io_outPong;
   wire         _accumLanes_0_6_io_busy;
   wire         _accumLanes_0_6_io_rawStall;
+  wire         _accumLanes_0_6_io_accept;
   wire         _accumLanes_0_5_io_in_ready;
   wire [31:0]  _accumLanes_0_5_io_outPing;
   wire [31:0]  _accumLanes_0_5_io_outPong;
   wire         _accumLanes_0_5_io_busy;
   wire         _accumLanes_0_5_io_rawStall;
+  wire         _accumLanes_0_5_io_accept;
   wire         _accumLanes_0_4_io_in_ready;
   wire [31:0]  _accumLanes_0_4_io_outPing;
   wire [31:0]  _accumLanes_0_4_io_outPong;
   wire         _accumLanes_0_4_io_busy;
   wire         _accumLanes_0_4_io_rawStall;
+  wire         _accumLanes_0_4_io_accept;
   wire         _accumLanes_0_3_io_in_ready;
   wire [31:0]  _accumLanes_0_3_io_outPing;
   wire [31:0]  _accumLanes_0_3_io_outPong;
   wire         _accumLanes_0_3_io_busy;
   wire         _accumLanes_0_3_io_rawStall;
+  wire         _accumLanes_0_3_io_accept;
   wire         _accumLanes_0_2_io_in_ready;
   wire [31:0]  _accumLanes_0_2_io_outPing;
   wire [31:0]  _accumLanes_0_2_io_outPong;
   wire         _accumLanes_0_2_io_busy;
   wire         _accumLanes_0_2_io_rawStall;
+  wire         _accumLanes_0_2_io_accept;
   wire         _accumLanes_0_1_io_in_ready;
   wire [31:0]  _accumLanes_0_1_io_outPing;
   wire [31:0]  _accumLanes_0_1_io_outPong;
   wire         _accumLanes_0_1_io_busy;
   wire         _accumLanes_0_1_io_rawStall;
+  wire         _accumLanes_0_1_io_accept;
   wire         _accumLanes_0_0_io_in_ready;
   wire [31:0]  _accumLanes_0_0_io_outPing;
   wire [31:0]  _accumLanes_0_0_io_outPong;
   wire         _accumLanes_0_0_io_busy;
   wire         _accumLanes_0_0_io_rawStall;
+  wire         _accumLanes_0_0_io_accept;
   wire         _coreLanes_7_7_io_inReady;
   wire         _coreLanes_7_7_io_out_valid;
   wire [13:0]  _coreLanes_7_7_io_out_bits_group;
@@ -1322,9 +1392,18 @@ module CuperSpmvOnly_ChiselDataPath8(
   reg  [63:0]  counterMatrixBeats_7;
   reg  [63:0]  counterValidSlots;
   reg  [63:0]  counterPaddingSlots;
+  reg  [63:0]  counterNonzeroXReads;
+  reg  [63:0]  counterNonzeroProducts;
+  reg  [63:0]  counterAccumAccepts;
   reg  [63:0]  counterRawStall;
   reg  [63:0]  counterOutputWrites;
+  reg  [63:0]  counterNonzeroOutputWrites;
   reg  [63:0]  counterWriterBackpressure;
+  reg          firstNonzeroTaggedSeen;
+  reg  [31:0]  firstNonzeroTaggedPacket;
+  reg  [31:0]  firstNonzeroTaggedPair;
+  reg  [31:0]  firstNonzeroTaggedPing;
+  reg  [31:0]  firstNonzeroTaggedPong;
   wire         _ap_idle_T = state == 5'h0;
   wire         accumLanes_7_7_io_initValid = state == 5'h2;
   wire         _accumLanes_7_7_io_outRead_T = state == 5'hC;
@@ -1552,28 +1631,29 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire         _GEN_26 = state == 5'hB;
   wire         _GEN_27 = state == 5'hD;
   wire         _GEN_28 =
-    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15
-    | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26
-    | _accumLanes_7_7_io_outRead_T | _GEN_27;
-  wire         _GEN_29 = _GEN_28 | ~_GEN_8;
+    _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
+    | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
+    | _GEN_27;
+  wire         _GEN_29 = _ap_idle_T | _GEN_28;
+  wire         _GEN_30 = _GEN_29 | ~_GEN_8;
   wire         _taggedWrite_0_T = outValid_0 & Vector_Y_Tagged_Stream_0_s_full_n;
-  wire         taggedWrite_0 = ~_GEN_28 & _GEN_8 & _taggedWrite_0_T;
+  wire         taggedWrite_0 = ~_GEN_29 & _GEN_8 & _taggedWrite_0_T;
   wire         _taggedWrite_1_T = outValid_1 & Vector_Y_Tagged_Stream_1_s_full_n;
-  wire         taggedWrite_1 = ~_GEN_28 & _GEN_8 & _taggedWrite_1_T;
+  wire         taggedWrite_1 = ~_GEN_29 & _GEN_8 & _taggedWrite_1_T;
   wire         _taggedWrite_2_T = outValid_2 & Vector_Y_Tagged_Stream_2_s_full_n;
-  wire         taggedWrite_2 = ~_GEN_28 & _GEN_8 & _taggedWrite_2_T;
+  wire         taggedWrite_2 = ~_GEN_29 & _GEN_8 & _taggedWrite_2_T;
   wire         _taggedWrite_3_T = outValid_3 & Vector_Y_Tagged_Stream_3_s_full_n;
-  wire         taggedWrite_3 = ~_GEN_28 & _GEN_8 & _taggedWrite_3_T;
+  wire         taggedWrite_3 = ~_GEN_29 & _GEN_8 & _taggedWrite_3_T;
   wire         _taggedWrite_4_T = outValid_4 & Vector_Y_Tagged_Stream_4_s_full_n;
-  wire         taggedWrite_4 = ~_GEN_28 & _GEN_8 & _taggedWrite_4_T;
+  wire         taggedWrite_4 = ~_GEN_29 & _GEN_8 & _taggedWrite_4_T;
   wire         _taggedWrite_5_T = outValid_5 & Vector_Y_Tagged_Stream_5_s_full_n;
-  wire         taggedWrite_5 = ~_GEN_28 & _GEN_8 & _taggedWrite_5_T;
+  wire         taggedWrite_5 = ~_GEN_29 & _GEN_8 & _taggedWrite_5_T;
   wire         _taggedWrite_6_T = outValid_6 & Vector_Y_Tagged_Stream_6_s_full_n;
-  wire         taggedWrite_6 = ~_GEN_28 & _GEN_8 & _taggedWrite_6_T;
+  wire         taggedWrite_6 = ~_GEN_29 & _GEN_8 & _taggedWrite_6_T;
   wire         _taggedWrite_7_T = outValid_7 & Vector_Y_Tagged_Stream_7_s_full_n;
-  wire         taggedWrite_7 = ~_GEN_28 & _GEN_8 & _taggedWrite_7_T;
+  wire         taggedWrite_7 = ~_GEN_29 & _GEN_8 & _taggedWrite_7_T;
   wire [512:0] _unused_T = {480'h0, PE_Param_in_peek_dout} ^ Vector_X_Stream_in_peek_dout;
-  wire [7:0]   _GEN_30 =
+  wire [7:0]   _GEN_31 =
     _unused_T[7:0]
     ^ {Matrix_A_Stream_7_peek_dout[0],
        Matrix_A_Stream_6_peek_dout[0],
@@ -1594,12 +1674,116 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [512:0] unused =
     {_unused_T[512:32],
      {_unused_T[31:8],
-      _GEN_30[7:2],
-      _GEN_30[1:0] ^ {PE_Param_in_peek_empty_n, Vector_X_Stream_in_peek_empty_n}}
+      _GEN_31[7:2],
+      _GEN_31[1:0] ^ {PE_Param_in_peek_empty_n, Vector_X_Stream_in_peek_empty_n}}
        ^ Matrix_len ^ xPacketBase};
   wire [63:0]  _counterMatrixBeats_T = casez_tmp_1 + 64'h1;
   wire [63:0]  _counterMatrixBeats_T_2 = casez_tmp_1 + 64'h1;
-  wire         _GEN_31 = _accumLanes_7_7_io_outRead_T | _GEN_27 | _GEN_8;
+  wire         _GEN_32 =
+    _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
+    | _matrixRead_7_T | _GEN_21 | _GEN_25;
+  wire         _GEN_33 = _GEN_28 | ~_GEN_8;
+  wire         _GEN_34 = _accumLanes_7_7_io_outRead_T | _GEN_27 | _GEN_8;
+  wire [6:0]   totalAccumAccepts =
+    {1'h0,
+     {1'h0,
+      {1'h0,
+       {1'h0,
+        {1'h0, {1'h0, _accumLanes_0_0_io_accept} + {1'h0, _accumLanes_0_1_io_accept}}
+          + {1'h0, {1'h0, _accumLanes_0_2_io_accept} + {1'h0, _accumLanes_0_3_io_accept}}}
+         + {1'h0,
+            {1'h0, {1'h0, _accumLanes_0_4_io_accept} + {1'h0, _accumLanes_0_5_io_accept}}
+              + {1'h0,
+                 {1'h0, _accumLanes_0_6_io_accept} + {1'h0, _accumLanes_0_7_io_accept}}}}
+        + {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, _accumLanes_1_0_io_accept} + {1'h0, _accumLanes_1_1_io_accept}}
+              + {1'h0,
+                 {1'h0, _accumLanes_1_2_io_accept} + {1'h0, _accumLanes_1_3_io_accept}}}
+             + {1'h0,
+                {1'h0,
+                 {1'h0, _accumLanes_1_4_io_accept} + {1'h0, _accumLanes_1_5_io_accept}}
+                  + {1'h0,
+                     {1'h0, _accumLanes_1_6_io_accept}
+                       + {1'h0, _accumLanes_1_7_io_accept}}}}}
+       + {1'h0,
+          {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, _accumLanes_2_0_io_accept} + {1'h0, _accumLanes_2_1_io_accept}}
+              + {1'h0,
+                 {1'h0, _accumLanes_2_2_io_accept} + {1'h0, _accumLanes_2_3_io_accept}}}
+             + {1'h0,
+                {1'h0,
+                 {1'h0, _accumLanes_2_4_io_accept} + {1'h0, _accumLanes_2_5_io_accept}}
+                  + {1'h0,
+                     {1'h0, _accumLanes_2_6_io_accept}
+                       + {1'h0, _accumLanes_2_7_io_accept}}}}
+            + {1'h0,
+               {1'h0,
+                {1'h0,
+                 {1'h0, _accumLanes_3_0_io_accept} + {1'h0, _accumLanes_3_1_io_accept}}
+                  + {1'h0,
+                     {1'h0, _accumLanes_3_2_io_accept}
+                       + {1'h0, _accumLanes_3_3_io_accept}}}
+                 + {1'h0,
+                    {1'h0,
+                     {1'h0, _accumLanes_3_4_io_accept}
+                       + {1'h0, _accumLanes_3_5_io_accept}}
+                      + {1'h0,
+                         {1'h0, _accumLanes_3_6_io_accept}
+                           + {1'h0, _accumLanes_3_7_io_accept}}}}}}
+    + {1'h0,
+       {1'h0,
+        {1'h0,
+         {1'h0,
+          {1'h0, {1'h0, _accumLanes_4_0_io_accept} + {1'h0, _accumLanes_4_1_io_accept}}
+            + {1'h0,
+               {1'h0, _accumLanes_4_2_io_accept} + {1'h0, _accumLanes_4_3_io_accept}}}
+           + {1'h0,
+              {1'h0,
+               {1'h0, _accumLanes_4_4_io_accept} + {1'h0, _accumLanes_4_5_io_accept}}
+                + {1'h0,
+                   {1'h0, _accumLanes_4_6_io_accept}
+                     + {1'h0, _accumLanes_4_7_io_accept}}}}
+          + {1'h0,
+             {1'h0,
+              {1'h0,
+               {1'h0, _accumLanes_5_0_io_accept} + {1'h0, _accumLanes_5_1_io_accept}}
+                + {1'h0,
+                   {1'h0, _accumLanes_5_2_io_accept} + {1'h0, _accumLanes_5_3_io_accept}}}
+               + {1'h0,
+                  {1'h0,
+                   {1'h0, _accumLanes_5_4_io_accept} + {1'h0, _accumLanes_5_5_io_accept}}
+                    + {1'h0,
+                       {1'h0, _accumLanes_5_6_io_accept}
+                         + {1'h0, _accumLanes_5_7_io_accept}}}}}
+         + {1'h0,
+            {1'h0,
+             {1'h0,
+              {1'h0,
+               {1'h0, _accumLanes_6_0_io_accept} + {1'h0, _accumLanes_6_1_io_accept}}
+                + {1'h0,
+                   {1'h0, _accumLanes_6_2_io_accept} + {1'h0, _accumLanes_6_3_io_accept}}}
+               + {1'h0,
+                  {1'h0,
+                   {1'h0, _accumLanes_6_4_io_accept} + {1'h0, _accumLanes_6_5_io_accept}}
+                    + {1'h0,
+                       {1'h0, _accumLanes_6_6_io_accept}
+                         + {1'h0, _accumLanes_6_7_io_accept}}}}
+              + {1'h0,
+                 {1'h0,
+                  {1'h0,
+                   {1'h0, _accumLanes_7_0_io_accept} + {1'h0, _accumLanes_7_1_io_accept}}
+                    + {1'h0,
+                       {1'h0, _accumLanes_7_2_io_accept}
+                         + {1'h0, _accumLanes_7_3_io_accept}}}
+                   + {1'h0,
+                      {1'h0,
+                       {1'h0, _accumLanes_7_4_io_accept}
+                         + {1'h0, _accumLanes_7_5_io_accept}}
+                        + {1'h0,
+                           {1'h0, _accumLanes_7_6_io_accept}
+                             + {1'h0, _accumLanes_7_7_io_accept}}}}}};
   wire [3:0]   totalOutputWrites =
     {1'h0,
      {1'h0, {1'h0, taggedWrite_0} + {1'h0, taggedWrite_1}}
@@ -1607,9 +1791,17 @@ module CuperSpmvOnly_ChiselDataPath8(
     + {1'h0,
        {1'h0, {1'h0, taggedWrite_4} + {1'h0, taggedWrite_5}}
          + {1'h0, {1'h0, taggedWrite_6} + {1'h0, taggedWrite_7}}};
+  wire [63:0]  _GEN_35 = {outPing_0, outPong_0};
+  wire [63:0]  _GEN_36 = {outPing_1, outPong_1};
+  wire [63:0]  _GEN_37 = {outPing_2, outPong_2};
+  wire [63:0]  _GEN_38 = {outPing_3, outPong_3};
+  wire [63:0]  _GEN_39 = {outPing_4, outPong_4};
+  wire [63:0]  _GEN_40 = {outPing_5, outPong_5};
+  wire [63:0]  _GEN_41 = {outPing_6, outPong_6};
+  wire [63:0]  _GEN_42 = {outPing_7, outPong_7};
   wire [13:0]  _initGroup_T = initGroup + 14'h1;
-  wire         _GEN_32 = _initGroup_T >= numOwnerGroups[13:0];
-  wire         _GEN_33 =
+  wire         _GEN_43 = _initGroup_T >= numOwnerGroups[13:0];
+  wire         _GEN_44 =
     {_coreLanes_7_7_io_busy | _accumLanes_7_7_io_busy,
      _coreLanes_7_6_io_busy | _accumLanes_7_6_io_busy,
      _coreLanes_7_5_io_busy | _accumLanes_7_5_io_busy,
@@ -1674,21 +1866,53 @@ module CuperSpmvOnly_ChiselDataPath8(
      _coreLanes_0_2_io_busy | _accumLanes_0_2_io_busy,
      _coreLanes_0_1_io_busy | _accumLanes_0_1_io_busy,
      _coreLanes_0_0_io_busy | _accumLanes_0_0_io_busy} == 64'h0;
-  wire         _GEN_34 = state == 5'hF;
-  wire         _GEN_35 = outPair != 3'h7;
+  wire         _GEN_45 = state == 5'hF;
+  wire         _GEN_46 = outPair != 3'h7;
   wire [13:0]  _outGroup_T = outGroup + 14'h1;
-  wire         _GEN_36 = _outGroup_T < numOwnerGroups[13:0];
-  wire         _GEN_37 = state == 5'h10;
+  wire         _GEN_47 = _outGroup_T < numOwnerGroups[13:0];
+  wire         _GEN_48 = state == 5'h10;
   wire [31:0]  _iterIdx_T = iterIdx + 32'h1;
-  wire         _GEN_38 =
+  wire         _GEN_49 =
     _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
-    | _GEN_27 | _GEN_8 | _GEN_34;
-  wire         _GEN_39 = state == 5'h11;
-  wire         _GEN_40 = _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19 | _GEN_38;
+    | _GEN_27 | _GEN_8 | _GEN_45;
+  wire         _GEN_50 = state == 5'h11;
+  wire         _GEN_51 = _taggedWrite_0_T & (|_GEN_35) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_52 = (|_GEN_36) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_53 = _taggedWrite_1_T & _GEN_52;
+  wire         _GEN_54 = _taggedWrite_1_T & _GEN_52 | _GEN_51;
+  wire         _GEN_55 = _taggedWrite_2_T & (|_GEN_37) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_56 = (|_GEN_38) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_57 = _GEN_56 | _GEN_55;
+  wire         _GEN_58 = _taggedWrite_3_T & _GEN_56;
+  wire         _GEN_59 = _taggedWrite_3_T ? _GEN_57 | _GEN_54 : _GEN_55 | _GEN_54;
+  wire         _GEN_60 = _taggedWrite_4_T & (|_GEN_39) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_61 = (|_GEN_40) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_62 = _GEN_61 | _GEN_60;
+  wire         _GEN_63 = _taggedWrite_5_T & _GEN_61;
+  wire         _GEN_64 = _taggedWrite_5_T ? _GEN_62 | _GEN_59 : _GEN_60 | _GEN_59;
+  wire         _GEN_65 = _taggedWrite_6_T & (|_GEN_41) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_66 = (|_GEN_42) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_67 = _GEN_66 | _GEN_65;
+  wire         _GEN_68 = _taggedWrite_7_T & _GEN_66;
+  wire         _GEN_69 = _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19 | _GEN_49;
+  wire         _GEN_70 =
+    _taggedWrite_1_T
+      ? _GEN_52 | _GEN_51 | firstNonzeroTaggedSeen
+      : _GEN_51 | firstNonzeroTaggedSeen;
+  wire         _GEN_71 = _taggedWrite_3_T ? _GEN_57 | _GEN_70 : _GEN_55 | _GEN_70;
+  wire         _GEN_72 = _taggedWrite_5_T ? _GEN_62 | _GEN_71 : _GEN_60 | _GEN_71;
+  wire [3:0]   nonzeroOutputWrites =
+    {1'h0,
+     {1'h0, {1'h0, taggedWrite_0 & (|_GEN_35)} + {1'h0, taggedWrite_1 & (|_GEN_36)}}
+       + {1'h0, {1'h0, taggedWrite_2 & (|_GEN_37)} + {1'h0, taggedWrite_3 & (|_GEN_38)}}}
+    + {1'h0,
+       {1'h0, {1'h0, taggedWrite_4 & (|_GEN_39)} + {1'h0, taggedWrite_5 & (|_GEN_40)}}
+         + {1'h0,
+            {1'h0, taggedWrite_6 & (|_GEN_41)} + {1'h0, taggedWrite_7 & (|_GEN_42)}}};
   wire [31:0]  _numOwnerGroups_T = Row_num + 32'hF;
   wire [27:0]  _numOwnerGroups_T_3 = _numOwnerGroups_T[31:4] + 28'h7;
   wire [31:0]  _totalVectorPackets_T = Column_num + 32'hF;
-  wire [40:0]  _GEN_41 = {9'h0, totalVectorPackets};
+  wire [40:0]  _GEN_73 = {9'h0, totalVectorPackets};
   wire [31:0]  _remaining_T_3 = casez_tmp_0 - 32'h1;
   wire [31:0]  _remaining_T_5 = casez_tmp_0 - 32'h1;
   wire [13:0]  _issueSlotReuse_T = issuePrevCol & issueSlot[63:50];
@@ -1757,20 +1981,20 @@ module CuperSpmvOnly_ChiselDataPath8(
     & _coreLanes_7_5_io_inReady | (&issueSource) & _activeCoreReady_T_187
     & _coreLanes_7_6_io_inReady | (&issueSource) & (&issueOwner)
     & _coreLanes_7_7_io_inReady;
-  wire         _GEN_42 = _ap_idle_T & ap_start;
-  wire         _GEN_43 = PE_Param_in_s_empty_n & boundaryCount == 4'h7;
-  wire         _GEN_44 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10;
-  wire         _GEN_45 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h0;
-  wire         _GEN_46 =
+  wire         _GEN_74 = _ap_idle_T & ap_start;
+  wire         _GEN_75 = PE_Param_in_s_empty_n & boundaryCount == 4'h7;
+  wire         _GEN_76 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10;
+  wire         _GEN_77 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h0;
+  wire         _GEN_78 =
     _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_20;
-  wire         _GEN_47 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h1;
-  wire         _GEN_48 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h2;
-  wire         _GEN_49 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h3;
-  wire         _GEN_50 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h4;
-  wire         _GEN_51 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h5;
-  wire         _GEN_52 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h6;
-  wire         _GEN_53 = PE_Param_in_s_empty_n & (&(boundaryCount[2:0]));
-  wire         _GEN_54 =
+  wire         _GEN_79 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h1;
+  wire         _GEN_80 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h2;
+  wire         _GEN_81 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h3;
+  wire         _GEN_82 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h4;
+  wire         _GEN_83 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h5;
+  wire         _GEN_84 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h6;
+  wire         _GEN_85 = PE_Param_in_s_empty_n & (&(boundaryCount[2:0]));
+  wire         _GEN_86 =
     {remaining_0,
      remaining_1,
      remaining_2,
@@ -1780,52 +2004,52 @@ module CuperSpmvOnly_ChiselDataPath8(
      remaining_6,
      remaining_7} == 256'h0;
   wire [31:0]  _nextBatch_T = batchIdx + 32'h1;
-  wire         _GEN_55 = _nextBatch_T >= Batch_num;
-  wire         _GEN_56 = _matrixRead_7_T & _GEN_54;
-  wire         _GEN_57 = _GEN_11 | _GEN_15 | _GEN_19;
-  wire         _GEN_58 = _GEN_57 | ~_GEN_56 | _GEN_55;
-  wire         _GEN_59 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid;
-  wire         _GEN_60 =
-    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_57;
-  wire         _GEN_61 = _GEN_60 | ~_matrixRead_7_T | _GEN_54 | ~(|_anySourceCanRead_T);
-  wire         _GEN_62 = (&issueOwner) & ~(|issueSource);
-  wire         _GEN_63 = issueSlot[49] & _GEN_62;
-  wire         _GEN_64 = (&issueOwner) & issueSource == 3'h1;
-  wire         _GEN_65 = issueSlot[49] & _GEN_64;
-  wire         _GEN_66 = (&issueOwner) & issueSource == 3'h2;
-  wire         _GEN_67 = issueSlot[49] & _GEN_66;
-  wire         _GEN_68 = (&issueOwner) & issueSource == 3'h3;
-  wire         _GEN_69 = issueSlot[49] & _GEN_68;
-  wire         _GEN_70 = (&issueOwner) & issueSource == 3'h4;
-  wire         _GEN_71 = issueSlot[49] & _GEN_70;
-  wire         _GEN_72 = (&issueOwner) & issueSource == 3'h5;
-  wire         _GEN_73 = issueSlot[49] & _GEN_72;
-  wire         _GEN_74 = (&issueOwner) & issueSource == 3'h6;
-  wire         _GEN_75 = issueSlot[49] & _GEN_74;
-  wire         _GEN_76 = (&issueOwner) & (&issueSource);
-  wire         _GEN_77 = issueSlot[49] & _GEN_76;
-  wire         _GEN_78 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_62);
-  wire         _GEN_79 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_64);
-  wire         _GEN_80 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_66);
-  wire         _GEN_81 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_68);
-  wire         _GEN_82 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_70);
-  wire         _GEN_83 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_72);
-  wire         _GEN_84 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_74);
-  wire         _GEN_85 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_76);
-  wire [31:0]  _GEN_86 = {15'h0, outGroup, 3'h0};
-  wire         _GEN_87 =
+  wire         _GEN_87 = _nextBatch_T >= Batch_num;
+  wire         _GEN_88 = _matrixRead_7_T & _GEN_86;
+  wire         _GEN_89 = _GEN_11 | _GEN_15 | _GEN_19;
+  wire         _GEN_90 = _GEN_89 | ~_GEN_88 | _GEN_87;
+  wire         _GEN_91 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid;
+  wire         _GEN_92 =
+    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_89;
+  wire         _GEN_93 = _GEN_92 | ~_matrixRead_7_T | _GEN_86 | ~(|_anySourceCanRead_T);
+  wire         _GEN_94 = (&issueOwner) & ~(|issueSource);
+  wire         _GEN_95 = issueSlot[49] & _GEN_94;
+  wire         _GEN_96 = (&issueOwner) & issueSource == 3'h1;
+  wire         _GEN_97 = issueSlot[49] & _GEN_96;
+  wire         _GEN_98 = (&issueOwner) & issueSource == 3'h2;
+  wire         _GEN_99 = issueSlot[49] & _GEN_98;
+  wire         _GEN_100 = (&issueOwner) & issueSource == 3'h3;
+  wire         _GEN_101 = issueSlot[49] & _GEN_100;
+  wire         _GEN_102 = (&issueOwner) & issueSource == 3'h4;
+  wire         _GEN_103 = issueSlot[49] & _GEN_102;
+  wire         _GEN_104 = (&issueOwner) & issueSource == 3'h5;
+  wire         _GEN_105 = issueSlot[49] & _GEN_104;
+  wire         _GEN_106 = (&issueOwner) & issueSource == 3'h6;
+  wire         _GEN_107 = issueSlot[49] & _GEN_106;
+  wire         _GEN_108 = (&issueOwner) & (&issueSource);
+  wire         _GEN_109 = issueSlot[49] & _GEN_108;
+  wire         _GEN_110 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_94);
+  wire         _GEN_111 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_96);
+  wire         _GEN_112 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_98);
+  wire         _GEN_113 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_100);
+  wire         _GEN_114 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_102);
+  wire         _GEN_115 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_104);
+  wire         _GEN_116 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_106);
+  wire         _GEN_117 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_108);
+  wire [31:0]  _GEN_118 = {15'h0, outGroup, 3'h0};
+  wire         _GEN_119 =
     _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15
     | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26;
-  wire [16:0]  _GEN_88 = {outGroup, 3'h0};
-  wire [31:0]  _GEN_89 = {15'h0, _GEN_88 + 17'h1};
-  wire [31:0]  _GEN_90 = {15'h0, _GEN_88 + 17'h2};
-  wire [31:0]  _GEN_91 = {15'h0, _GEN_88 + 17'h3};
-  wire [31:0]  _GEN_92 = {15'h0, _GEN_88 + 17'h4};
-  wire [31:0]  _GEN_93 = {15'h0, _GEN_88 + 17'h5};
-  wire [31:0]  _GEN_94 = {15'h0, _GEN_88 + 17'h6};
-  wire [31:0]  _GEN_95 = {15'h0, _GEN_88 + 17'h7};
-  wire         _GEN_96 = _GEN & activeCoreReady;
-  wire [40:0]  _xPacketLimit_T_8 = _GEN_41 - {_nextBatch_T, 9'h0};
+  wire [16:0]  _GEN_120 = {outGroup, 3'h0};
+  wire [31:0]  _GEN_121 = {15'h0, _GEN_120 + 17'h1};
+  wire [31:0]  _GEN_122 = {15'h0, _GEN_120 + 17'h2};
+  wire [31:0]  _GEN_123 = {15'h0, _GEN_120 + 17'h3};
+  wire [31:0]  _GEN_124 = {15'h0, _GEN_120 + 17'h4};
+  wire [31:0]  _GEN_125 = {15'h0, _GEN_120 + 17'h5};
+  wire [31:0]  _GEN_126 = {15'h0, _GEN_120 + 17'h6};
+  wire [31:0]  _GEN_127 = {15'h0, _GEN_120 + 17'h7};
+  wire         _GEN_128 = _GEN & activeCoreReady;
+  wire [40:0]  _xPacketLimit_T_8 = _GEN_73 - {_nextBatch_T, 9'h0};
   wire [31:0]  _remaining_T_1 = PE_Param_in_s_dout[31:0] - casez_tmp;
   always @(posedge ap_clk) begin
     if (~ap_rst_n) begin
@@ -1863,9 +2087,18 @@ module CuperSpmvOnly_ChiselDataPath8(
       counterMatrixBeats_7 <= 64'h0;
       counterValidSlots <= 64'h0;
       counterPaddingSlots <= 64'h0;
+      counterNonzeroXReads <= 64'h0;
+      counterNonzeroProducts <= 64'h0;
+      counterAccumAccepts <= 64'h0;
       counterRawStall <= 64'h0;
       counterOutputWrites <= 64'h0;
+      counterNonzeroOutputWrites <= 64'h0;
       counterWriterBackpressure <= 64'h0;
+      firstNonzeroTaggedSeen <= 1'h0;
+      firstNonzeroTaggedPacket <= 32'h0;
+      firstNonzeroTaggedPair <= 32'h0;
+      firstNonzeroTaggedPing <= 32'h0;
+      firstNonzeroTaggedPong <= 32'h0;
     end
     else begin
       if (_ap_idle_T) begin
@@ -1884,7 +2117,14 @@ module CuperSpmvOnly_ChiselDataPath8(
           counterMatrixBeats_7 <= 64'h0;
           counterValidSlots <= 64'h0;
           counterPaddingSlots <= 64'h0;
+          counterNonzeroXReads <= 64'h0;
+          counterNonzeroProducts <= 64'h0;
+          firstNonzeroTaggedPacket <= 32'h0;
+          firstNonzeroTaggedPair <= 32'h0;
+          firstNonzeroTaggedPing <= 32'h0;
+          firstNonzeroTaggedPong <= 32'h0;
         end
+        firstNonzeroTaggedSeen <= ~ap_start & firstNonzeroTaggedSeen;
       end
       else begin
         if (_GEN_9) begin
@@ -1894,14 +2134,14 @@ module CuperSpmvOnly_ChiselDataPath8(
           end
         end
         else if (accumLanes_7_7_io_initValid) begin
-          if (_GEN_32)
+          if (_GEN_43)
             state <= 5'h3;
           else
             initGroup <= _initGroup_T;
         end
         else begin
           if (_GEN_10) begin
-            if (_GEN_43)
+            if (_GEN_75)
               state <= 5'h4;
           end
           else if (_GEN_11) begin
@@ -1915,12 +2155,12 @@ module CuperSpmvOnly_ChiselDataPath8(
               state <= 5'h4;
           end
           else if (_GEN_19) begin
-            if (_GEN_43)
+            if (_GEN_75)
               state <= 5'h7;
           end
           else if (_matrixRead_7_T) begin
-            if (_GEN_54)
-              state <= _GEN_55 ? 5'hB : 5'h4;
+            if (_GEN_86)
+              state <= _GEN_87 ? 5'hB : 5'h4;
             else if (|_anySourceCanRead_T)
               state <= 5'h8;
           end
@@ -1939,7 +2179,7 @@ module CuperSpmvOnly_ChiselDataPath8(
               state <= (&issueOwner) ? 5'h7 : 5'h8;
           end
           else if (_GEN_26) begin
-            if (_GEN_33)
+            if (_GEN_44)
               state <= 5'hC;
           end
           else if (_accumLanes_7_7_io_outRead_T)
@@ -1957,18 +2197,18 @@ module CuperSpmvOnly_ChiselDataPath8(
                   & ~Vector_Y_Tagged_Stream_7_s_full_n))
               state <= 5'hF;
           end
-          else if (_GEN_34)
-            state <= _GEN_35 | _GEN_36 ? 5'hC : 5'h10;
-          else if (_GEN_37)
+          else if (_GEN_45)
+            state <= _GEN_46 | _GEN_47 ? 5'hC : 5'h10;
+          else if (_GEN_48)
             state <= (|_iterIdx_T) ? 5'h11 : 5'h2;
-          else if (_GEN_39)
+          else if (_GEN_50)
             state <= 5'h0;
-          if (_GEN_40 | ~_GEN_37 | (|_iterIdx_T)) begin
+          if (_GEN_69 | ~_GEN_48 | (|_iterIdx_T)) begin
           end
           else
             initGroup <= 14'h0;
         end
-        if (_GEN_9 | accumLanes_7_7_io_initValid | _GEN_40 | ~_GEN_37
+        if (_GEN_9 | accumLanes_7_7_io_initValid | _GEN_69 | ~_GEN_48
             | (|_iterIdx_T)) begin
         end
         else
@@ -1981,60 +2221,59 @@ module CuperSpmvOnly_ChiselDataPath8(
           counterXPackets <= counterXPackets + 64'h1;
         if (~_GEN_22) begin
           if (_GEN_21) begin
-            if (_GEN_63)
+            if (_GEN_95)
               counterMatrixBeats_0 <= _counterMatrixBeats_T;
-            if (_GEN_65)
+            if (_GEN_97)
               counterMatrixBeats_1 <= _counterMatrixBeats_T;
-            if (_GEN_67)
+            if (_GEN_99)
               counterMatrixBeats_2 <= _counterMatrixBeats_T;
-            if (_GEN_69)
+            if (_GEN_101)
               counterMatrixBeats_3 <= _counterMatrixBeats_T;
-            if (_GEN_71)
+            if (_GEN_103)
               counterMatrixBeats_4 <= _counterMatrixBeats_T;
-            if (_GEN_73)
+            if (_GEN_105)
               counterMatrixBeats_5 <= _counterMatrixBeats_T;
-            if (_GEN_75)
+            if (_GEN_107)
               counterMatrixBeats_6 <= _counterMatrixBeats_T;
-            if (_GEN_77)
+            if (_GEN_109)
               counterMatrixBeats_7 <= _counterMatrixBeats_T;
           end
           else begin
-            if (_GEN_78) begin
+            if (_GEN_110) begin
             end
             else
               counterMatrixBeats_0 <= _counterMatrixBeats_T_2;
-            if (_GEN_79) begin
+            if (_GEN_111) begin
             end
             else
               counterMatrixBeats_1 <= _counterMatrixBeats_T_2;
-            if (_GEN_80) begin
+            if (_GEN_112) begin
             end
             else
               counterMatrixBeats_2 <= _counterMatrixBeats_T_2;
-            if (_GEN_81) begin
+            if (_GEN_113) begin
             end
             else
               counterMatrixBeats_3 <= _counterMatrixBeats_T_2;
-            if (_GEN_82) begin
+            if (_GEN_114) begin
             end
             else
               counterMatrixBeats_4 <= _counterMatrixBeats_T_2;
-            if (_GEN_83) begin
+            if (_GEN_115) begin
             end
             else
               counterMatrixBeats_5 <= _counterMatrixBeats_T_2;
-            if (_GEN_84) begin
+            if (_GEN_116) begin
             end
             else
               counterMatrixBeats_6 <= _counterMatrixBeats_T_2;
-            if (_GEN_85) begin
+            if (_GEN_117) begin
             end
             else
               counterMatrixBeats_7 <= _counterMatrixBeats_T_2;
           end
         end
-        if (_GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
-            | _matrixRead_7_T | _GEN_21 | _GEN_25 | ~_GEN_96) begin
+        if (_GEN_32 | ~_GEN_128) begin
         end
         else
           counterValidSlots <= counterValidSlots + 64'h1;
@@ -2042,13 +2281,83 @@ module CuperSpmvOnly_ChiselDataPath8(
         end
         else
           counterPaddingSlots <= counterPaddingSlots + 64'h1;
+        if (_GEN_32 | ~(_GEN & activeCoreReady & (|issueX))) begin
+        end
+        else
+          counterNonzeroXReads <= counterNonzeroXReads + 64'h1;
+        if (_GEN_32 | ~(_GEN & activeCoreReady & (|issueX) & (|issueValue))) begin
+        end
+        else
+          counterNonzeroProducts <= counterNonzeroProducts + 64'h1;
+        if (_GEN_33) begin
+        end
+        else begin
+          firstNonzeroTaggedSeen <=
+            _taggedWrite_7_T ? _GEN_67 | _GEN_72 : _GEN_65 | _GEN_72;
+          if (_GEN_68)
+            firstNonzeroTaggedPacket <= outPacket_7;
+          else if (_GEN_65)
+            firstNonzeroTaggedPacket <= outPacket_6;
+          else if (_GEN_63)
+            firstNonzeroTaggedPacket <= outPacket_5;
+          else if (_GEN_60)
+            firstNonzeroTaggedPacket <= outPacket_4;
+          else if (_GEN_58)
+            firstNonzeroTaggedPacket <= outPacket_3;
+          else if (_GEN_55)
+            firstNonzeroTaggedPacket <= outPacket_2;
+          else if (_GEN_53)
+            firstNonzeroTaggedPacket <= outPacket_1;
+          else if (_GEN_51)
+            firstNonzeroTaggedPacket <= outPacket_0;
+        end
+        if (_GEN_28
+            | ~(_GEN_8
+                & (_taggedWrite_7_T ? _GEN_67 | _GEN_64 : _GEN_65 | _GEN_64))) begin
+        end
+        else
+          firstNonzeroTaggedPair <= {29'h0, outPair};
+        if (_GEN_33) begin
+        end
+        else if (_GEN_68) begin
+          firstNonzeroTaggedPing <= outPing_7;
+          firstNonzeroTaggedPong <= outPong_7;
+        end
+        else if (_GEN_65) begin
+          firstNonzeroTaggedPing <= outPing_6;
+          firstNonzeroTaggedPong <= outPong_6;
+        end
+        else if (_GEN_63) begin
+          firstNonzeroTaggedPing <= outPing_5;
+          firstNonzeroTaggedPong <= outPong_5;
+        end
+        else if (_GEN_60) begin
+          firstNonzeroTaggedPing <= outPing_4;
+          firstNonzeroTaggedPong <= outPong_4;
+        end
+        else if (_GEN_58) begin
+          firstNonzeroTaggedPing <= outPing_3;
+          firstNonzeroTaggedPong <= outPong_3;
+        end
+        else if (_GEN_55) begin
+          firstNonzeroTaggedPing <= outPing_2;
+          firstNonzeroTaggedPong <= outPong_2;
+        end
+        else if (_GEN_53) begin
+          firstNonzeroTaggedPing <= outPing_1;
+          firstNonzeroTaggedPong <= outPong_1;
+        end
+        else if (_GEN_51) begin
+          firstNonzeroTaggedPing <= outPing_0;
+          firstNonzeroTaggedPong <= outPong_0;
+        end
       end
       donePulse <=
         ~(_GEN_24 | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
-          | _GEN_27 | _GEN_8 | _GEN_34 | _GEN_37) & _GEN_39;
+          | _GEN_27 | _GEN_8 | _GEN_45 | _GEN_48) & _GEN_50;
       if (~_GEN_13) begin
         if (accumLanes_7_7_io_initValid) begin
-          if (_GEN_32)
+          if (_GEN_43)
             boundaryCount <= 4'h0;
         end
         else if (_GEN_10) begin
@@ -2064,21 +2373,21 @@ module CuperSpmvOnly_ChiselDataPath8(
             if (PE_Param_in_s_empty_n)
               boundaryCount <= boundaryCount + 4'h1;
           end
-          else if (_GEN_38 | ~_GEN_37 | (|_iterIdx_T)) begin
+          else if (_GEN_49 | ~_GEN_48 | (|_iterIdx_T)) begin
           end
           else
             boundaryCount <= 4'h0;
         end
       end
-      if (~_GEN_59) begin
+      if (~_GEN_91) begin
         if (_GEN_10) begin
-          if (_GEN_43) begin
+          if (_GEN_75) begin
             batchIdx <= 32'h0;
             xPacketIdx <= 10'h0;
           end
         end
         else begin
-          if (_GEN_58) begin
+          if (_GEN_90) begin
           end
           else
             batchIdx <= _nextBatch_T;
@@ -2087,14 +2396,14 @@ module CuperSpmvOnly_ChiselDataPath8(
               if (&xWriteLane)
                 xPacketIdx <= xPacketIdx + 10'h1;
             end
-            else if (_GEN_19 | ~_GEN_56 | _GEN_55) begin
+            else if (_GEN_19 | ~_GEN_88 | _GEN_87) begin
             end
             else
               xPacketIdx <= 10'h0;
           end
         end
       end
-      if (~_GEN_44) begin
+      if (~_GEN_76) begin
         if (_GEN_11) begin
           if (_GEN_12 | ~Vector_X_Stream_in_s_empty_n) begin
           end
@@ -2106,13 +2415,13 @@ module CuperSpmvOnly_ChiselDataPath8(
         else
           xWriteLane <= xWriteLane + 4'h1;
       end
-      if (_GEN_61) begin
+      if (_GEN_93) begin
       end
       else
         issueSource <= selectedSource;
-      if (~_GEN_60) begin
+      if (~_GEN_92) begin
         if (_matrixRead_7_T) begin
-          if (_GEN_54 | ~(|_anySourceCanRead_T)) begin
+          if (_GEN_86 | ~(|_anySourceCanRead_T)) begin
           end
           else begin
             issueOwner <= 3'h0;
@@ -2126,7 +2435,7 @@ module CuperSpmvOnly_ChiselDataPath8(
               issueOwner <= issueOwner + 3'h1;
             issuePrevCol <= issueSlot[63:50];
           end
-          else if (_GEN_25 | ~_GEN_96 | (&issueOwner)) begin
+          else if (_GEN_25 | ~_GEN_128 | (&issueOwner)) begin
           end
           else
             issueOwner <= issueOwner + 3'h1;
@@ -2139,64 +2448,68 @@ module CuperSpmvOnly_ChiselDataPath8(
       if (~(_ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11
             | _GEN_15 | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN)) begin
         if (_GEN_26) begin
-          if (_GEN_33) begin
+          if (_GEN_44) begin
             outGroup <= 14'h0;
             outPair <= 3'h0;
           end
         end
         else begin
-          if (_GEN_31 | ~_GEN_34 | _GEN_35 | ~_GEN_36) begin
+          if (_GEN_34 | ~_GEN_45 | _GEN_46 | ~_GEN_47) begin
           end
           else
             outGroup <= _outGroup_T;
-          if (_GEN_31 | ~_GEN_34) begin
+          if (_GEN_34 | ~_GEN_45) begin
           end
-          else if (_GEN_35)
+          else if (_GEN_46)
             outPair <= outPair + 3'h1;
-          else if (_GEN_36)
+          else if (_GEN_47)
             outPair <= 3'h0;
         end
       end
-      if (~_GEN_87) begin
+      if (~_GEN_119) begin
         outValid_0 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_86 < numOutPackets
+            ? _GEN_118 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_0_T)) & outValid_0;
         outValid_1 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_89 < numOutPackets
+            ? _GEN_121 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_1_T)) & outValid_1;
         outValid_2 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_90 < numOutPackets
+            ? _GEN_122 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_2_T)) & outValid_2;
         outValid_3 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_91 < numOutPackets
+            ? _GEN_123 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_3_T)) & outValid_3;
         outValid_4 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_92 < numOutPackets
+            ? _GEN_124 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_4_T)) & outValid_4;
         outValid_5 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_93 < numOutPackets
+            ? _GEN_125 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_5_T)) & outValid_5;
         outValid_6 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_94 < numOutPackets
+            ? _GEN_126 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_6_T)) & outValid_6;
         outValid_7 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_95 < numOutPackets
+            ? _GEN_127 < numOutPackets
             : (_GEN_27 | ~(_GEN_8 & _taggedWrite_7_T)) & outValid_7;
       end
-      if (_GEN_42) begin
+      if (_GEN_74) begin
+        counterAccumAccepts <= 64'h0;
         counterRawStall <= 64'h0;
         counterOutputWrites <= 64'h0;
+        counterNonzeroOutputWrites <= 64'h0;
         counterWriterBackpressure <= 64'h0;
       end
       else begin
+        if (|totalAccumAccepts)
+          counterAccumAccepts <= counterAccumAccepts + {57'h0, totalAccumAccepts};
         if (|{_coreLanes_7_7_io_rawStall | _accumLanes_7_7_io_rawStall,
               _coreLanes_7_6_io_rawStall | _accumLanes_7_6_io_rawStall,
               _coreLanes_7_5_io_rawStall | _accumLanes_7_5_io_rawStall,
@@ -2264,6 +2577,9 @@ module CuperSpmvOnly_ChiselDataPath8(
           counterRawStall <= counterRawStall + 64'h1;
         if (|totalOutputWrites)
           counterOutputWrites <= counterOutputWrites + {60'h0, totalOutputWrites};
+        if (|nonzeroOutputWrites)
+          counterNonzeroOutputWrites <=
+            counterNonzeroOutputWrites + {60'h0, nonzeroOutputWrites};
         if (_GEN_8
             & (outValid_0 & ~Vector_Y_Tagged_Stream_0_s_full_n | outValid_1
                & ~Vector_Y_Tagged_Stream_1_s_full_n | outValid_2
@@ -2276,14 +2592,14 @@ module CuperSpmvOnly_ChiselDataPath8(
           counterWriterBackpressure <= counterWriterBackpressure + 64'h1;
       end
     end
-    if (_GEN_42) begin
+    if (_GEN_74) begin
       numOutPackets <= {4'h0, _numOwnerGroups_T[31:4]};
       numOwnerGroups <= {7'h0, _numOwnerGroups_T_3[27:3]};
       totalVectorPackets <= {4'h0, _totalVectorPackets_T[31:4]};
     end
-    if (~_GEN_59) begin
+    if (~_GEN_91) begin
       if (_GEN_10) begin
-        if (_GEN_43) begin
+        if (_GEN_75) begin
           xPacketLimit <=
             totalVectorPackets == 32'h0
               ? 10'h0
@@ -2307,11 +2623,11 @@ module CuperSpmvOnly_ChiselDataPath8(
         if (PE_Param_in_s_empty_n & (&(boundaryCount[2:0])))
           start_7 <= PE_Param_in_s_dout[31:0];
       end
-      else if (_GEN_58) begin
+      else if (_GEN_90) begin
       end
       else begin
         xPacketLimit <=
-          {_nextBatch_T, 9'h0} >= _GEN_41
+          {_nextBatch_T, 9'h0} >= _GEN_73
             ? 10'h0
             : _xPacketLimit_T_8 > 41'h200 ? 10'h200 : _xPacketLimit_T_8[9:0];
         xPacketBase <= {_nextBatch_T[22:0], 9'h0};
@@ -2325,117 +2641,117 @@ module CuperSpmvOnly_ChiselDataPath8(
         start_7 <= end_7;
       end
     end
-    if (_GEN_44 | ~_GEN_11 | _GEN_12 | ~Vector_X_Stream_in_s_empty_n) begin
+    if (_GEN_76 | ~_GEN_11 | _GEN_12 | ~Vector_X_Stream_in_s_empty_n) begin
     end
     else
       xWriteWord <= Vector_X_Stream_in_s_dout[511:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_45)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_77)) begin
     end
     else
       end_0 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_47)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_79)) begin
     end
     else
       end_1 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_48)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_80)) begin
     end
     else
       end_2 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_49)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_81)) begin
     end
     else
       end_3 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_50)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_82)) begin
     end
     else
       end_4 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_51)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_83)) begin
     end
     else
       end_5 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_52)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_84)) begin
     end
     else
       end_6 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_46 | ~(_GEN_19 & _GEN_53)) begin
+    if (_GEN_78 | ~(_GEN_19 & _GEN_85)) begin
     end
     else
       end_7 <= PE_Param_in_s_dout[31:0];
-    if (~_GEN_46) begin
+    if (~_GEN_78) begin
       if (_GEN_19) begin
-        if (_GEN_45)
+        if (_GEN_77)
           remaining_0 <= _remaining_T_1;
-        if (_GEN_47)
+        if (_GEN_79)
           remaining_1 <= _remaining_T_1;
-        if (_GEN_48)
+        if (_GEN_80)
           remaining_2 <= _remaining_T_1;
-        if (_GEN_49)
+        if (_GEN_81)
           remaining_3 <= _remaining_T_1;
-        if (_GEN_50)
+        if (_GEN_82)
           remaining_4 <= _remaining_T_1;
-        if (_GEN_51)
+        if (_GEN_83)
           remaining_5 <= _remaining_T_1;
-        if (_GEN_52)
+        if (_GEN_84)
           remaining_6 <= _remaining_T_1;
-        if (_GEN_53)
+        if (_GEN_85)
           remaining_7 <= _remaining_T_1;
       end
       else if (~_matrixRead_7_T) begin
         if (_GEN_21) begin
-          if (_GEN_63)
+          if (_GEN_95)
             remaining_0 <= _remaining_T_3;
-          if (_GEN_65)
+          if (_GEN_97)
             remaining_1 <= _remaining_T_3;
-          if (_GEN_67)
+          if (_GEN_99)
             remaining_2 <= _remaining_T_3;
-          if (_GEN_69)
+          if (_GEN_101)
             remaining_3 <= _remaining_T_3;
-          if (_GEN_71)
+          if (_GEN_103)
             remaining_4 <= _remaining_T_3;
-          if (_GEN_73)
+          if (_GEN_105)
             remaining_5 <= _remaining_T_3;
-          if (_GEN_75)
+          if (_GEN_107)
             remaining_6 <= _remaining_T_3;
-          if (_GEN_77)
+          if (_GEN_109)
             remaining_7 <= _remaining_T_3;
         end
         else begin
-          if (_GEN_78) begin
+          if (_GEN_110) begin
           end
           else
             remaining_0 <= _remaining_T_5;
-          if (_GEN_79) begin
+          if (_GEN_111) begin
           end
           else
             remaining_1 <= _remaining_T_5;
-          if (_GEN_80) begin
+          if (_GEN_112) begin
           end
           else
             remaining_2 <= _remaining_T_5;
-          if (_GEN_81) begin
+          if (_GEN_113) begin
           end
           else
             remaining_3 <= _remaining_T_5;
-          if (_GEN_82) begin
+          if (_GEN_114) begin
           end
           else
             remaining_4 <= _remaining_T_5;
-          if (_GEN_83) begin
+          if (_GEN_115) begin
           end
           else
             remaining_5 <= _remaining_T_5;
-          if (_GEN_84) begin
+          if (_GEN_116) begin
           end
           else
             remaining_6 <= _remaining_T_5;
-          if (_GEN_85) begin
+          if (_GEN_117) begin
           end
           else
             remaining_7 <= _remaining_T_5;
         end
       end
     end
-    if (_GEN_61) begin
+    if (_GEN_93) begin
     end
     else
       issueWord <=
@@ -2608,17 +2924,17 @@ module CuperSpmvOnly_ChiselDataPath8(
         | (_selectedPong_7_T_6 ? _accumLanes_6_7_io_outPong : 32'h0)
         | ((&outPair) ? _accumLanes_7_7_io_outPong : 32'h0);
     end
-    if (_GEN_87 | ~_accumLanes_7_7_io_outRead_T) begin
+    if (_GEN_119 | ~_accumLanes_7_7_io_outRead_T) begin
     end
     else begin
-      outPacket_0 <= _GEN_86;
-      outPacket_1 <= _GEN_89;
-      outPacket_2 <= _GEN_90;
-      outPacket_3 <= _GEN_91;
-      outPacket_4 <= _GEN_92;
-      outPacket_5 <= _GEN_93;
-      outPacket_6 <= _GEN_94;
-      outPacket_7 <= _GEN_95;
+      outPacket_0 <= _GEN_118;
+      outPacket_1 <= _GEN_121;
+      outPacket_2 <= _GEN_122;
+      outPacket_3 <= _GEN_123;
+      outPacket_4 <= _GEN_124;
+      outPacket_5 <= _GEN_125;
+      outPacket_6 <= _GEN_126;
+      outPacket_7 <= _GEN_127;
     end
   end // always @(posedge)
   xMem_8192x32 xMem_ext (
@@ -3752,7 +4068,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_0_io_outPing),
     .io_outPong       (_accumLanes_0_0_io_outPong),
     .io_busy          (_accumLanes_0_0_io_busy),
-    .io_rawStall      (_accumLanes_0_0_io_rawStall)
+    .io_rawStall      (_accumLanes_0_0_io_rawStall),
+    .io_accept        (_accumLanes_0_0_io_accept)
   );
   StripAccumLane accumLanes_0_1 (
     .clock            (ap_clk),
@@ -3769,7 +4086,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_1_io_outPing),
     .io_outPong       (_accumLanes_0_1_io_outPong),
     .io_busy          (_accumLanes_0_1_io_busy),
-    .io_rawStall      (_accumLanes_0_1_io_rawStall)
+    .io_rawStall      (_accumLanes_0_1_io_rawStall),
+    .io_accept        (_accumLanes_0_1_io_accept)
   );
   StripAccumLane accumLanes_0_2 (
     .clock            (ap_clk),
@@ -3786,7 +4104,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_2_io_outPing),
     .io_outPong       (_accumLanes_0_2_io_outPong),
     .io_busy          (_accumLanes_0_2_io_busy),
-    .io_rawStall      (_accumLanes_0_2_io_rawStall)
+    .io_rawStall      (_accumLanes_0_2_io_rawStall),
+    .io_accept        (_accumLanes_0_2_io_accept)
   );
   StripAccumLane accumLanes_0_3 (
     .clock            (ap_clk),
@@ -3803,7 +4122,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_3_io_outPing),
     .io_outPong       (_accumLanes_0_3_io_outPong),
     .io_busy          (_accumLanes_0_3_io_busy),
-    .io_rawStall      (_accumLanes_0_3_io_rawStall)
+    .io_rawStall      (_accumLanes_0_3_io_rawStall),
+    .io_accept        (_accumLanes_0_3_io_accept)
   );
   StripAccumLane accumLanes_0_4 (
     .clock            (ap_clk),
@@ -3820,7 +4140,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_4_io_outPing),
     .io_outPong       (_accumLanes_0_4_io_outPong),
     .io_busy          (_accumLanes_0_4_io_busy),
-    .io_rawStall      (_accumLanes_0_4_io_rawStall)
+    .io_rawStall      (_accumLanes_0_4_io_rawStall),
+    .io_accept        (_accumLanes_0_4_io_accept)
   );
   StripAccumLane accumLanes_0_5 (
     .clock            (ap_clk),
@@ -3837,7 +4158,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_5_io_outPing),
     .io_outPong       (_accumLanes_0_5_io_outPong),
     .io_busy          (_accumLanes_0_5_io_busy),
-    .io_rawStall      (_accumLanes_0_5_io_rawStall)
+    .io_rawStall      (_accumLanes_0_5_io_rawStall),
+    .io_accept        (_accumLanes_0_5_io_accept)
   );
   StripAccumLane accumLanes_0_6 (
     .clock            (ap_clk),
@@ -3854,7 +4176,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_6_io_outPing),
     .io_outPong       (_accumLanes_0_6_io_outPong),
     .io_busy          (_accumLanes_0_6_io_busy),
-    .io_rawStall      (_accumLanes_0_6_io_rawStall)
+    .io_rawStall      (_accumLanes_0_6_io_rawStall),
+    .io_accept        (_accumLanes_0_6_io_accept)
   );
   StripAccumLane accumLanes_0_7 (
     .clock            (ap_clk),
@@ -3871,7 +4194,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_0_7_io_outPing),
     .io_outPong       (_accumLanes_0_7_io_outPong),
     .io_busy          (_accumLanes_0_7_io_busy),
-    .io_rawStall      (_accumLanes_0_7_io_rawStall)
+    .io_rawStall      (_accumLanes_0_7_io_rawStall),
+    .io_accept        (_accumLanes_0_7_io_accept)
   );
   StripAccumLane accumLanes_1_0 (
     .clock            (ap_clk),
@@ -3888,7 +4212,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_0_io_outPing),
     .io_outPong       (_accumLanes_1_0_io_outPong),
     .io_busy          (_accumLanes_1_0_io_busy),
-    .io_rawStall      (_accumLanes_1_0_io_rawStall)
+    .io_rawStall      (_accumLanes_1_0_io_rawStall),
+    .io_accept        (_accumLanes_1_0_io_accept)
   );
   StripAccumLane accumLanes_1_1 (
     .clock            (ap_clk),
@@ -3905,7 +4230,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_1_io_outPing),
     .io_outPong       (_accumLanes_1_1_io_outPong),
     .io_busy          (_accumLanes_1_1_io_busy),
-    .io_rawStall      (_accumLanes_1_1_io_rawStall)
+    .io_rawStall      (_accumLanes_1_1_io_rawStall),
+    .io_accept        (_accumLanes_1_1_io_accept)
   );
   StripAccumLane accumLanes_1_2 (
     .clock            (ap_clk),
@@ -3922,7 +4248,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_2_io_outPing),
     .io_outPong       (_accumLanes_1_2_io_outPong),
     .io_busy          (_accumLanes_1_2_io_busy),
-    .io_rawStall      (_accumLanes_1_2_io_rawStall)
+    .io_rawStall      (_accumLanes_1_2_io_rawStall),
+    .io_accept        (_accumLanes_1_2_io_accept)
   );
   StripAccumLane accumLanes_1_3 (
     .clock            (ap_clk),
@@ -3939,7 +4266,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_3_io_outPing),
     .io_outPong       (_accumLanes_1_3_io_outPong),
     .io_busy          (_accumLanes_1_3_io_busy),
-    .io_rawStall      (_accumLanes_1_3_io_rawStall)
+    .io_rawStall      (_accumLanes_1_3_io_rawStall),
+    .io_accept        (_accumLanes_1_3_io_accept)
   );
   StripAccumLane accumLanes_1_4 (
     .clock            (ap_clk),
@@ -3956,7 +4284,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_4_io_outPing),
     .io_outPong       (_accumLanes_1_4_io_outPong),
     .io_busy          (_accumLanes_1_4_io_busy),
-    .io_rawStall      (_accumLanes_1_4_io_rawStall)
+    .io_rawStall      (_accumLanes_1_4_io_rawStall),
+    .io_accept        (_accumLanes_1_4_io_accept)
   );
   StripAccumLane accumLanes_1_5 (
     .clock            (ap_clk),
@@ -3973,7 +4302,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_5_io_outPing),
     .io_outPong       (_accumLanes_1_5_io_outPong),
     .io_busy          (_accumLanes_1_5_io_busy),
-    .io_rawStall      (_accumLanes_1_5_io_rawStall)
+    .io_rawStall      (_accumLanes_1_5_io_rawStall),
+    .io_accept        (_accumLanes_1_5_io_accept)
   );
   StripAccumLane accumLanes_1_6 (
     .clock            (ap_clk),
@@ -3990,7 +4320,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_6_io_outPing),
     .io_outPong       (_accumLanes_1_6_io_outPong),
     .io_busy          (_accumLanes_1_6_io_busy),
-    .io_rawStall      (_accumLanes_1_6_io_rawStall)
+    .io_rawStall      (_accumLanes_1_6_io_rawStall),
+    .io_accept        (_accumLanes_1_6_io_accept)
   );
   StripAccumLane accumLanes_1_7 (
     .clock            (ap_clk),
@@ -4007,7 +4338,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_1_7_io_outPing),
     .io_outPong       (_accumLanes_1_7_io_outPong),
     .io_busy          (_accumLanes_1_7_io_busy),
-    .io_rawStall      (_accumLanes_1_7_io_rawStall)
+    .io_rawStall      (_accumLanes_1_7_io_rawStall),
+    .io_accept        (_accumLanes_1_7_io_accept)
   );
   StripAccumLane accumLanes_2_0 (
     .clock            (ap_clk),
@@ -4024,7 +4356,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_0_io_outPing),
     .io_outPong       (_accumLanes_2_0_io_outPong),
     .io_busy          (_accumLanes_2_0_io_busy),
-    .io_rawStall      (_accumLanes_2_0_io_rawStall)
+    .io_rawStall      (_accumLanes_2_0_io_rawStall),
+    .io_accept        (_accumLanes_2_0_io_accept)
   );
   StripAccumLane accumLanes_2_1 (
     .clock            (ap_clk),
@@ -4041,7 +4374,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_1_io_outPing),
     .io_outPong       (_accumLanes_2_1_io_outPong),
     .io_busy          (_accumLanes_2_1_io_busy),
-    .io_rawStall      (_accumLanes_2_1_io_rawStall)
+    .io_rawStall      (_accumLanes_2_1_io_rawStall),
+    .io_accept        (_accumLanes_2_1_io_accept)
   );
   StripAccumLane accumLanes_2_2 (
     .clock            (ap_clk),
@@ -4058,7 +4392,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_2_io_outPing),
     .io_outPong       (_accumLanes_2_2_io_outPong),
     .io_busy          (_accumLanes_2_2_io_busy),
-    .io_rawStall      (_accumLanes_2_2_io_rawStall)
+    .io_rawStall      (_accumLanes_2_2_io_rawStall),
+    .io_accept        (_accumLanes_2_2_io_accept)
   );
   StripAccumLane accumLanes_2_3 (
     .clock            (ap_clk),
@@ -4075,7 +4410,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_3_io_outPing),
     .io_outPong       (_accumLanes_2_3_io_outPong),
     .io_busy          (_accumLanes_2_3_io_busy),
-    .io_rawStall      (_accumLanes_2_3_io_rawStall)
+    .io_rawStall      (_accumLanes_2_3_io_rawStall),
+    .io_accept        (_accumLanes_2_3_io_accept)
   );
   StripAccumLane accumLanes_2_4 (
     .clock            (ap_clk),
@@ -4092,7 +4428,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_4_io_outPing),
     .io_outPong       (_accumLanes_2_4_io_outPong),
     .io_busy          (_accumLanes_2_4_io_busy),
-    .io_rawStall      (_accumLanes_2_4_io_rawStall)
+    .io_rawStall      (_accumLanes_2_4_io_rawStall),
+    .io_accept        (_accumLanes_2_4_io_accept)
   );
   StripAccumLane accumLanes_2_5 (
     .clock            (ap_clk),
@@ -4109,7 +4446,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_5_io_outPing),
     .io_outPong       (_accumLanes_2_5_io_outPong),
     .io_busy          (_accumLanes_2_5_io_busy),
-    .io_rawStall      (_accumLanes_2_5_io_rawStall)
+    .io_rawStall      (_accumLanes_2_5_io_rawStall),
+    .io_accept        (_accumLanes_2_5_io_accept)
   );
   StripAccumLane accumLanes_2_6 (
     .clock            (ap_clk),
@@ -4126,7 +4464,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_6_io_outPing),
     .io_outPong       (_accumLanes_2_6_io_outPong),
     .io_busy          (_accumLanes_2_6_io_busy),
-    .io_rawStall      (_accumLanes_2_6_io_rawStall)
+    .io_rawStall      (_accumLanes_2_6_io_rawStall),
+    .io_accept        (_accumLanes_2_6_io_accept)
   );
   StripAccumLane accumLanes_2_7 (
     .clock            (ap_clk),
@@ -4143,7 +4482,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_2_7_io_outPing),
     .io_outPong       (_accumLanes_2_7_io_outPong),
     .io_busy          (_accumLanes_2_7_io_busy),
-    .io_rawStall      (_accumLanes_2_7_io_rawStall)
+    .io_rawStall      (_accumLanes_2_7_io_rawStall),
+    .io_accept        (_accumLanes_2_7_io_accept)
   );
   StripAccumLane accumLanes_3_0 (
     .clock            (ap_clk),
@@ -4160,7 +4500,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_0_io_outPing),
     .io_outPong       (_accumLanes_3_0_io_outPong),
     .io_busy          (_accumLanes_3_0_io_busy),
-    .io_rawStall      (_accumLanes_3_0_io_rawStall)
+    .io_rawStall      (_accumLanes_3_0_io_rawStall),
+    .io_accept        (_accumLanes_3_0_io_accept)
   );
   StripAccumLane accumLanes_3_1 (
     .clock            (ap_clk),
@@ -4177,7 +4518,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_1_io_outPing),
     .io_outPong       (_accumLanes_3_1_io_outPong),
     .io_busy          (_accumLanes_3_1_io_busy),
-    .io_rawStall      (_accumLanes_3_1_io_rawStall)
+    .io_rawStall      (_accumLanes_3_1_io_rawStall),
+    .io_accept        (_accumLanes_3_1_io_accept)
   );
   StripAccumLane accumLanes_3_2 (
     .clock            (ap_clk),
@@ -4194,7 +4536,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_2_io_outPing),
     .io_outPong       (_accumLanes_3_2_io_outPong),
     .io_busy          (_accumLanes_3_2_io_busy),
-    .io_rawStall      (_accumLanes_3_2_io_rawStall)
+    .io_rawStall      (_accumLanes_3_2_io_rawStall),
+    .io_accept        (_accumLanes_3_2_io_accept)
   );
   StripAccumLane accumLanes_3_3 (
     .clock            (ap_clk),
@@ -4211,7 +4554,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_3_io_outPing),
     .io_outPong       (_accumLanes_3_3_io_outPong),
     .io_busy          (_accumLanes_3_3_io_busy),
-    .io_rawStall      (_accumLanes_3_3_io_rawStall)
+    .io_rawStall      (_accumLanes_3_3_io_rawStall),
+    .io_accept        (_accumLanes_3_3_io_accept)
   );
   StripAccumLane accumLanes_3_4 (
     .clock            (ap_clk),
@@ -4228,7 +4572,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_4_io_outPing),
     .io_outPong       (_accumLanes_3_4_io_outPong),
     .io_busy          (_accumLanes_3_4_io_busy),
-    .io_rawStall      (_accumLanes_3_4_io_rawStall)
+    .io_rawStall      (_accumLanes_3_4_io_rawStall),
+    .io_accept        (_accumLanes_3_4_io_accept)
   );
   StripAccumLane accumLanes_3_5 (
     .clock            (ap_clk),
@@ -4245,7 +4590,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_5_io_outPing),
     .io_outPong       (_accumLanes_3_5_io_outPong),
     .io_busy          (_accumLanes_3_5_io_busy),
-    .io_rawStall      (_accumLanes_3_5_io_rawStall)
+    .io_rawStall      (_accumLanes_3_5_io_rawStall),
+    .io_accept        (_accumLanes_3_5_io_accept)
   );
   StripAccumLane accumLanes_3_6 (
     .clock            (ap_clk),
@@ -4262,7 +4608,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_6_io_outPing),
     .io_outPong       (_accumLanes_3_6_io_outPong),
     .io_busy          (_accumLanes_3_6_io_busy),
-    .io_rawStall      (_accumLanes_3_6_io_rawStall)
+    .io_rawStall      (_accumLanes_3_6_io_rawStall),
+    .io_accept        (_accumLanes_3_6_io_accept)
   );
   StripAccumLane accumLanes_3_7 (
     .clock            (ap_clk),
@@ -4279,7 +4626,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_3_7_io_outPing),
     .io_outPong       (_accumLanes_3_7_io_outPong),
     .io_busy          (_accumLanes_3_7_io_busy),
-    .io_rawStall      (_accumLanes_3_7_io_rawStall)
+    .io_rawStall      (_accumLanes_3_7_io_rawStall),
+    .io_accept        (_accumLanes_3_7_io_accept)
   );
   StripAccumLane accumLanes_4_0 (
     .clock            (ap_clk),
@@ -4296,7 +4644,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_0_io_outPing),
     .io_outPong       (_accumLanes_4_0_io_outPong),
     .io_busy          (_accumLanes_4_0_io_busy),
-    .io_rawStall      (_accumLanes_4_0_io_rawStall)
+    .io_rawStall      (_accumLanes_4_0_io_rawStall),
+    .io_accept        (_accumLanes_4_0_io_accept)
   );
   StripAccumLane accumLanes_4_1 (
     .clock            (ap_clk),
@@ -4313,7 +4662,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_1_io_outPing),
     .io_outPong       (_accumLanes_4_1_io_outPong),
     .io_busy          (_accumLanes_4_1_io_busy),
-    .io_rawStall      (_accumLanes_4_1_io_rawStall)
+    .io_rawStall      (_accumLanes_4_1_io_rawStall),
+    .io_accept        (_accumLanes_4_1_io_accept)
   );
   StripAccumLane accumLanes_4_2 (
     .clock            (ap_clk),
@@ -4330,7 +4680,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_2_io_outPing),
     .io_outPong       (_accumLanes_4_2_io_outPong),
     .io_busy          (_accumLanes_4_2_io_busy),
-    .io_rawStall      (_accumLanes_4_2_io_rawStall)
+    .io_rawStall      (_accumLanes_4_2_io_rawStall),
+    .io_accept        (_accumLanes_4_2_io_accept)
   );
   StripAccumLane accumLanes_4_3 (
     .clock            (ap_clk),
@@ -4347,7 +4698,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_3_io_outPing),
     .io_outPong       (_accumLanes_4_3_io_outPong),
     .io_busy          (_accumLanes_4_3_io_busy),
-    .io_rawStall      (_accumLanes_4_3_io_rawStall)
+    .io_rawStall      (_accumLanes_4_3_io_rawStall),
+    .io_accept        (_accumLanes_4_3_io_accept)
   );
   StripAccumLane accumLanes_4_4 (
     .clock            (ap_clk),
@@ -4364,7 +4716,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_4_io_outPing),
     .io_outPong       (_accumLanes_4_4_io_outPong),
     .io_busy          (_accumLanes_4_4_io_busy),
-    .io_rawStall      (_accumLanes_4_4_io_rawStall)
+    .io_rawStall      (_accumLanes_4_4_io_rawStall),
+    .io_accept        (_accumLanes_4_4_io_accept)
   );
   StripAccumLane accumLanes_4_5 (
     .clock            (ap_clk),
@@ -4381,7 +4734,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_5_io_outPing),
     .io_outPong       (_accumLanes_4_5_io_outPong),
     .io_busy          (_accumLanes_4_5_io_busy),
-    .io_rawStall      (_accumLanes_4_5_io_rawStall)
+    .io_rawStall      (_accumLanes_4_5_io_rawStall),
+    .io_accept        (_accumLanes_4_5_io_accept)
   );
   StripAccumLane accumLanes_4_6 (
     .clock            (ap_clk),
@@ -4398,7 +4752,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_6_io_outPing),
     .io_outPong       (_accumLanes_4_6_io_outPong),
     .io_busy          (_accumLanes_4_6_io_busy),
-    .io_rawStall      (_accumLanes_4_6_io_rawStall)
+    .io_rawStall      (_accumLanes_4_6_io_rawStall),
+    .io_accept        (_accumLanes_4_6_io_accept)
   );
   StripAccumLane accumLanes_4_7 (
     .clock            (ap_clk),
@@ -4415,7 +4770,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_4_7_io_outPing),
     .io_outPong       (_accumLanes_4_7_io_outPong),
     .io_busy          (_accumLanes_4_7_io_busy),
-    .io_rawStall      (_accumLanes_4_7_io_rawStall)
+    .io_rawStall      (_accumLanes_4_7_io_rawStall),
+    .io_accept        (_accumLanes_4_7_io_accept)
   );
   StripAccumLane accumLanes_5_0 (
     .clock            (ap_clk),
@@ -4432,7 +4788,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_0_io_outPing),
     .io_outPong       (_accumLanes_5_0_io_outPong),
     .io_busy          (_accumLanes_5_0_io_busy),
-    .io_rawStall      (_accumLanes_5_0_io_rawStall)
+    .io_rawStall      (_accumLanes_5_0_io_rawStall),
+    .io_accept        (_accumLanes_5_0_io_accept)
   );
   StripAccumLane accumLanes_5_1 (
     .clock            (ap_clk),
@@ -4449,7 +4806,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_1_io_outPing),
     .io_outPong       (_accumLanes_5_1_io_outPong),
     .io_busy          (_accumLanes_5_1_io_busy),
-    .io_rawStall      (_accumLanes_5_1_io_rawStall)
+    .io_rawStall      (_accumLanes_5_1_io_rawStall),
+    .io_accept        (_accumLanes_5_1_io_accept)
   );
   StripAccumLane accumLanes_5_2 (
     .clock            (ap_clk),
@@ -4466,7 +4824,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_2_io_outPing),
     .io_outPong       (_accumLanes_5_2_io_outPong),
     .io_busy          (_accumLanes_5_2_io_busy),
-    .io_rawStall      (_accumLanes_5_2_io_rawStall)
+    .io_rawStall      (_accumLanes_5_2_io_rawStall),
+    .io_accept        (_accumLanes_5_2_io_accept)
   );
   StripAccumLane accumLanes_5_3 (
     .clock            (ap_clk),
@@ -4483,7 +4842,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_3_io_outPing),
     .io_outPong       (_accumLanes_5_3_io_outPong),
     .io_busy          (_accumLanes_5_3_io_busy),
-    .io_rawStall      (_accumLanes_5_3_io_rawStall)
+    .io_rawStall      (_accumLanes_5_3_io_rawStall),
+    .io_accept        (_accumLanes_5_3_io_accept)
   );
   StripAccumLane accumLanes_5_4 (
     .clock            (ap_clk),
@@ -4500,7 +4860,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_4_io_outPing),
     .io_outPong       (_accumLanes_5_4_io_outPong),
     .io_busy          (_accumLanes_5_4_io_busy),
-    .io_rawStall      (_accumLanes_5_4_io_rawStall)
+    .io_rawStall      (_accumLanes_5_4_io_rawStall),
+    .io_accept        (_accumLanes_5_4_io_accept)
   );
   StripAccumLane accumLanes_5_5 (
     .clock            (ap_clk),
@@ -4517,7 +4878,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_5_io_outPing),
     .io_outPong       (_accumLanes_5_5_io_outPong),
     .io_busy          (_accumLanes_5_5_io_busy),
-    .io_rawStall      (_accumLanes_5_5_io_rawStall)
+    .io_rawStall      (_accumLanes_5_5_io_rawStall),
+    .io_accept        (_accumLanes_5_5_io_accept)
   );
   StripAccumLane accumLanes_5_6 (
     .clock            (ap_clk),
@@ -4534,7 +4896,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_6_io_outPing),
     .io_outPong       (_accumLanes_5_6_io_outPong),
     .io_busy          (_accumLanes_5_6_io_busy),
-    .io_rawStall      (_accumLanes_5_6_io_rawStall)
+    .io_rawStall      (_accumLanes_5_6_io_rawStall),
+    .io_accept        (_accumLanes_5_6_io_accept)
   );
   StripAccumLane accumLanes_5_7 (
     .clock            (ap_clk),
@@ -4551,7 +4914,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_5_7_io_outPing),
     .io_outPong       (_accumLanes_5_7_io_outPong),
     .io_busy          (_accumLanes_5_7_io_busy),
-    .io_rawStall      (_accumLanes_5_7_io_rawStall)
+    .io_rawStall      (_accumLanes_5_7_io_rawStall),
+    .io_accept        (_accumLanes_5_7_io_accept)
   );
   StripAccumLane accumLanes_6_0 (
     .clock            (ap_clk),
@@ -4568,7 +4932,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_0_io_outPing),
     .io_outPong       (_accumLanes_6_0_io_outPong),
     .io_busy          (_accumLanes_6_0_io_busy),
-    .io_rawStall      (_accumLanes_6_0_io_rawStall)
+    .io_rawStall      (_accumLanes_6_0_io_rawStall),
+    .io_accept        (_accumLanes_6_0_io_accept)
   );
   StripAccumLane accumLanes_6_1 (
     .clock            (ap_clk),
@@ -4585,7 +4950,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_1_io_outPing),
     .io_outPong       (_accumLanes_6_1_io_outPong),
     .io_busy          (_accumLanes_6_1_io_busy),
-    .io_rawStall      (_accumLanes_6_1_io_rawStall)
+    .io_rawStall      (_accumLanes_6_1_io_rawStall),
+    .io_accept        (_accumLanes_6_1_io_accept)
   );
   StripAccumLane accumLanes_6_2 (
     .clock            (ap_clk),
@@ -4602,7 +4968,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_2_io_outPing),
     .io_outPong       (_accumLanes_6_2_io_outPong),
     .io_busy          (_accumLanes_6_2_io_busy),
-    .io_rawStall      (_accumLanes_6_2_io_rawStall)
+    .io_rawStall      (_accumLanes_6_2_io_rawStall),
+    .io_accept        (_accumLanes_6_2_io_accept)
   );
   StripAccumLane accumLanes_6_3 (
     .clock            (ap_clk),
@@ -4619,7 +4986,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_3_io_outPing),
     .io_outPong       (_accumLanes_6_3_io_outPong),
     .io_busy          (_accumLanes_6_3_io_busy),
-    .io_rawStall      (_accumLanes_6_3_io_rawStall)
+    .io_rawStall      (_accumLanes_6_3_io_rawStall),
+    .io_accept        (_accumLanes_6_3_io_accept)
   );
   StripAccumLane accumLanes_6_4 (
     .clock            (ap_clk),
@@ -4636,7 +5004,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_4_io_outPing),
     .io_outPong       (_accumLanes_6_4_io_outPong),
     .io_busy          (_accumLanes_6_4_io_busy),
-    .io_rawStall      (_accumLanes_6_4_io_rawStall)
+    .io_rawStall      (_accumLanes_6_4_io_rawStall),
+    .io_accept        (_accumLanes_6_4_io_accept)
   );
   StripAccumLane accumLanes_6_5 (
     .clock            (ap_clk),
@@ -4653,7 +5022,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_5_io_outPing),
     .io_outPong       (_accumLanes_6_5_io_outPong),
     .io_busy          (_accumLanes_6_5_io_busy),
-    .io_rawStall      (_accumLanes_6_5_io_rawStall)
+    .io_rawStall      (_accumLanes_6_5_io_rawStall),
+    .io_accept        (_accumLanes_6_5_io_accept)
   );
   StripAccumLane accumLanes_6_6 (
     .clock            (ap_clk),
@@ -4670,7 +5040,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_6_io_outPing),
     .io_outPong       (_accumLanes_6_6_io_outPong),
     .io_busy          (_accumLanes_6_6_io_busy),
-    .io_rawStall      (_accumLanes_6_6_io_rawStall)
+    .io_rawStall      (_accumLanes_6_6_io_rawStall),
+    .io_accept        (_accumLanes_6_6_io_accept)
   );
   StripAccumLane accumLanes_6_7 (
     .clock            (ap_clk),
@@ -4687,7 +5058,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_6_7_io_outPing),
     .io_outPong       (_accumLanes_6_7_io_outPong),
     .io_busy          (_accumLanes_6_7_io_busy),
-    .io_rawStall      (_accumLanes_6_7_io_rawStall)
+    .io_rawStall      (_accumLanes_6_7_io_rawStall),
+    .io_accept        (_accumLanes_6_7_io_accept)
   );
   StripAccumLane accumLanes_7_0 (
     .clock            (ap_clk),
@@ -4704,7 +5076,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_0_io_outPing),
     .io_outPong       (_accumLanes_7_0_io_outPong),
     .io_busy          (_accumLanes_7_0_io_busy),
-    .io_rawStall      (_accumLanes_7_0_io_rawStall)
+    .io_rawStall      (_accumLanes_7_0_io_rawStall),
+    .io_accept        (_accumLanes_7_0_io_accept)
   );
   StripAccumLane accumLanes_7_1 (
     .clock            (ap_clk),
@@ -4721,7 +5094,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_1_io_outPing),
     .io_outPong       (_accumLanes_7_1_io_outPong),
     .io_busy          (_accumLanes_7_1_io_busy),
-    .io_rawStall      (_accumLanes_7_1_io_rawStall)
+    .io_rawStall      (_accumLanes_7_1_io_rawStall),
+    .io_accept        (_accumLanes_7_1_io_accept)
   );
   StripAccumLane accumLanes_7_2 (
     .clock            (ap_clk),
@@ -4738,7 +5112,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_2_io_outPing),
     .io_outPong       (_accumLanes_7_2_io_outPong),
     .io_busy          (_accumLanes_7_2_io_busy),
-    .io_rawStall      (_accumLanes_7_2_io_rawStall)
+    .io_rawStall      (_accumLanes_7_2_io_rawStall),
+    .io_accept        (_accumLanes_7_2_io_accept)
   );
   StripAccumLane accumLanes_7_3 (
     .clock            (ap_clk),
@@ -4755,7 +5130,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_3_io_outPing),
     .io_outPong       (_accumLanes_7_3_io_outPong),
     .io_busy          (_accumLanes_7_3_io_busy),
-    .io_rawStall      (_accumLanes_7_3_io_rawStall)
+    .io_rawStall      (_accumLanes_7_3_io_rawStall),
+    .io_accept        (_accumLanes_7_3_io_accept)
   );
   StripAccumLane accumLanes_7_4 (
     .clock            (ap_clk),
@@ -4772,7 +5148,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_4_io_outPing),
     .io_outPong       (_accumLanes_7_4_io_outPong),
     .io_busy          (_accumLanes_7_4_io_busy),
-    .io_rawStall      (_accumLanes_7_4_io_rawStall)
+    .io_rawStall      (_accumLanes_7_4_io_rawStall),
+    .io_accept        (_accumLanes_7_4_io_accept)
   );
   StripAccumLane accumLanes_7_5 (
     .clock            (ap_clk),
@@ -4789,7 +5166,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_5_io_outPing),
     .io_outPong       (_accumLanes_7_5_io_outPong),
     .io_busy          (_accumLanes_7_5_io_busy),
-    .io_rawStall      (_accumLanes_7_5_io_rawStall)
+    .io_rawStall      (_accumLanes_7_5_io_rawStall),
+    .io_accept        (_accumLanes_7_5_io_accept)
   );
   StripAccumLane accumLanes_7_6 (
     .clock            (ap_clk),
@@ -4806,7 +5184,8 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_6_io_outPing),
     .io_outPong       (_accumLanes_7_6_io_outPong),
     .io_busy          (_accumLanes_7_6_io_busy),
-    .io_rawStall      (_accumLanes_7_6_io_rawStall)
+    .io_rawStall      (_accumLanes_7_6_io_rawStall),
+    .io_accept        (_accumLanes_7_6_io_accept)
   );
   StripAccumLane accumLanes_7_7 (
     .clock            (ap_clk),
@@ -4823,9 +5202,23 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_outPing       (_accumLanes_7_7_io_outPing),
     .io_outPong       (_accumLanes_7_7_io_outPong),
     .io_busy          (_accumLanes_7_7_io_busy),
-    .io_rawStall      (_accumLanes_7_7_io_rawStall)
+    .io_rawStall      (_accumLanes_7_7_io_rawStall),
+    .io_accept        (_accumLanes_7_7_io_accept)
   );
   assign ap_done = donePulse;
+  assign Debug_valid_slots = counterValidSlots;
+  assign Debug_padding_slots = counterPaddingSlots;
+  assign Debug_nonzero_x_reads = counterNonzeroXReads;
+  assign Debug_nonzero_products = counterNonzeroProducts;
+  assign Debug_accum_accepts = counterAccumAccepts;
+  assign Debug_tagged_writes = counterOutputWrites;
+  assign Debug_nonzero_tagged_writes = counterNonzeroOutputWrites;
+  assign Debug_raw_stall_cycles = counterRawStall;
+  assign Debug_writer_backpressure_cycles = counterWriterBackpressure;
+  assign Debug_first_nonzero_tagged_packet = firstNonzeroTaggedPacket;
+  assign Debug_first_nonzero_tagged_pair = firstNonzeroTaggedPair;
+  assign Debug_first_nonzero_tagged_ping = firstNonzeroTaggedPing;
+  assign Debug_first_nonzero_tagged_pong = firstNonzeroTaggedPong;
   assign PE_Param_in_s_read =
     ~_ap_idle_T & (_GEN_9 | ~accumLanes_7_7_io_initValid & (_GEN_10 | ~_GEN_20 & _GEN_19))
     & PE_Param_in_s_empty_n;
@@ -4848,28 +5241,28 @@ module CuperSpmvOnly_ChiselDataPath8(
   assign Matrix_A_Stream_7_s_read =
     _matrixRead_7_T & (|_anySourceCanRead_T) & (&selectedSource);
   assign Vector_Y_Tagged_Stream_0_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_0, outPing_0, 29'h0, outPair, outPacket_0};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_0, outPing_0, 29'h0, outPair, outPacket_0};
   assign Vector_Y_Tagged_Stream_0_s_write = taggedWrite_0;
   assign Vector_Y_Tagged_Stream_1_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_1, outPing_1, 29'h0, outPair, outPacket_1};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_1, outPing_1, 29'h0, outPair, outPacket_1};
   assign Vector_Y_Tagged_Stream_1_s_write = taggedWrite_1;
   assign Vector_Y_Tagged_Stream_2_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_2, outPing_2, 29'h0, outPair, outPacket_2};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_2, outPing_2, 29'h0, outPair, outPacket_2};
   assign Vector_Y_Tagged_Stream_2_s_write = taggedWrite_2;
   assign Vector_Y_Tagged_Stream_3_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_3, outPing_3, 29'h0, outPair, outPacket_3};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_3, outPing_3, 29'h0, outPair, outPacket_3};
   assign Vector_Y_Tagged_Stream_3_s_write = taggedWrite_3;
   assign Vector_Y_Tagged_Stream_4_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_4, outPing_4, 29'h0, outPair, outPacket_4};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_4, outPing_4, 29'h0, outPair, outPacket_4};
   assign Vector_Y_Tagged_Stream_4_s_write = taggedWrite_4;
   assign Vector_Y_Tagged_Stream_5_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_5, outPing_5, 29'h0, outPair, outPacket_5};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_5, outPing_5, 29'h0, outPair, outPacket_5};
   assign Vector_Y_Tagged_Stream_5_s_write = taggedWrite_5;
   assign Vector_Y_Tagged_Stream_6_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_6, outPing_6, 29'h0, outPair, outPacket_6};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_6, outPing_6, 29'h0, outPair, outPacket_6};
   assign Vector_Y_Tagged_Stream_6_s_write = taggedWrite_6;
   assign Vector_Y_Tagged_Stream_7_s_din =
-    _GEN_29 ? 129'h0 : {1'h0, outPong_7, outPing_7, 29'h0, outPair, outPacket_7};
+    _GEN_30 ? 129'h0 : {1'h0, outPong_7, outPing_7, 29'h0, outPair, outPacket_7};
   assign Vector_Y_Tagged_Stream_7_s_write = taggedWrite_7;
 endmodule
 
@@ -5639,6 +6032,19 @@ module CuperSpmvChisel8(
   wire         _peParamQ_io_deq_valid;
   wire [32:0]  _peParamQ_io_deq_bits;
   wire         _datapath_ap_done;
+  wire [63:0]  _datapath_Debug_valid_slots;
+  wire [63:0]  _datapath_Debug_padding_slots;
+  wire [63:0]  _datapath_Debug_nonzero_x_reads;
+  wire [63:0]  _datapath_Debug_nonzero_products;
+  wire [63:0]  _datapath_Debug_accum_accepts;
+  wire [63:0]  _datapath_Debug_tagged_writes;
+  wire [63:0]  _datapath_Debug_nonzero_tagged_writes;
+  wire [63:0]  _datapath_Debug_raw_stall_cycles;
+  wire [63:0]  _datapath_Debug_writer_backpressure_cycles;
+  wire [31:0]  _datapath_Debug_first_nonzero_tagged_packet;
+  wire [31:0]  _datapath_Debug_first_nonzero_tagged_pair;
+  wire [31:0]  _datapath_Debug_first_nonzero_tagged_ping;
+  wire [31:0]  _datapath_Debug_first_nonzero_tagged_pong;
   wire         _datapath_PE_Param_in_s_read;
   wire         _datapath_Vector_X_Stream_in_s_read;
   wire         _datapath_Matrix_A_Stream_0_s_read;
@@ -5774,6 +6180,15 @@ module CuperSpmvChisel8(
   reg  [31:0]  taggedPairsRead;
   reg  [31:0]  yWritesIssued;
   reg  [31:0]  yWriteResponses;
+  reg  [31:0]  nonzeroYWrites;
+  reg          firstNonzeroYSeen;
+  reg  [31:0]  firstNonzeroYAddr;
+  reg  [31:0]  firstNonzeroYData;
+  reg          firstWriterTaggedSeen;
+  reg  [31:0]  firstWriterTaggedPacket;
+  reg  [31:0]  firstWriterTaggedPair;
+  reg  [31:0]  firstWriterTaggedPing;
+  reg  [31:0]  firstWriterTaggedPong;
   reg  [31:0]  pendingYAddr;
   reg  [31:0]  pendingYData;
   reg          nextYValid;
@@ -5876,37 +6291,37 @@ module CuperSpmvChisel8(
       6'b100111:
         casez_tmp = yWritesIssued;
       6'b101000:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_valid_slots[31:0];
       6'b101001:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_nonzero_x_reads[31:0];
       6'b101010:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_nonzero_products[31:0];
       6'b101011:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_accum_accepts[31:0];
       6'b101100:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_nonzero_tagged_writes[31:0];
       6'b101101:
-        casez_tmp = 32'h0;
+        casez_tmp = nonzeroYWrites;
       6'b101110:
-        casez_tmp = 32'h0;
+        casez_tmp = firstNonzeroYAddr;
       6'b101111:
-        casez_tmp = 32'h0;
+        casez_tmp = firstNonzeroYData;
       6'b110000:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_first_nonzero_tagged_packet;
       6'b110001:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_first_nonzero_tagged_pair;
       6'b110010:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_first_nonzero_tagged_ping;
       6'b110011:
-        casez_tmp = 32'h0;
+        casez_tmp = _datapath_Debug_first_nonzero_tagged_pong;
       6'b110100:
-        casez_tmp = 32'h0;
+        casez_tmp = firstWriterTaggedPacket;
       6'b110101:
-        casez_tmp = 32'h0;
+        casez_tmp = firstWriterTaggedPair;
       6'b110110:
-        casez_tmp = 32'h0;
+        casez_tmp = firstWriterTaggedPing;
       6'b110111:
-        casez_tmp = 32'h0;
+        casez_tmp = firstWriterTaggedPong;
       6'b111000:
         casez_tmp = 32'h0;
       6'b111001:
@@ -6023,35 +6438,39 @@ module CuperSpmvChisel8(
       6'b101110:
         casez_tmp_0 = {32'h0, yWritesIssued};
       6'b101111:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_valid_slots;
       6'b110000:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_padding_slots;
       6'b110001:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_nonzero_x_reads;
       6'b110010:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_nonzero_products;
       6'b110011:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_accum_accepts;
       6'b110100:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_tagged_writes;
       6'b110101:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_nonzero_tagged_writes;
       6'b110110:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 =
+          {_datapath_Debug_first_nonzero_tagged_pair,
+           _datapath_Debug_first_nonzero_tagged_packet};
       6'b110111:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 =
+          {_datapath_Debug_first_nonzero_tagged_pong,
+           _datapath_Debug_first_nonzero_tagged_ping};
       6'b111000:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = {firstNonzeroYData, firstNonzeroYAddr};
       6'b111001:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = {32'h0, nonzeroYWrites};
       6'b111010:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_raw_stall_cycles;
       6'b111011:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = _datapath_Debug_writer_backpressure_cycles;
       6'b111100:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = {firstWriterTaggedPair, firstWriterTaggedPacket};
       6'b111101:
-        casez_tmp_0 = 64'h0;
+        casez_tmp_0 = {firstWriterTaggedPong, firstWriterTaggedPing};
       6'b111110:
         casez_tmp_0 = 64'h0;
       default:
@@ -6358,17 +6777,22 @@ module CuperSpmvChisel8(
     _GEN_28 | ~(_GEN_30 & _matrixQ_7_io_enq_valid_T & (|m_axi_Matrix_data_7_RRESP));
   wire [31:0]  _matrixBeatIndex_7_T = matrixBeatIndex_7 + 32'h1;
   wire         _GEN_130 = _selectedTaggedRead_T_1 & _GEN_32;
-  wire         _GEN_131 = _GEN_37 | ~_GEN_38;
-  wire [31:0]  _GEN_132 =
+  wire         _GEN_131 =
+    _selectedTaggedRead_T_1 & _GEN_31 & selectedTaggedValid
+    & (|{selectedTaggedBits[95:64], selectedTaggedBits[127:96]}) & ~firstWriterTaggedSeen;
+  wire         _GEN_132 =
+    _GEN_34 & m_axi_Y_out_WREADY & (|pendingYData) & ~firstNonzeroYSeen;
+  wire         _GEN_133 = _GEN_37 | ~_GEN_38;
+  wire [31:0]  _GEN_134 =
     {32{~_GEN_37}}
     & {21'h0, (&writerState) & m_axi_Y_out_BVALID & (|m_axi_Y_out_BRESP), 10'h0}
     | bErrorMask;
-  wire         _GEN_133 = ~(|state) & startPending;
-  wire         _GEN_134 = _GEN_42 & m_axi_SpElement_list_ptr_RVALID;
-  wire         _GEN_135 = _GEN_55 & m_axi_Metrics_BVALID & (&metricIndex);
-  wire         _GEN_136 = _GEN_40 | ~_GEN_134;
-  wire         _GEN_137 = ~awValid & s_axi_control_AWVALID;
-  wire         _GEN_138 = ~wValid & s_axi_control_WVALID;
+  wire         _GEN_135 = ~(|state) & startPending;
+  wire         _GEN_136 = _GEN_42 & m_axi_SpElement_list_ptr_RVALID;
+  wire         _GEN_137 = _GEN_55 & m_axi_Metrics_BVALID & (&metricIndex);
+  wire         _GEN_138 = _GEN_40 | ~_GEN_136;
+  wire         _GEN_139 = ~awValid & s_axi_control_AWVALID;
+  wire         _GEN_140 = ~wValid & s_axi_control_WVALID;
   always @(posedge ap_clk) begin
     if (~ap_rst_n) begin
       argPtr_0 <= 64'h0;
@@ -6470,6 +6894,15 @@ module CuperSpmvChisel8(
       taggedPairsRead <= 32'h0;
       yWritesIssued <= 32'h0;
       yWriteResponses <= 32'h0;
+      nonzeroYWrites <= 32'h0;
+      firstNonzeroYSeen <= 1'h0;
+      firstNonzeroYAddr <= 32'h0;
+      firstNonzeroYData <= 32'h0;
+      firstWriterTaggedSeen <= 1'h0;
+      firstWriterTaggedPacket <= 32'h0;
+      firstWriterTaggedPair <= 32'h0;
+      firstWriterTaggedPing <= 32'h0;
+      firstWriterTaggedPong <= 32'h0;
       pendingYAddr <= 32'h0;
       pendingYData <= 32'h0;
       nextYValid <= 1'h0;
@@ -6617,14 +7050,14 @@ module CuperSpmvChisel8(
         iterationNum <= wData;
       startPending <=
         (|state)
-          ? (_GEN_57 | ~_GEN_135 ? _GEN_63 : autoRestart | _GEN_62 | startPending)
+          ? (_GEN_57 | ~_GEN_137 ? _GEN_63 : autoRestart | _GEN_62 | startPending)
           : ~startPending & _GEN_63;
       if (commitWrite & _GEN_61)
         autoRestart <= wData[7];
-      doneSticky <= (|state) ? ~_GEN_57 & _GEN_135 | _GEN_96 : ~startPending & _GEN_96;
-      datapathStart <= ~_GEN_43 & _GEN_134 & (&lenIndex);
-      awValid <= ~commitWrite & (_GEN_137 | awValid);
-      wValid <= ~commitWrite & (_GEN_138 | wValid);
+      doneSticky <= (|state) ? ~_GEN_57 & _GEN_137 | _GEN_96 : ~startPending & _GEN_96;
+      datapathStart <= ~_GEN_43 & _GEN_136 & (&lenIndex);
+      awValid <= ~commitWrite & (_GEN_139 | awValid);
+      wValid <= ~commitWrite & (_GEN_140 | wValid);
       bValid <= ~(bValid & s_axi_control_BREADY) & (commitWrite | bValid);
       if (|state) begin
         if (_GEN_40) begin
@@ -6666,10 +7099,10 @@ module CuperSpmvChisel8(
           end
           else if (_GEN_60)
             state <= (&metricIndex) ? 4'h0 : 4'h7;
-          if (_GEN_134 | ~_GEN_100)
+          if (_GEN_136 | ~_GEN_100)
             lastPtr <= m_axi_SpElement_list_ptr_RDATA;
         end
-        if (_GEN_40 | ~_GEN_134 | (&lenIndex)) begin
+        if (_GEN_40 | ~_GEN_136 | (&lenIndex)) begin
         end
         else
           lenIndex <= lenIndex + 3'h1;
@@ -6684,7 +7117,7 @@ module CuperSpmvChisel8(
             statusIndex <= statusIndex + 6'h1;
         end
         if (_GEN_50) begin
-          if (_GEN_131) begin
+          if (_GEN_133) begin
           end
           else
             lastBresp <= m_axi_Y_out_BRESP;
@@ -6694,7 +7127,7 @@ module CuperSpmvChisel8(
             metricIndex <= 6'h0;
           if (m_axi_Status_BVALID)
             lastBresp <= m_axi_Status_BRESP;
-          else if (_GEN_131) begin
+          else if (_GEN_133) begin
           end
           else
             lastBresp <= m_axi_Y_out_BRESP;
@@ -6705,7 +7138,7 @@ module CuperSpmvChisel8(
           else
             metricIndex <= metricIndex + 6'h1;
           if (_GEN_56 | ~_GEN_60) begin
-            if (_GEN_131) begin
+            if (_GEN_133) begin
             end
             else
               lastBresp <= m_axi_Y_out_BRESP;
@@ -6713,7 +7146,7 @@ module CuperSpmvChisel8(
           else
             lastBresp <= m_axi_Metrics_BRESP;
         end
-        if (_GEN_136) begin
+        if (_GEN_138) begin
           if (_GEN_100) begin
           end
           else
@@ -6809,7 +7242,7 @@ module CuperSpmvChisel8(
         end
         else
           firstPtr <= m_axi_SpElement_list_ptr_RDATA;
-        if (_GEN_136) begin
+        if (_GEN_138) begin
           if (_GEN_128) begin
             if (_GEN_125) begin
               if (_GEN_122) begin
@@ -7104,7 +7537,7 @@ module CuperSpmvChisel8(
         end
         else
           lastPtr <= m_axi_SpElement_list_ptr_RDATA;
-        if (_GEN_131) begin
+        if (_GEN_133) begin
         end
         else
           lastBresp <= m_axi_Y_out_BRESP;
@@ -7282,7 +7715,7 @@ module CuperSpmvChisel8(
           matrixBeatIndex_7 <= _matrixBeatIndex_7_T;
         writerState <= casez_tmp_4;
       end
-      if (_GEN_133) begin
+      if (_GEN_135) begin
         xPacketsRead <= 32'h0;
         matrixBeatsRead_0 <= 32'h0;
         matrixBeatsRead_1 <= 32'h0;
@@ -7316,6 +7749,13 @@ module CuperSpmvChisel8(
         taggedPairsRead <= 32'h0;
         yWritesIssued <= 32'h0;
         yWriteResponses <= 32'h0;
+        nonzeroYWrites <= 32'h0;
+        firstNonzeroYAddr <= 32'h0;
+        firstNonzeroYData <= 32'h0;
+        firstWriterTaggedPacket <= 32'h0;
+        firstWriterTaggedPair <= 32'h0;
+        firstWriterTaggedPing <= 32'h0;
+        firstWriterTaggedPong <= 32'h0;
       end
       else begin
         if (_GEN_104) begin
@@ -7447,33 +7887,51 @@ module CuperSpmvChisel8(
         end
         else
           yWritesIssued <= yWritesIssued + 32'h1;
-        if (_GEN_131) begin
+        if (_GEN_133) begin
         end
         else
           yWriteResponses <= yWriteResponses + 32'h1;
+        if (_GEN_35 | ~(_GEN_34 & m_axi_Y_out_WREADY & (|pendingYData))) begin
+        end
+        else
+          nonzeroYWrites <= nonzeroYWrites + 32'h1;
+        if (_GEN_35 | ~_GEN_132) begin
+        end
+        else begin
+          firstNonzeroYAddr <= pendingYAddr;
+          firstNonzeroYData <= pendingYData;
+        end
+        if (_GEN_131) begin
+          firstWriterTaggedPacket <= selectedTaggedBits[31:0];
+          firstWriterTaggedPair <= selectedTaggedBits[63:32];
+          firstWriterTaggedPing <= selectedTaggedBits[95:64];
+          firstWriterTaggedPong <= selectedTaggedBits[127:96];
+        end
       end
       bErrorMask <=
         (|state)
           ? (_GEN_50
-               ? _GEN_132
+               ? _GEN_134
                : _GEN_48
                    ? (m_axi_Status_BVALID & (|m_axi_Status_BRESP)
                         ? bErrorMask | 32'h800
-                        : _GEN_132)
+                        : _GEN_134)
                    : _GEN_56 | ~(_GEN_55 & m_axi_Metrics_BVALID & (|m_axi_Metrics_BRESP))
-                       ? _GEN_132
+                       ? _GEN_134
                        : bErrorMask | 32'h1000)
-          : startPending ? 32'h0 : _GEN_132;
+          : startPending ? 32'h0 : _GEN_134;
+      firstNonzeroYSeen <= ~_GEN_135 & (~_GEN_35 & _GEN_132 | firstNonzeroYSeen);
+      firstWriterTaggedSeen <= ~_GEN_135 & (_GEN_131 | firstWriterTaggedSeen);
       pendingYAddr <= casez_tmp_2;
       pendingYData <= casez_tmp_3;
       nextYValid <=
-        ~_GEN_133
+        ~_GEN_135
         & (_selectedTaggedRead_T_1 ? _GEN_32 | nextYValid : _GEN_39 & nextYValid);
       if (_GEN_130) begin
         nextYAddr <= _base_T_2 + 32'h1;
         nextYData <= selectedTaggedBits[127:96];
       end
-      datapathDoneSeen <= ~_GEN_133 & (_datapath_ap_done | datapathDoneSeen);
+      datapathDoneSeen <= ~_GEN_135 & (_datapath_ap_done | datapathDoneSeen);
       rValid <= ~_GEN_95 & (_GEN_94 | rValid);
       if (_GEN_94) begin
         rData <=
@@ -7545,9 +8003,9 @@ module CuperSpmvChisel8(
         rIsCtrl <= _rIsCtrl_T;
       end
     end
-    if (_GEN_137)
+    if (_GEN_139)
       awAddr <= s_axi_control_AWADDR;
-    if (_GEN_138) begin
+    if (_GEN_140) begin
       wData <= s_axi_control_WDATA;
       wStrb <= s_axi_control_WSTRB;
     end
@@ -7561,6 +8019,19 @@ module CuperSpmvChisel8(
     .Batch_num                         (batchNum),
     .Matrix_len                        (matrixLen),
     .Column_num                        (columnNum),
+    .Debug_valid_slots                 (_datapath_Debug_valid_slots),
+    .Debug_padding_slots               (_datapath_Debug_padding_slots),
+    .Debug_nonzero_x_reads             (_datapath_Debug_nonzero_x_reads),
+    .Debug_nonzero_products            (_datapath_Debug_nonzero_products),
+    .Debug_accum_accepts               (_datapath_Debug_accum_accepts),
+    .Debug_tagged_writes               (_datapath_Debug_tagged_writes),
+    .Debug_nonzero_tagged_writes       (_datapath_Debug_nonzero_tagged_writes),
+    .Debug_raw_stall_cycles            (_datapath_Debug_raw_stall_cycles),
+    .Debug_writer_backpressure_cycles  (_datapath_Debug_writer_backpressure_cycles),
+    .Debug_first_nonzero_tagged_packet (_datapath_Debug_first_nonzero_tagged_packet),
+    .Debug_first_nonzero_tagged_pair   (_datapath_Debug_first_nonzero_tagged_pair),
+    .Debug_first_nonzero_tagged_ping   (_datapath_Debug_first_nonzero_tagged_ping),
+    .Debug_first_nonzero_tagged_pong   (_datapath_Debug_first_nonzero_tagged_pong),
     .PE_Param_in_s_dout                (_peParamQ_io_deq_bits),
     .PE_Param_in_s_empty_n             (_peParamQ_io_deq_valid),
     .PE_Param_in_s_read                (_datapath_PE_Param_in_s_read),

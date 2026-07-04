@@ -32,6 +32,20 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
   val Matrix_len = IO(Input(UInt(32.W))).suggestName("Matrix_len")
   val Column_num = IO(Input(UInt(32.W))).suggestName("Column_num")
 
+  val Debug_valid_slots = IO(Output(UInt(64.W))).suggestName("Debug_valid_slots")
+  val Debug_padding_slots = IO(Output(UInt(64.W))).suggestName("Debug_padding_slots")
+  val Debug_nonzero_x_reads = IO(Output(UInt(64.W))).suggestName("Debug_nonzero_x_reads")
+  val Debug_nonzero_products = IO(Output(UInt(64.W))).suggestName("Debug_nonzero_products")
+  val Debug_accum_accepts = IO(Output(UInt(64.W))).suggestName("Debug_accum_accepts")
+  val Debug_tagged_writes = IO(Output(UInt(64.W))).suggestName("Debug_tagged_writes")
+  val Debug_nonzero_tagged_writes = IO(Output(UInt(64.W))).suggestName("Debug_nonzero_tagged_writes")
+  val Debug_raw_stall_cycles = IO(Output(UInt(64.W))).suggestName("Debug_raw_stall_cycles")
+  val Debug_writer_backpressure_cycles = IO(Output(UInt(64.W))).suggestName("Debug_writer_backpressure_cycles")
+  val Debug_first_nonzero_tagged_packet = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_packet")
+  val Debug_first_nonzero_tagged_pair = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_pair")
+  val Debug_first_nonzero_tagged_ping = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_ping")
+  val Debug_first_nonzero_tagged_pong = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_pong")
+
   // PE_Param_in 流格式沿用 strip-padding 路径：前 4 个 header 丢弃，然后每个 batch
   // 读取 8 个 start 和 8 个 end，得到各 HBM channel 本 batch 的 matrix beat 范围。
   val PE_Param_in_s_dout = IO(Input(UInt(33.W))).suggestName("PE_Param_in_s_dout")
@@ -160,16 +174,43 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val counterMatrixBeats = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(64.W))))
     val counterValidSlots = RegInit(0.U(64.W))
     val counterPaddingSlots = RegInit(0.U(64.W))
+    val counterNonzeroXReads = RegInit(0.U(64.W))
+    val counterNonzeroProducts = RegInit(0.U(64.W))
+    val counterAccumAccepts = RegInit(0.U(64.W))
     val counterRawStall = RegInit(0.U(64.W))
     val counterOutputWrites = RegInit(0.U(64.W))
+    val counterNonzeroOutputWrites = RegInit(0.U(64.W))
     val counterWriterBackpressure = RegInit(0.U(64.W))
+    val firstNonzeroTaggedSeen = RegInit(false.B)
+    val firstNonzeroTaggedPacket = RegInit(0.U(32.W))
+    val firstNonzeroTaggedPair = RegInit(0.U(32.W))
+    val firstNonzeroTaggedPing = RegInit(0.U(32.W))
+    val firstNonzeroTaggedPong = RegInit(0.U(32.W))
     dontTouch(counterXPackets)
     dontTouch(counterMatrixBeats)
     dontTouch(counterValidSlots)
     dontTouch(counterPaddingSlots)
+    dontTouch(counterNonzeroXReads)
+    dontTouch(counterNonzeroProducts)
+    dontTouch(counterAccumAccepts)
     dontTouch(counterRawStall)
     dontTouch(counterOutputWrites)
+    dontTouch(counterNonzeroOutputWrites)
     dontTouch(counterWriterBackpressure)
+
+    Debug_valid_slots := counterValidSlots
+    Debug_padding_slots := counterPaddingSlots
+    Debug_nonzero_x_reads := counterNonzeroXReads
+    Debug_nonzero_products := counterNonzeroProducts
+    Debug_accum_accepts := counterAccumAccepts
+    Debug_tagged_writes := counterOutputWrites
+    Debug_nonzero_tagged_writes := counterNonzeroOutputWrites
+    Debug_raw_stall_cycles := counterRawStall
+    Debug_writer_backpressure_cycles := counterWriterBackpressure
+    Debug_first_nonzero_tagged_packet := firstNonzeroTaggedPacket
+    Debug_first_nonzero_tagged_pair := firstNonzeroTaggedPair
+    Debug_first_nonzero_tagged_ping := firstNonzeroTaggedPing
+    Debug_first_nonzero_tagged_pong := firstNonzeroTaggedPong
 
     // 行/列数换算：
     // - Vector X 每包 16 个 float32
@@ -219,6 +260,7 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     // 每个 lane 先给默认空输入；后面的 slot 解码逻辑只覆盖本周期实际发射的 lane。
     val laneRawStall = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
     val laneAccept = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
+    val laneAccumAccept = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
     val laneBusy = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
     for (source <- 0 until hbmChannels) {
       for (owner <- 0 until hbmChannels) {
@@ -241,6 +283,7 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
 
         laneRawStall(source)(owner) := core.io.rawStall || accum.io.rawStall
         laneAccept(source)(owner) := core.io.accept
+        laneAccumAccept(source)(owner) := accum.io.accept
         laneBusy(source)(owner) := core.io.busy || accum.io.busy
       }
     }
@@ -286,7 +329,11 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val anyRemaining = remaining.map(_ =/= 0.U).reduce(_ || _)
     val anyLaneBusy = laneBusy.asUInt.orR
     val anyRawStall = laneRawStall.asUInt.orR
+    val totalAccumAccepts = PopCount(laneAccumAccept.asUInt)
     val totalOutputWrites = PopCount(taggedWrite.asUInt)
+    val nonzeroOutputWrites = PopCount((0 until hbmChannels).map { owner =>
+      taggedWrite(owner) && (outPing(owner).orR || outPong(owner).orR)
+    })
     val anyOutputBlocked =
       outValid.zip(yFullN).map { case (valid, ready) => valid && !ready }.reduce(_ || _)
 
@@ -311,6 +358,12 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     when(totalOutputWrites =/= 0.U) {
       counterOutputWrites := counterOutputWrites + totalOutputWrites
     }
+    when(nonzeroOutputWrites =/= 0.U) {
+      counterNonzeroOutputWrites := counterNonzeroOutputWrites + nonzeroOutputWrites
+    }
+    when(totalAccumAccepts =/= 0.U) {
+      counterAccumAccepts := counterAccumAccepts + totalAccumAccepts
+    }
     when(state === outputEmit && anyOutputBlocked) {
       counterWriterBackpressure := counterWriterBackpressure + 1.U
     }
@@ -329,9 +382,18 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
           counterMatrixBeats := VecInit(Seq.fill(hbmChannels)(0.U(64.W)))
           counterValidSlots := 0.U
           counterPaddingSlots := 0.U
+          counterNonzeroXReads := 0.U
+          counterNonzeroProducts := 0.U
+          counterAccumAccepts := 0.U
           counterRawStall := 0.U
           counterOutputWrites := 0.U
+          counterNonzeroOutputWrites := 0.U
           counterWriterBackpressure := 0.U
+          firstNonzeroTaggedSeen := false.B
+          firstNonzeroTaggedPacket := 0.U
+          firstNonzeroTaggedPair := 0.U
+          firstNonzeroTaggedPing := 0.U
+          firstNonzeroTaggedPong := 0.U
           state := readHeader
         }
       }
@@ -475,6 +537,12 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       is(issueSlotSend) {
         when(activeCoreReady) {
           counterValidSlots := counterValidSlots + 1.U
+          when(issueX.orR) {
+            counterNonzeroXReads := counterNonzeroXReads + 1.U
+          }
+          when(issueX.orR && issueValue.orR) {
+            counterNonzeroProducts := counterNonzeroProducts + 1.U
+          }
           when(issueOwner === 7.U) {
             remaining(issueSource) := remaining(issueSource) - 1.U
             counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
@@ -521,6 +589,13 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
           taggedDin(owner) := payload
           taggedWrite(owner) := outValid(owner) && yFullN(owner)
           when(outValid(owner) && yFullN(owner)) {
+            when((outPing(owner).orR || outPong(owner).orR) && !firstNonzeroTaggedSeen) {
+              firstNonzeroTaggedSeen := true.B
+              firstNonzeroTaggedPacket := outPacket(owner)
+              firstNonzeroTaggedPair := outPair
+              firstNonzeroTaggedPing := outPing(owner)
+              firstNonzeroTaggedPong := outPong(owner)
+            }
             outValid(owner) := false.B
           }
         }

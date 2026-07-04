@@ -343,6 +343,15 @@ class CuperSpmvChisel8 extends RawModule {
     val taggedPairsRead = RegInit(0.U(32.W))
     val yWritesIssued = RegInit(0.U(32.W))
     val yWriteResponses = RegInit(0.U(32.W))
+    val nonzeroYWrites = RegInit(0.U(32.W))
+    val firstNonzeroYSeen = RegInit(false.B)
+    val firstNonzeroYAddr = RegInit(0.U(32.W))
+    val firstNonzeroYData = RegInit(0.U(32.W))
+    val firstWriterTaggedSeen = RegInit(false.B)
+    val firstWriterTaggedPacket = RegInit(0.U(32.W))
+    val firstWriterTaggedPair = RegInit(0.U(32.W))
+    val firstWriterTaggedPing = RegInit(0.U(32.W))
+    val firstWriterTaggedPong = RegInit(0.U(32.W))
     val pendingYAddr = RegInit(0.U(32.W))
     val pendingYData = RegInit(0.U(32.W))
     val nextYValid = RegInit(false.B)
@@ -472,6 +481,22 @@ class CuperSpmvChisel8 extends RawModule {
       is(37.U) { statusValue := Cat(0.U(31.W), writerDone) }
       is(38.U) { statusValue := Cat(0.U(29.W), ptrLoaderDone, xLoaderDone, allMatrixLoadersDone) }
       is(39.U) { statusValue := yWritesIssued }
+      is(40.U) { statusValue := datapath.Debug_valid_slots(31, 0) }
+      is(41.U) { statusValue := datapath.Debug_nonzero_x_reads(31, 0) }
+      is(42.U) { statusValue := datapath.Debug_nonzero_products(31, 0) }
+      is(43.U) { statusValue := datapath.Debug_accum_accepts(31, 0) }
+      is(44.U) { statusValue := datapath.Debug_nonzero_tagged_writes(31, 0) }
+      is(45.U) { statusValue := nonzeroYWrites }
+      is(46.U) { statusValue := firstNonzeroYAddr }
+      is(47.U) { statusValue := firstNonzeroYData }
+      is(48.U) { statusValue := datapath.Debug_first_nonzero_tagged_packet }
+      is(49.U) { statusValue := datapath.Debug_first_nonzero_tagged_pair }
+      is(50.U) { statusValue := datapath.Debug_first_nonzero_tagged_ping }
+      is(51.U) { statusValue := datapath.Debug_first_nonzero_tagged_pong }
+      is(52.U) { statusValue := firstWriterTaggedPacket }
+      is(53.U) { statusValue := firstWriterTaggedPair }
+      is(54.U) { statusValue := firstWriterTaggedPing }
+      is(55.U) { statusValue := firstWriterTaggedPong }
     }
 
     val metricValue = Wire(UInt(64.W))
@@ -524,6 +549,21 @@ class CuperSpmvChisel8 extends RawModule {
       is(44.U) { metricValue := Cat(scalarWritesExpected, yWriteResponses) }
       is(45.U) { metricValue := Cat(0.U(61.W), datapathDoneSeen, writerDone, xLoaderDone) }
       is(46.U) { metricValue := Cat(0.U(32.W), yWritesIssued) }
+      is(47.U) { metricValue := datapath.Debug_valid_slots }
+      is(48.U) { metricValue := datapath.Debug_padding_slots }
+      is(49.U) { metricValue := datapath.Debug_nonzero_x_reads }
+      is(50.U) { metricValue := datapath.Debug_nonzero_products }
+      is(51.U) { metricValue := datapath.Debug_accum_accepts }
+      is(52.U) { metricValue := datapath.Debug_tagged_writes }
+      is(53.U) { metricValue := datapath.Debug_nonzero_tagged_writes }
+      is(54.U) { metricValue := Cat(datapath.Debug_first_nonzero_tagged_pair, datapath.Debug_first_nonzero_tagged_packet) }
+      is(55.U) { metricValue := Cat(datapath.Debug_first_nonzero_tagged_pong, datapath.Debug_first_nonzero_tagged_ping) }
+      is(56.U) { metricValue := Cat(firstNonzeroYData, firstNonzeroYAddr) }
+      is(57.U) { metricValue := Cat(0.U(32.W), nonzeroYWrites) }
+      is(58.U) { metricValue := datapath.Debug_raw_stall_cycles }
+      is(59.U) { metricValue := datapath.Debug_writer_backpressure_cycles }
+      is(60.U) { metricValue := Cat(firstWriterTaggedPair, firstWriterTaggedPacket) }
+      is(61.U) { metricValue := Cat(firstWriterTaggedPong, firstWriterTaggedPing) }
     }
 
     // Ptr stream loader: first four internal headers, then boundary-major
@@ -678,6 +718,14 @@ class CuperSpmvChisel8 extends RawModule {
             nextYAddr := base + 1.U
             nextYData := selectedTaggedBits(127, 96)
             nextYValid := true.B
+            when((selectedTaggedBits(95, 64).orR || selectedTaggedBits(127, 96).orR) &&
+                !firstWriterTaggedSeen) {
+              firstWriterTaggedSeen := true.B
+              firstWriterTaggedPacket := packet
+              firstWriterTaggedPair := pair
+              firstWriterTaggedPing := selectedTaggedBits(95, 64)
+              firstWriterTaggedPong := selectedTaggedBits(127, 96)
+            }
             taggedPairsRead := taggedPairsRead + 1.U
             writerCursor := writerCursor + 1.U
             writerState := writerAddr
@@ -702,6 +750,14 @@ class CuperSpmvChisel8 extends RawModule {
         m_axi_Y_out.WLAST := true.B
         when(m_axi_Y_out.WREADY) {
           yWritesIssued := yWritesIssued + 1.U
+          when(pendingYData.orR) {
+            nonzeroYWrites := nonzeroYWrites + 1.U
+            when(!firstNonzeroYSeen) {
+              firstNonzeroYSeen := true.B
+              firstNonzeroYAddr := pendingYAddr
+              firstNonzeroYData := pendingYData
+            }
+          }
           writerState := writerResp
         }
       }
@@ -754,6 +810,15 @@ class CuperSpmvChisel8 extends RawModule {
           taggedPairsRead := 0.U
           yWritesIssued := 0.U
           yWriteResponses := 0.U
+          nonzeroYWrites := 0.U
+          firstNonzeroYSeen := false.B
+          firstNonzeroYAddr := 0.U
+          firstNonzeroYData := 0.U
+          firstWriterTaggedSeen := false.B
+          firstWriterTaggedPacket := 0.U
+          firstWriterTaggedPair := 0.U
+          firstWriterTaggedPing := 0.U
+          firstWriterTaggedPong := 0.U
           nextYValid := false.B
           datapathDoneSeen := false.B
           matrixDoneMask := 0.U
