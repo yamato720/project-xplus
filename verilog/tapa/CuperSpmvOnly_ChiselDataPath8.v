@@ -14,9 +14,12 @@ module StripCoreLane(
   output        io_out_bits_pong,
   output [31:0] io_out_bits_value,
   output        io_busy,
-                io_rawStall
+                io_rawStall,
+                io_debugOutAccept,
+  output [31:0] io_debugOutValue
 );
 
+  wire [31:0] _fmul_dout;
   reg         mulValid_0;
   reg         mulValid_1;
   reg         mulValid_2;
@@ -24,7 +27,6 @@ module StripCoreLane(
   reg         mulValid_4;
   reg         mulValid_5;
   reg         mulValid_6;
-  reg         mulValid_7;
   reg  [13:0] mulGroup_0;
   reg  [13:0] mulGroup_1;
   reg  [13:0] mulGroup_2;
@@ -32,7 +34,6 @@ module StripCoreLane(
   reg  [13:0] mulGroup_4;
   reg  [13:0] mulGroup_5;
   reg  [13:0] mulGroup_6;
-  reg  [13:0] mulGroup_7;
   reg         mulPong_0;
   reg         mulPong_1;
   reg         mulPong_2;
@@ -40,8 +41,7 @@ module StripCoreLane(
   reg         mulPong_4;
   reg         mulPong_5;
   reg         mulPong_6;
-  reg         mulPong_7;
-  wire        canAdvance = ~mulValid_7 | io_out_ready;
+  wire        canAdvance = ~mulValid_6 | io_out_ready;
   wire        mulHazard =
     mulValid_0 & mulGroup_0 == io_inGroup & mulPong_0 == io_inPong | mulValid_1
     & mulGroup_1 == io_inGroup & mulPong_1 == io_inPong | mulValid_2
@@ -49,8 +49,7 @@ module StripCoreLane(
     & mulGroup_3 == io_inGroup & mulPong_3 == io_inPong | mulValid_4
     & mulGroup_4 == io_inGroup & mulPong_4 == io_inPong | mulValid_5
     & mulGroup_5 == io_inGroup & mulPong_5 == io_inPong | mulValid_6
-    & mulGroup_6 == io_inGroup & mulPong_6 == io_inPong | mulValid_7
-    & mulGroup_7 == io_inGroup & mulPong_7 == io_inPong;
+    & mulGroup_6 == io_inGroup & mulPong_6 == io_inPong;
   wire        fire = io_inValid & canAdvance & ~mulHazard;
   wire        io_inReady_0 = canAdvance & ~mulHazard;
   always @(posedge clock) begin
@@ -62,7 +61,6 @@ module StripCoreLane(
       mulValid_4 <= 1'h0;
       mulValid_5 <= 1'h0;
       mulValid_6 <= 1'h0;
-      mulValid_7 <= 1'h0;
     end
     else if (canAdvance) begin
       mulValid_0 <= fire;
@@ -72,7 +70,6 @@ module StripCoreLane(
       mulValid_4 <= mulValid_3;
       mulValid_5 <= mulValid_4;
       mulValid_6 <= mulValid_5;
-      mulValid_7 <= mulValid_6;
     end
     if (canAdvance) begin
       mulGroup_0 <= io_inGroup;
@@ -82,7 +79,6 @@ module StripCoreLane(
       mulGroup_4 <= mulGroup_3;
       mulGroup_5 <= mulGroup_4;
       mulGroup_6 <= mulGroup_5;
-      mulGroup_7 <= mulGroup_6;
       mulPong_0 <= io_inPong;
       mulPong_1 <= mulPong_0;
       mulPong_2 <= mulPong_1;
@@ -90,12 +86,11 @@ module StripCoreLane(
       mulPong_4 <= mulPong_3;
       mulPong_5 <= mulPong_4;
       mulPong_6 <= mulPong_5;
-      mulPong_7 <= mulPong_6;
     end
   end // always @(posedge)
   CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1 #(
     .ID(1),
-    .NUM_STAGE(8),
+    .NUM_STAGE(7),
     .din0_WIDTH(32),
     .din1_WIDTH(32),
     .dout_WIDTH(32)
@@ -105,22 +100,18 @@ module StripCoreLane(
     .ce    (canAdvance),
     .din0  (fire ? io_inValue : 32'h0),
     .din1  (fire ? io_inX : 32'h0),
-    .dout  (io_out_bits_value)
+    .dout  (_fmul_dout)
   );
   assign io_inReady = io_inReady_0;
-  assign io_out_valid = mulValid_7;
-  assign io_out_bits_group = mulGroup_7;
-  assign io_out_bits_pong = mulPong_7;
+  assign io_out_valid = mulValid_6;
+  assign io_out_bits_group = mulGroup_6;
+  assign io_out_bits_pong = mulPong_6;
+  assign io_out_bits_value = _fmul_dout;
   assign io_busy =
-    |{mulValid_7,
-      mulValid_6,
-      mulValid_5,
-      mulValid_4,
-      mulValid_3,
-      mulValid_2,
-      mulValid_1,
-      mulValid_0};
+    |{mulValid_6, mulValid_5, mulValid_4, mulValid_3, mulValid_2, mulValid_1, mulValid_0};
   assign io_rawStall = io_inValid & ~io_inReady_0;
+  assign io_debugOutAccept = mulValid_6 & io_out_ready;
+  assign io_debugOutValue = _fmul_dout;
 endmodule
 
 // VCS coverage exclude_file
@@ -165,7 +156,9 @@ module StripAccumLane(
                 io_outPong,
   output        io_busy,
                 io_rawStall,
-                io_accept
+                io_accept,
+                io_debugFaddValid,
+  output [31:0] io_debugFaddValue
 );
 
   wire [31:0] _fadd_dout;
@@ -341,6 +334,8 @@ module StripAccumLane(
       addValid_0};
   assign io_rawStall = io_in_valid & hazard;
   assign io_accept = fire;
+  assign io_debugFaddValid = addValid_11;
+  assign io_debugFaddValue = _fadd_dout;
 endmodule
 
 // VCS coverage exclude_file
@@ -394,6 +389,12 @@ module CuperSpmvOnly_ChiselDataPath8(
                  Debug_first_nonzero_tagged_pair,
                  Debug_first_nonzero_tagged_ping,
                  Debug_first_nonzero_tagged_pong,
+  output [63:0]  Debug_core_nonzero_out,
+                 Debug_fadd_nonzero_out,
+                 Debug_partial_read_nonzero,
+  output [31:0]  Debug_first_nonzero_core_out,
+                 Debug_first_nonzero_fadd_out,
+                 Debug_first_nonzero_partial_read,
   input  [32:0]  PE_Param_in_s_dout,
   input          PE_Param_in_s_empty_n,
   output         PE_Param_in_s_read,
@@ -494,384 +495,512 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire         _accumLanes_7_7_io_busy;
   wire         _accumLanes_7_7_io_rawStall;
   wire         _accumLanes_7_7_io_accept;
+  wire         _accumLanes_7_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_7_io_debugFaddValue;
   wire         _accumLanes_7_6_io_in_ready;
   wire [31:0]  _accumLanes_7_6_io_outPing;
   wire [31:0]  _accumLanes_7_6_io_outPong;
   wire         _accumLanes_7_6_io_busy;
   wire         _accumLanes_7_6_io_rawStall;
   wire         _accumLanes_7_6_io_accept;
+  wire         _accumLanes_7_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_6_io_debugFaddValue;
   wire         _accumLanes_7_5_io_in_ready;
   wire [31:0]  _accumLanes_7_5_io_outPing;
   wire [31:0]  _accumLanes_7_5_io_outPong;
   wire         _accumLanes_7_5_io_busy;
   wire         _accumLanes_7_5_io_rawStall;
   wire         _accumLanes_7_5_io_accept;
+  wire         _accumLanes_7_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_5_io_debugFaddValue;
   wire         _accumLanes_7_4_io_in_ready;
   wire [31:0]  _accumLanes_7_4_io_outPing;
   wire [31:0]  _accumLanes_7_4_io_outPong;
   wire         _accumLanes_7_4_io_busy;
   wire         _accumLanes_7_4_io_rawStall;
   wire         _accumLanes_7_4_io_accept;
+  wire         _accumLanes_7_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_4_io_debugFaddValue;
   wire         _accumLanes_7_3_io_in_ready;
   wire [31:0]  _accumLanes_7_3_io_outPing;
   wire [31:0]  _accumLanes_7_3_io_outPong;
   wire         _accumLanes_7_3_io_busy;
   wire         _accumLanes_7_3_io_rawStall;
   wire         _accumLanes_7_3_io_accept;
+  wire         _accumLanes_7_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_3_io_debugFaddValue;
   wire         _accumLanes_7_2_io_in_ready;
   wire [31:0]  _accumLanes_7_2_io_outPing;
   wire [31:0]  _accumLanes_7_2_io_outPong;
   wire         _accumLanes_7_2_io_busy;
   wire         _accumLanes_7_2_io_rawStall;
   wire         _accumLanes_7_2_io_accept;
+  wire         _accumLanes_7_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_2_io_debugFaddValue;
   wire         _accumLanes_7_1_io_in_ready;
   wire [31:0]  _accumLanes_7_1_io_outPing;
   wire [31:0]  _accumLanes_7_1_io_outPong;
   wire         _accumLanes_7_1_io_busy;
   wire         _accumLanes_7_1_io_rawStall;
   wire         _accumLanes_7_1_io_accept;
+  wire         _accumLanes_7_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_1_io_debugFaddValue;
   wire         _accumLanes_7_0_io_in_ready;
   wire [31:0]  _accumLanes_7_0_io_outPing;
   wire [31:0]  _accumLanes_7_0_io_outPong;
   wire         _accumLanes_7_0_io_busy;
   wire         _accumLanes_7_0_io_rawStall;
   wire         _accumLanes_7_0_io_accept;
+  wire         _accumLanes_7_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_7_0_io_debugFaddValue;
   wire         _accumLanes_6_7_io_in_ready;
   wire [31:0]  _accumLanes_6_7_io_outPing;
   wire [31:0]  _accumLanes_6_7_io_outPong;
   wire         _accumLanes_6_7_io_busy;
   wire         _accumLanes_6_7_io_rawStall;
   wire         _accumLanes_6_7_io_accept;
+  wire         _accumLanes_6_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_7_io_debugFaddValue;
   wire         _accumLanes_6_6_io_in_ready;
   wire [31:0]  _accumLanes_6_6_io_outPing;
   wire [31:0]  _accumLanes_6_6_io_outPong;
   wire         _accumLanes_6_6_io_busy;
   wire         _accumLanes_6_6_io_rawStall;
   wire         _accumLanes_6_6_io_accept;
+  wire         _accumLanes_6_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_6_io_debugFaddValue;
   wire         _accumLanes_6_5_io_in_ready;
   wire [31:0]  _accumLanes_6_5_io_outPing;
   wire [31:0]  _accumLanes_6_5_io_outPong;
   wire         _accumLanes_6_5_io_busy;
   wire         _accumLanes_6_5_io_rawStall;
   wire         _accumLanes_6_5_io_accept;
+  wire         _accumLanes_6_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_5_io_debugFaddValue;
   wire         _accumLanes_6_4_io_in_ready;
   wire [31:0]  _accumLanes_6_4_io_outPing;
   wire [31:0]  _accumLanes_6_4_io_outPong;
   wire         _accumLanes_6_4_io_busy;
   wire         _accumLanes_6_4_io_rawStall;
   wire         _accumLanes_6_4_io_accept;
+  wire         _accumLanes_6_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_4_io_debugFaddValue;
   wire         _accumLanes_6_3_io_in_ready;
   wire [31:0]  _accumLanes_6_3_io_outPing;
   wire [31:0]  _accumLanes_6_3_io_outPong;
   wire         _accumLanes_6_3_io_busy;
   wire         _accumLanes_6_3_io_rawStall;
   wire         _accumLanes_6_3_io_accept;
+  wire         _accumLanes_6_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_3_io_debugFaddValue;
   wire         _accumLanes_6_2_io_in_ready;
   wire [31:0]  _accumLanes_6_2_io_outPing;
   wire [31:0]  _accumLanes_6_2_io_outPong;
   wire         _accumLanes_6_2_io_busy;
   wire         _accumLanes_6_2_io_rawStall;
   wire         _accumLanes_6_2_io_accept;
+  wire         _accumLanes_6_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_2_io_debugFaddValue;
   wire         _accumLanes_6_1_io_in_ready;
   wire [31:0]  _accumLanes_6_1_io_outPing;
   wire [31:0]  _accumLanes_6_1_io_outPong;
   wire         _accumLanes_6_1_io_busy;
   wire         _accumLanes_6_1_io_rawStall;
   wire         _accumLanes_6_1_io_accept;
+  wire         _accumLanes_6_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_1_io_debugFaddValue;
   wire         _accumLanes_6_0_io_in_ready;
   wire [31:0]  _accumLanes_6_0_io_outPing;
   wire [31:0]  _accumLanes_6_0_io_outPong;
   wire         _accumLanes_6_0_io_busy;
   wire         _accumLanes_6_0_io_rawStall;
   wire         _accumLanes_6_0_io_accept;
+  wire         _accumLanes_6_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_6_0_io_debugFaddValue;
   wire         _accumLanes_5_7_io_in_ready;
   wire [31:0]  _accumLanes_5_7_io_outPing;
   wire [31:0]  _accumLanes_5_7_io_outPong;
   wire         _accumLanes_5_7_io_busy;
   wire         _accumLanes_5_7_io_rawStall;
   wire         _accumLanes_5_7_io_accept;
+  wire         _accumLanes_5_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_7_io_debugFaddValue;
   wire         _accumLanes_5_6_io_in_ready;
   wire [31:0]  _accumLanes_5_6_io_outPing;
   wire [31:0]  _accumLanes_5_6_io_outPong;
   wire         _accumLanes_5_6_io_busy;
   wire         _accumLanes_5_6_io_rawStall;
   wire         _accumLanes_5_6_io_accept;
+  wire         _accumLanes_5_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_6_io_debugFaddValue;
   wire         _accumLanes_5_5_io_in_ready;
   wire [31:0]  _accumLanes_5_5_io_outPing;
   wire [31:0]  _accumLanes_5_5_io_outPong;
   wire         _accumLanes_5_5_io_busy;
   wire         _accumLanes_5_5_io_rawStall;
   wire         _accumLanes_5_5_io_accept;
+  wire         _accumLanes_5_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_5_io_debugFaddValue;
   wire         _accumLanes_5_4_io_in_ready;
   wire [31:0]  _accumLanes_5_4_io_outPing;
   wire [31:0]  _accumLanes_5_4_io_outPong;
   wire         _accumLanes_5_4_io_busy;
   wire         _accumLanes_5_4_io_rawStall;
   wire         _accumLanes_5_4_io_accept;
+  wire         _accumLanes_5_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_4_io_debugFaddValue;
   wire         _accumLanes_5_3_io_in_ready;
   wire [31:0]  _accumLanes_5_3_io_outPing;
   wire [31:0]  _accumLanes_5_3_io_outPong;
   wire         _accumLanes_5_3_io_busy;
   wire         _accumLanes_5_3_io_rawStall;
   wire         _accumLanes_5_3_io_accept;
+  wire         _accumLanes_5_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_3_io_debugFaddValue;
   wire         _accumLanes_5_2_io_in_ready;
   wire [31:0]  _accumLanes_5_2_io_outPing;
   wire [31:0]  _accumLanes_5_2_io_outPong;
   wire         _accumLanes_5_2_io_busy;
   wire         _accumLanes_5_2_io_rawStall;
   wire         _accumLanes_5_2_io_accept;
+  wire         _accumLanes_5_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_2_io_debugFaddValue;
   wire         _accumLanes_5_1_io_in_ready;
   wire [31:0]  _accumLanes_5_1_io_outPing;
   wire [31:0]  _accumLanes_5_1_io_outPong;
   wire         _accumLanes_5_1_io_busy;
   wire         _accumLanes_5_1_io_rawStall;
   wire         _accumLanes_5_1_io_accept;
+  wire         _accumLanes_5_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_1_io_debugFaddValue;
   wire         _accumLanes_5_0_io_in_ready;
   wire [31:0]  _accumLanes_5_0_io_outPing;
   wire [31:0]  _accumLanes_5_0_io_outPong;
   wire         _accumLanes_5_0_io_busy;
   wire         _accumLanes_5_0_io_rawStall;
   wire         _accumLanes_5_0_io_accept;
+  wire         _accumLanes_5_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_5_0_io_debugFaddValue;
   wire         _accumLanes_4_7_io_in_ready;
   wire [31:0]  _accumLanes_4_7_io_outPing;
   wire [31:0]  _accumLanes_4_7_io_outPong;
   wire         _accumLanes_4_7_io_busy;
   wire         _accumLanes_4_7_io_rawStall;
   wire         _accumLanes_4_7_io_accept;
+  wire         _accumLanes_4_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_7_io_debugFaddValue;
   wire         _accumLanes_4_6_io_in_ready;
   wire [31:0]  _accumLanes_4_6_io_outPing;
   wire [31:0]  _accumLanes_4_6_io_outPong;
   wire         _accumLanes_4_6_io_busy;
   wire         _accumLanes_4_6_io_rawStall;
   wire         _accumLanes_4_6_io_accept;
+  wire         _accumLanes_4_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_6_io_debugFaddValue;
   wire         _accumLanes_4_5_io_in_ready;
   wire [31:0]  _accumLanes_4_5_io_outPing;
   wire [31:0]  _accumLanes_4_5_io_outPong;
   wire         _accumLanes_4_5_io_busy;
   wire         _accumLanes_4_5_io_rawStall;
   wire         _accumLanes_4_5_io_accept;
+  wire         _accumLanes_4_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_5_io_debugFaddValue;
   wire         _accumLanes_4_4_io_in_ready;
   wire [31:0]  _accumLanes_4_4_io_outPing;
   wire [31:0]  _accumLanes_4_4_io_outPong;
   wire         _accumLanes_4_4_io_busy;
   wire         _accumLanes_4_4_io_rawStall;
   wire         _accumLanes_4_4_io_accept;
+  wire         _accumLanes_4_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_4_io_debugFaddValue;
   wire         _accumLanes_4_3_io_in_ready;
   wire [31:0]  _accumLanes_4_3_io_outPing;
   wire [31:0]  _accumLanes_4_3_io_outPong;
   wire         _accumLanes_4_3_io_busy;
   wire         _accumLanes_4_3_io_rawStall;
   wire         _accumLanes_4_3_io_accept;
+  wire         _accumLanes_4_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_3_io_debugFaddValue;
   wire         _accumLanes_4_2_io_in_ready;
   wire [31:0]  _accumLanes_4_2_io_outPing;
   wire [31:0]  _accumLanes_4_2_io_outPong;
   wire         _accumLanes_4_2_io_busy;
   wire         _accumLanes_4_2_io_rawStall;
   wire         _accumLanes_4_2_io_accept;
+  wire         _accumLanes_4_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_2_io_debugFaddValue;
   wire         _accumLanes_4_1_io_in_ready;
   wire [31:0]  _accumLanes_4_1_io_outPing;
   wire [31:0]  _accumLanes_4_1_io_outPong;
   wire         _accumLanes_4_1_io_busy;
   wire         _accumLanes_4_1_io_rawStall;
   wire         _accumLanes_4_1_io_accept;
+  wire         _accumLanes_4_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_1_io_debugFaddValue;
   wire         _accumLanes_4_0_io_in_ready;
   wire [31:0]  _accumLanes_4_0_io_outPing;
   wire [31:0]  _accumLanes_4_0_io_outPong;
   wire         _accumLanes_4_0_io_busy;
   wire         _accumLanes_4_0_io_rawStall;
   wire         _accumLanes_4_0_io_accept;
+  wire         _accumLanes_4_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_4_0_io_debugFaddValue;
   wire         _accumLanes_3_7_io_in_ready;
   wire [31:0]  _accumLanes_3_7_io_outPing;
   wire [31:0]  _accumLanes_3_7_io_outPong;
   wire         _accumLanes_3_7_io_busy;
   wire         _accumLanes_3_7_io_rawStall;
   wire         _accumLanes_3_7_io_accept;
+  wire         _accumLanes_3_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_7_io_debugFaddValue;
   wire         _accumLanes_3_6_io_in_ready;
   wire [31:0]  _accumLanes_3_6_io_outPing;
   wire [31:0]  _accumLanes_3_6_io_outPong;
   wire         _accumLanes_3_6_io_busy;
   wire         _accumLanes_3_6_io_rawStall;
   wire         _accumLanes_3_6_io_accept;
+  wire         _accumLanes_3_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_6_io_debugFaddValue;
   wire         _accumLanes_3_5_io_in_ready;
   wire [31:0]  _accumLanes_3_5_io_outPing;
   wire [31:0]  _accumLanes_3_5_io_outPong;
   wire         _accumLanes_3_5_io_busy;
   wire         _accumLanes_3_5_io_rawStall;
   wire         _accumLanes_3_5_io_accept;
+  wire         _accumLanes_3_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_5_io_debugFaddValue;
   wire         _accumLanes_3_4_io_in_ready;
   wire [31:0]  _accumLanes_3_4_io_outPing;
   wire [31:0]  _accumLanes_3_4_io_outPong;
   wire         _accumLanes_3_4_io_busy;
   wire         _accumLanes_3_4_io_rawStall;
   wire         _accumLanes_3_4_io_accept;
+  wire         _accumLanes_3_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_4_io_debugFaddValue;
   wire         _accumLanes_3_3_io_in_ready;
   wire [31:0]  _accumLanes_3_3_io_outPing;
   wire [31:0]  _accumLanes_3_3_io_outPong;
   wire         _accumLanes_3_3_io_busy;
   wire         _accumLanes_3_3_io_rawStall;
   wire         _accumLanes_3_3_io_accept;
+  wire         _accumLanes_3_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_3_io_debugFaddValue;
   wire         _accumLanes_3_2_io_in_ready;
   wire [31:0]  _accumLanes_3_2_io_outPing;
   wire [31:0]  _accumLanes_3_2_io_outPong;
   wire         _accumLanes_3_2_io_busy;
   wire         _accumLanes_3_2_io_rawStall;
   wire         _accumLanes_3_2_io_accept;
+  wire         _accumLanes_3_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_2_io_debugFaddValue;
   wire         _accumLanes_3_1_io_in_ready;
   wire [31:0]  _accumLanes_3_1_io_outPing;
   wire [31:0]  _accumLanes_3_1_io_outPong;
   wire         _accumLanes_3_1_io_busy;
   wire         _accumLanes_3_1_io_rawStall;
   wire         _accumLanes_3_1_io_accept;
+  wire         _accumLanes_3_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_1_io_debugFaddValue;
   wire         _accumLanes_3_0_io_in_ready;
   wire [31:0]  _accumLanes_3_0_io_outPing;
   wire [31:0]  _accumLanes_3_0_io_outPong;
   wire         _accumLanes_3_0_io_busy;
   wire         _accumLanes_3_0_io_rawStall;
   wire         _accumLanes_3_0_io_accept;
+  wire         _accumLanes_3_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_3_0_io_debugFaddValue;
   wire         _accumLanes_2_7_io_in_ready;
   wire [31:0]  _accumLanes_2_7_io_outPing;
   wire [31:0]  _accumLanes_2_7_io_outPong;
   wire         _accumLanes_2_7_io_busy;
   wire         _accumLanes_2_7_io_rawStall;
   wire         _accumLanes_2_7_io_accept;
+  wire         _accumLanes_2_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_7_io_debugFaddValue;
   wire         _accumLanes_2_6_io_in_ready;
   wire [31:0]  _accumLanes_2_6_io_outPing;
   wire [31:0]  _accumLanes_2_6_io_outPong;
   wire         _accumLanes_2_6_io_busy;
   wire         _accumLanes_2_6_io_rawStall;
   wire         _accumLanes_2_6_io_accept;
+  wire         _accumLanes_2_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_6_io_debugFaddValue;
   wire         _accumLanes_2_5_io_in_ready;
   wire [31:0]  _accumLanes_2_5_io_outPing;
   wire [31:0]  _accumLanes_2_5_io_outPong;
   wire         _accumLanes_2_5_io_busy;
   wire         _accumLanes_2_5_io_rawStall;
   wire         _accumLanes_2_5_io_accept;
+  wire         _accumLanes_2_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_5_io_debugFaddValue;
   wire         _accumLanes_2_4_io_in_ready;
   wire [31:0]  _accumLanes_2_4_io_outPing;
   wire [31:0]  _accumLanes_2_4_io_outPong;
   wire         _accumLanes_2_4_io_busy;
   wire         _accumLanes_2_4_io_rawStall;
   wire         _accumLanes_2_4_io_accept;
+  wire         _accumLanes_2_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_4_io_debugFaddValue;
   wire         _accumLanes_2_3_io_in_ready;
   wire [31:0]  _accumLanes_2_3_io_outPing;
   wire [31:0]  _accumLanes_2_3_io_outPong;
   wire         _accumLanes_2_3_io_busy;
   wire         _accumLanes_2_3_io_rawStall;
   wire         _accumLanes_2_3_io_accept;
+  wire         _accumLanes_2_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_3_io_debugFaddValue;
   wire         _accumLanes_2_2_io_in_ready;
   wire [31:0]  _accumLanes_2_2_io_outPing;
   wire [31:0]  _accumLanes_2_2_io_outPong;
   wire         _accumLanes_2_2_io_busy;
   wire         _accumLanes_2_2_io_rawStall;
   wire         _accumLanes_2_2_io_accept;
+  wire         _accumLanes_2_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_2_io_debugFaddValue;
   wire         _accumLanes_2_1_io_in_ready;
   wire [31:0]  _accumLanes_2_1_io_outPing;
   wire [31:0]  _accumLanes_2_1_io_outPong;
   wire         _accumLanes_2_1_io_busy;
   wire         _accumLanes_2_1_io_rawStall;
   wire         _accumLanes_2_1_io_accept;
+  wire         _accumLanes_2_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_1_io_debugFaddValue;
   wire         _accumLanes_2_0_io_in_ready;
   wire [31:0]  _accumLanes_2_0_io_outPing;
   wire [31:0]  _accumLanes_2_0_io_outPong;
   wire         _accumLanes_2_0_io_busy;
   wire         _accumLanes_2_0_io_rawStall;
   wire         _accumLanes_2_0_io_accept;
+  wire         _accumLanes_2_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_2_0_io_debugFaddValue;
   wire         _accumLanes_1_7_io_in_ready;
   wire [31:0]  _accumLanes_1_7_io_outPing;
   wire [31:0]  _accumLanes_1_7_io_outPong;
   wire         _accumLanes_1_7_io_busy;
   wire         _accumLanes_1_7_io_rawStall;
   wire         _accumLanes_1_7_io_accept;
+  wire         _accumLanes_1_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_7_io_debugFaddValue;
   wire         _accumLanes_1_6_io_in_ready;
   wire [31:0]  _accumLanes_1_6_io_outPing;
   wire [31:0]  _accumLanes_1_6_io_outPong;
   wire         _accumLanes_1_6_io_busy;
   wire         _accumLanes_1_6_io_rawStall;
   wire         _accumLanes_1_6_io_accept;
+  wire         _accumLanes_1_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_6_io_debugFaddValue;
   wire         _accumLanes_1_5_io_in_ready;
   wire [31:0]  _accumLanes_1_5_io_outPing;
   wire [31:0]  _accumLanes_1_5_io_outPong;
   wire         _accumLanes_1_5_io_busy;
   wire         _accumLanes_1_5_io_rawStall;
   wire         _accumLanes_1_5_io_accept;
+  wire         _accumLanes_1_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_5_io_debugFaddValue;
   wire         _accumLanes_1_4_io_in_ready;
   wire [31:0]  _accumLanes_1_4_io_outPing;
   wire [31:0]  _accumLanes_1_4_io_outPong;
   wire         _accumLanes_1_4_io_busy;
   wire         _accumLanes_1_4_io_rawStall;
   wire         _accumLanes_1_4_io_accept;
+  wire         _accumLanes_1_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_4_io_debugFaddValue;
   wire         _accumLanes_1_3_io_in_ready;
   wire [31:0]  _accumLanes_1_3_io_outPing;
   wire [31:0]  _accumLanes_1_3_io_outPong;
   wire         _accumLanes_1_3_io_busy;
   wire         _accumLanes_1_3_io_rawStall;
   wire         _accumLanes_1_3_io_accept;
+  wire         _accumLanes_1_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_3_io_debugFaddValue;
   wire         _accumLanes_1_2_io_in_ready;
   wire [31:0]  _accumLanes_1_2_io_outPing;
   wire [31:0]  _accumLanes_1_2_io_outPong;
   wire         _accumLanes_1_2_io_busy;
   wire         _accumLanes_1_2_io_rawStall;
   wire         _accumLanes_1_2_io_accept;
+  wire         _accumLanes_1_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_2_io_debugFaddValue;
   wire         _accumLanes_1_1_io_in_ready;
   wire [31:0]  _accumLanes_1_1_io_outPing;
   wire [31:0]  _accumLanes_1_1_io_outPong;
   wire         _accumLanes_1_1_io_busy;
   wire         _accumLanes_1_1_io_rawStall;
   wire         _accumLanes_1_1_io_accept;
+  wire         _accumLanes_1_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_1_io_debugFaddValue;
   wire         _accumLanes_1_0_io_in_ready;
   wire [31:0]  _accumLanes_1_0_io_outPing;
   wire [31:0]  _accumLanes_1_0_io_outPong;
   wire         _accumLanes_1_0_io_busy;
   wire         _accumLanes_1_0_io_rawStall;
   wire         _accumLanes_1_0_io_accept;
+  wire         _accumLanes_1_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_1_0_io_debugFaddValue;
   wire         _accumLanes_0_7_io_in_ready;
   wire [31:0]  _accumLanes_0_7_io_outPing;
   wire [31:0]  _accumLanes_0_7_io_outPong;
   wire         _accumLanes_0_7_io_busy;
   wire         _accumLanes_0_7_io_rawStall;
   wire         _accumLanes_0_7_io_accept;
+  wire         _accumLanes_0_7_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_7_io_debugFaddValue;
   wire         _accumLanes_0_6_io_in_ready;
   wire [31:0]  _accumLanes_0_6_io_outPing;
   wire [31:0]  _accumLanes_0_6_io_outPong;
   wire         _accumLanes_0_6_io_busy;
   wire         _accumLanes_0_6_io_rawStall;
   wire         _accumLanes_0_6_io_accept;
+  wire         _accumLanes_0_6_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_6_io_debugFaddValue;
   wire         _accumLanes_0_5_io_in_ready;
   wire [31:0]  _accumLanes_0_5_io_outPing;
   wire [31:0]  _accumLanes_0_5_io_outPong;
   wire         _accumLanes_0_5_io_busy;
   wire         _accumLanes_0_5_io_rawStall;
   wire         _accumLanes_0_5_io_accept;
+  wire         _accumLanes_0_5_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_5_io_debugFaddValue;
   wire         _accumLanes_0_4_io_in_ready;
   wire [31:0]  _accumLanes_0_4_io_outPing;
   wire [31:0]  _accumLanes_0_4_io_outPong;
   wire         _accumLanes_0_4_io_busy;
   wire         _accumLanes_0_4_io_rawStall;
   wire         _accumLanes_0_4_io_accept;
+  wire         _accumLanes_0_4_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_4_io_debugFaddValue;
   wire         _accumLanes_0_3_io_in_ready;
   wire [31:0]  _accumLanes_0_3_io_outPing;
   wire [31:0]  _accumLanes_0_3_io_outPong;
   wire         _accumLanes_0_3_io_busy;
   wire         _accumLanes_0_3_io_rawStall;
   wire         _accumLanes_0_3_io_accept;
+  wire         _accumLanes_0_3_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_3_io_debugFaddValue;
   wire         _accumLanes_0_2_io_in_ready;
   wire [31:0]  _accumLanes_0_2_io_outPing;
   wire [31:0]  _accumLanes_0_2_io_outPong;
   wire         _accumLanes_0_2_io_busy;
   wire         _accumLanes_0_2_io_rawStall;
   wire         _accumLanes_0_2_io_accept;
+  wire         _accumLanes_0_2_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_2_io_debugFaddValue;
   wire         _accumLanes_0_1_io_in_ready;
   wire [31:0]  _accumLanes_0_1_io_outPing;
   wire [31:0]  _accumLanes_0_1_io_outPong;
   wire         _accumLanes_0_1_io_busy;
   wire         _accumLanes_0_1_io_rawStall;
   wire         _accumLanes_0_1_io_accept;
+  wire         _accumLanes_0_1_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_1_io_debugFaddValue;
   wire         _accumLanes_0_0_io_in_ready;
   wire [31:0]  _accumLanes_0_0_io_outPing;
   wire [31:0]  _accumLanes_0_0_io_outPong;
   wire         _accumLanes_0_0_io_busy;
   wire         _accumLanes_0_0_io_rawStall;
   wire         _accumLanes_0_0_io_accept;
+  wire         _accumLanes_0_0_io_debugFaddValid;
+  wire [31:0]  _accumLanes_0_0_io_debugFaddValue;
   wire         _coreLanes_7_7_io_inReady;
   wire         _coreLanes_7_7_io_out_valid;
   wire [13:0]  _coreLanes_7_7_io_out_bits_group;
@@ -879,6 +1008,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_7_io_out_bits_value;
   wire         _coreLanes_7_7_io_busy;
   wire         _coreLanes_7_7_io_rawStall;
+  wire         _coreLanes_7_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_7_io_debugOutValue;
   wire         _coreLanes_7_6_io_inReady;
   wire         _coreLanes_7_6_io_out_valid;
   wire [13:0]  _coreLanes_7_6_io_out_bits_group;
@@ -886,6 +1017,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_6_io_out_bits_value;
   wire         _coreLanes_7_6_io_busy;
   wire         _coreLanes_7_6_io_rawStall;
+  wire         _coreLanes_7_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_6_io_debugOutValue;
   wire         _coreLanes_7_5_io_inReady;
   wire         _coreLanes_7_5_io_out_valid;
   wire [13:0]  _coreLanes_7_5_io_out_bits_group;
@@ -893,6 +1026,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_5_io_out_bits_value;
   wire         _coreLanes_7_5_io_busy;
   wire         _coreLanes_7_5_io_rawStall;
+  wire         _coreLanes_7_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_5_io_debugOutValue;
   wire         _coreLanes_7_4_io_inReady;
   wire         _coreLanes_7_4_io_out_valid;
   wire [13:0]  _coreLanes_7_4_io_out_bits_group;
@@ -900,6 +1035,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_4_io_out_bits_value;
   wire         _coreLanes_7_4_io_busy;
   wire         _coreLanes_7_4_io_rawStall;
+  wire         _coreLanes_7_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_4_io_debugOutValue;
   wire         _coreLanes_7_3_io_inReady;
   wire         _coreLanes_7_3_io_out_valid;
   wire [13:0]  _coreLanes_7_3_io_out_bits_group;
@@ -907,6 +1044,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_3_io_out_bits_value;
   wire         _coreLanes_7_3_io_busy;
   wire         _coreLanes_7_3_io_rawStall;
+  wire         _coreLanes_7_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_3_io_debugOutValue;
   wire         _coreLanes_7_2_io_inReady;
   wire         _coreLanes_7_2_io_out_valid;
   wire [13:0]  _coreLanes_7_2_io_out_bits_group;
@@ -914,6 +1053,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_2_io_out_bits_value;
   wire         _coreLanes_7_2_io_busy;
   wire         _coreLanes_7_2_io_rawStall;
+  wire         _coreLanes_7_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_2_io_debugOutValue;
   wire         _coreLanes_7_1_io_inReady;
   wire         _coreLanes_7_1_io_out_valid;
   wire [13:0]  _coreLanes_7_1_io_out_bits_group;
@@ -921,6 +1062,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_1_io_out_bits_value;
   wire         _coreLanes_7_1_io_busy;
   wire         _coreLanes_7_1_io_rawStall;
+  wire         _coreLanes_7_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_1_io_debugOutValue;
   wire         _coreLanes_7_0_io_inReady;
   wire         _coreLanes_7_0_io_out_valid;
   wire [13:0]  _coreLanes_7_0_io_out_bits_group;
@@ -928,6 +1071,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_7_0_io_out_bits_value;
   wire         _coreLanes_7_0_io_busy;
   wire         _coreLanes_7_0_io_rawStall;
+  wire         _coreLanes_7_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_7_0_io_debugOutValue;
   wire         _coreLanes_6_7_io_inReady;
   wire         _coreLanes_6_7_io_out_valid;
   wire [13:0]  _coreLanes_6_7_io_out_bits_group;
@@ -935,6 +1080,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_7_io_out_bits_value;
   wire         _coreLanes_6_7_io_busy;
   wire         _coreLanes_6_7_io_rawStall;
+  wire         _coreLanes_6_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_7_io_debugOutValue;
   wire         _coreLanes_6_6_io_inReady;
   wire         _coreLanes_6_6_io_out_valid;
   wire [13:0]  _coreLanes_6_6_io_out_bits_group;
@@ -942,6 +1089,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_6_io_out_bits_value;
   wire         _coreLanes_6_6_io_busy;
   wire         _coreLanes_6_6_io_rawStall;
+  wire         _coreLanes_6_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_6_io_debugOutValue;
   wire         _coreLanes_6_5_io_inReady;
   wire         _coreLanes_6_5_io_out_valid;
   wire [13:0]  _coreLanes_6_5_io_out_bits_group;
@@ -949,6 +1098,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_5_io_out_bits_value;
   wire         _coreLanes_6_5_io_busy;
   wire         _coreLanes_6_5_io_rawStall;
+  wire         _coreLanes_6_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_5_io_debugOutValue;
   wire         _coreLanes_6_4_io_inReady;
   wire         _coreLanes_6_4_io_out_valid;
   wire [13:0]  _coreLanes_6_4_io_out_bits_group;
@@ -956,6 +1107,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_4_io_out_bits_value;
   wire         _coreLanes_6_4_io_busy;
   wire         _coreLanes_6_4_io_rawStall;
+  wire         _coreLanes_6_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_4_io_debugOutValue;
   wire         _coreLanes_6_3_io_inReady;
   wire         _coreLanes_6_3_io_out_valid;
   wire [13:0]  _coreLanes_6_3_io_out_bits_group;
@@ -963,6 +1116,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_3_io_out_bits_value;
   wire         _coreLanes_6_3_io_busy;
   wire         _coreLanes_6_3_io_rawStall;
+  wire         _coreLanes_6_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_3_io_debugOutValue;
   wire         _coreLanes_6_2_io_inReady;
   wire         _coreLanes_6_2_io_out_valid;
   wire [13:0]  _coreLanes_6_2_io_out_bits_group;
@@ -970,6 +1125,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_2_io_out_bits_value;
   wire         _coreLanes_6_2_io_busy;
   wire         _coreLanes_6_2_io_rawStall;
+  wire         _coreLanes_6_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_2_io_debugOutValue;
   wire         _coreLanes_6_1_io_inReady;
   wire         _coreLanes_6_1_io_out_valid;
   wire [13:0]  _coreLanes_6_1_io_out_bits_group;
@@ -977,6 +1134,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_1_io_out_bits_value;
   wire         _coreLanes_6_1_io_busy;
   wire         _coreLanes_6_1_io_rawStall;
+  wire         _coreLanes_6_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_1_io_debugOutValue;
   wire         _coreLanes_6_0_io_inReady;
   wire         _coreLanes_6_0_io_out_valid;
   wire [13:0]  _coreLanes_6_0_io_out_bits_group;
@@ -984,6 +1143,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_6_0_io_out_bits_value;
   wire         _coreLanes_6_0_io_busy;
   wire         _coreLanes_6_0_io_rawStall;
+  wire         _coreLanes_6_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_6_0_io_debugOutValue;
   wire         _coreLanes_5_7_io_inReady;
   wire         _coreLanes_5_7_io_out_valid;
   wire [13:0]  _coreLanes_5_7_io_out_bits_group;
@@ -991,6 +1152,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_7_io_out_bits_value;
   wire         _coreLanes_5_7_io_busy;
   wire         _coreLanes_5_7_io_rawStall;
+  wire         _coreLanes_5_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_7_io_debugOutValue;
   wire         _coreLanes_5_6_io_inReady;
   wire         _coreLanes_5_6_io_out_valid;
   wire [13:0]  _coreLanes_5_6_io_out_bits_group;
@@ -998,6 +1161,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_6_io_out_bits_value;
   wire         _coreLanes_5_6_io_busy;
   wire         _coreLanes_5_6_io_rawStall;
+  wire         _coreLanes_5_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_6_io_debugOutValue;
   wire         _coreLanes_5_5_io_inReady;
   wire         _coreLanes_5_5_io_out_valid;
   wire [13:0]  _coreLanes_5_5_io_out_bits_group;
@@ -1005,6 +1170,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_5_io_out_bits_value;
   wire         _coreLanes_5_5_io_busy;
   wire         _coreLanes_5_5_io_rawStall;
+  wire         _coreLanes_5_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_5_io_debugOutValue;
   wire         _coreLanes_5_4_io_inReady;
   wire         _coreLanes_5_4_io_out_valid;
   wire [13:0]  _coreLanes_5_4_io_out_bits_group;
@@ -1012,6 +1179,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_4_io_out_bits_value;
   wire         _coreLanes_5_4_io_busy;
   wire         _coreLanes_5_4_io_rawStall;
+  wire         _coreLanes_5_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_4_io_debugOutValue;
   wire         _coreLanes_5_3_io_inReady;
   wire         _coreLanes_5_3_io_out_valid;
   wire [13:0]  _coreLanes_5_3_io_out_bits_group;
@@ -1019,6 +1188,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_3_io_out_bits_value;
   wire         _coreLanes_5_3_io_busy;
   wire         _coreLanes_5_3_io_rawStall;
+  wire         _coreLanes_5_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_3_io_debugOutValue;
   wire         _coreLanes_5_2_io_inReady;
   wire         _coreLanes_5_2_io_out_valid;
   wire [13:0]  _coreLanes_5_2_io_out_bits_group;
@@ -1026,6 +1197,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_2_io_out_bits_value;
   wire         _coreLanes_5_2_io_busy;
   wire         _coreLanes_5_2_io_rawStall;
+  wire         _coreLanes_5_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_2_io_debugOutValue;
   wire         _coreLanes_5_1_io_inReady;
   wire         _coreLanes_5_1_io_out_valid;
   wire [13:0]  _coreLanes_5_1_io_out_bits_group;
@@ -1033,6 +1206,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_1_io_out_bits_value;
   wire         _coreLanes_5_1_io_busy;
   wire         _coreLanes_5_1_io_rawStall;
+  wire         _coreLanes_5_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_1_io_debugOutValue;
   wire         _coreLanes_5_0_io_inReady;
   wire         _coreLanes_5_0_io_out_valid;
   wire [13:0]  _coreLanes_5_0_io_out_bits_group;
@@ -1040,6 +1215,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_5_0_io_out_bits_value;
   wire         _coreLanes_5_0_io_busy;
   wire         _coreLanes_5_0_io_rawStall;
+  wire         _coreLanes_5_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_5_0_io_debugOutValue;
   wire         _coreLanes_4_7_io_inReady;
   wire         _coreLanes_4_7_io_out_valid;
   wire [13:0]  _coreLanes_4_7_io_out_bits_group;
@@ -1047,6 +1224,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_7_io_out_bits_value;
   wire         _coreLanes_4_7_io_busy;
   wire         _coreLanes_4_7_io_rawStall;
+  wire         _coreLanes_4_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_7_io_debugOutValue;
   wire         _coreLanes_4_6_io_inReady;
   wire         _coreLanes_4_6_io_out_valid;
   wire [13:0]  _coreLanes_4_6_io_out_bits_group;
@@ -1054,6 +1233,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_6_io_out_bits_value;
   wire         _coreLanes_4_6_io_busy;
   wire         _coreLanes_4_6_io_rawStall;
+  wire         _coreLanes_4_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_6_io_debugOutValue;
   wire         _coreLanes_4_5_io_inReady;
   wire         _coreLanes_4_5_io_out_valid;
   wire [13:0]  _coreLanes_4_5_io_out_bits_group;
@@ -1061,6 +1242,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_5_io_out_bits_value;
   wire         _coreLanes_4_5_io_busy;
   wire         _coreLanes_4_5_io_rawStall;
+  wire         _coreLanes_4_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_5_io_debugOutValue;
   wire         _coreLanes_4_4_io_inReady;
   wire         _coreLanes_4_4_io_out_valid;
   wire [13:0]  _coreLanes_4_4_io_out_bits_group;
@@ -1068,6 +1251,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_4_io_out_bits_value;
   wire         _coreLanes_4_4_io_busy;
   wire         _coreLanes_4_4_io_rawStall;
+  wire         _coreLanes_4_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_4_io_debugOutValue;
   wire         _coreLanes_4_3_io_inReady;
   wire         _coreLanes_4_3_io_out_valid;
   wire [13:0]  _coreLanes_4_3_io_out_bits_group;
@@ -1075,6 +1260,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_3_io_out_bits_value;
   wire         _coreLanes_4_3_io_busy;
   wire         _coreLanes_4_3_io_rawStall;
+  wire         _coreLanes_4_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_3_io_debugOutValue;
   wire         _coreLanes_4_2_io_inReady;
   wire         _coreLanes_4_2_io_out_valid;
   wire [13:0]  _coreLanes_4_2_io_out_bits_group;
@@ -1082,6 +1269,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_2_io_out_bits_value;
   wire         _coreLanes_4_2_io_busy;
   wire         _coreLanes_4_2_io_rawStall;
+  wire         _coreLanes_4_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_2_io_debugOutValue;
   wire         _coreLanes_4_1_io_inReady;
   wire         _coreLanes_4_1_io_out_valid;
   wire [13:0]  _coreLanes_4_1_io_out_bits_group;
@@ -1089,6 +1278,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_1_io_out_bits_value;
   wire         _coreLanes_4_1_io_busy;
   wire         _coreLanes_4_1_io_rawStall;
+  wire         _coreLanes_4_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_1_io_debugOutValue;
   wire         _coreLanes_4_0_io_inReady;
   wire         _coreLanes_4_0_io_out_valid;
   wire [13:0]  _coreLanes_4_0_io_out_bits_group;
@@ -1096,6 +1287,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_4_0_io_out_bits_value;
   wire         _coreLanes_4_0_io_busy;
   wire         _coreLanes_4_0_io_rawStall;
+  wire         _coreLanes_4_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_4_0_io_debugOutValue;
   wire         _coreLanes_3_7_io_inReady;
   wire         _coreLanes_3_7_io_out_valid;
   wire [13:0]  _coreLanes_3_7_io_out_bits_group;
@@ -1103,6 +1296,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_7_io_out_bits_value;
   wire         _coreLanes_3_7_io_busy;
   wire         _coreLanes_3_7_io_rawStall;
+  wire         _coreLanes_3_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_7_io_debugOutValue;
   wire         _coreLanes_3_6_io_inReady;
   wire         _coreLanes_3_6_io_out_valid;
   wire [13:0]  _coreLanes_3_6_io_out_bits_group;
@@ -1110,6 +1305,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_6_io_out_bits_value;
   wire         _coreLanes_3_6_io_busy;
   wire         _coreLanes_3_6_io_rawStall;
+  wire         _coreLanes_3_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_6_io_debugOutValue;
   wire         _coreLanes_3_5_io_inReady;
   wire         _coreLanes_3_5_io_out_valid;
   wire [13:0]  _coreLanes_3_5_io_out_bits_group;
@@ -1117,6 +1314,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_5_io_out_bits_value;
   wire         _coreLanes_3_5_io_busy;
   wire         _coreLanes_3_5_io_rawStall;
+  wire         _coreLanes_3_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_5_io_debugOutValue;
   wire         _coreLanes_3_4_io_inReady;
   wire         _coreLanes_3_4_io_out_valid;
   wire [13:0]  _coreLanes_3_4_io_out_bits_group;
@@ -1124,6 +1323,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_4_io_out_bits_value;
   wire         _coreLanes_3_4_io_busy;
   wire         _coreLanes_3_4_io_rawStall;
+  wire         _coreLanes_3_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_4_io_debugOutValue;
   wire         _coreLanes_3_3_io_inReady;
   wire         _coreLanes_3_3_io_out_valid;
   wire [13:0]  _coreLanes_3_3_io_out_bits_group;
@@ -1131,6 +1332,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_3_io_out_bits_value;
   wire         _coreLanes_3_3_io_busy;
   wire         _coreLanes_3_3_io_rawStall;
+  wire         _coreLanes_3_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_3_io_debugOutValue;
   wire         _coreLanes_3_2_io_inReady;
   wire         _coreLanes_3_2_io_out_valid;
   wire [13:0]  _coreLanes_3_2_io_out_bits_group;
@@ -1138,6 +1341,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_2_io_out_bits_value;
   wire         _coreLanes_3_2_io_busy;
   wire         _coreLanes_3_2_io_rawStall;
+  wire         _coreLanes_3_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_2_io_debugOutValue;
   wire         _coreLanes_3_1_io_inReady;
   wire         _coreLanes_3_1_io_out_valid;
   wire [13:0]  _coreLanes_3_1_io_out_bits_group;
@@ -1145,6 +1350,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_1_io_out_bits_value;
   wire         _coreLanes_3_1_io_busy;
   wire         _coreLanes_3_1_io_rawStall;
+  wire         _coreLanes_3_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_1_io_debugOutValue;
   wire         _coreLanes_3_0_io_inReady;
   wire         _coreLanes_3_0_io_out_valid;
   wire [13:0]  _coreLanes_3_0_io_out_bits_group;
@@ -1152,6 +1359,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_3_0_io_out_bits_value;
   wire         _coreLanes_3_0_io_busy;
   wire         _coreLanes_3_0_io_rawStall;
+  wire         _coreLanes_3_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_3_0_io_debugOutValue;
   wire         _coreLanes_2_7_io_inReady;
   wire         _coreLanes_2_7_io_out_valid;
   wire [13:0]  _coreLanes_2_7_io_out_bits_group;
@@ -1159,6 +1368,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_7_io_out_bits_value;
   wire         _coreLanes_2_7_io_busy;
   wire         _coreLanes_2_7_io_rawStall;
+  wire         _coreLanes_2_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_7_io_debugOutValue;
   wire         _coreLanes_2_6_io_inReady;
   wire         _coreLanes_2_6_io_out_valid;
   wire [13:0]  _coreLanes_2_6_io_out_bits_group;
@@ -1166,6 +1377,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_6_io_out_bits_value;
   wire         _coreLanes_2_6_io_busy;
   wire         _coreLanes_2_6_io_rawStall;
+  wire         _coreLanes_2_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_6_io_debugOutValue;
   wire         _coreLanes_2_5_io_inReady;
   wire         _coreLanes_2_5_io_out_valid;
   wire [13:0]  _coreLanes_2_5_io_out_bits_group;
@@ -1173,6 +1386,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_5_io_out_bits_value;
   wire         _coreLanes_2_5_io_busy;
   wire         _coreLanes_2_5_io_rawStall;
+  wire         _coreLanes_2_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_5_io_debugOutValue;
   wire         _coreLanes_2_4_io_inReady;
   wire         _coreLanes_2_4_io_out_valid;
   wire [13:0]  _coreLanes_2_4_io_out_bits_group;
@@ -1180,6 +1395,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_4_io_out_bits_value;
   wire         _coreLanes_2_4_io_busy;
   wire         _coreLanes_2_4_io_rawStall;
+  wire         _coreLanes_2_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_4_io_debugOutValue;
   wire         _coreLanes_2_3_io_inReady;
   wire         _coreLanes_2_3_io_out_valid;
   wire [13:0]  _coreLanes_2_3_io_out_bits_group;
@@ -1187,6 +1404,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_3_io_out_bits_value;
   wire         _coreLanes_2_3_io_busy;
   wire         _coreLanes_2_3_io_rawStall;
+  wire         _coreLanes_2_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_3_io_debugOutValue;
   wire         _coreLanes_2_2_io_inReady;
   wire         _coreLanes_2_2_io_out_valid;
   wire [13:0]  _coreLanes_2_2_io_out_bits_group;
@@ -1194,6 +1413,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_2_io_out_bits_value;
   wire         _coreLanes_2_2_io_busy;
   wire         _coreLanes_2_2_io_rawStall;
+  wire         _coreLanes_2_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_2_io_debugOutValue;
   wire         _coreLanes_2_1_io_inReady;
   wire         _coreLanes_2_1_io_out_valid;
   wire [13:0]  _coreLanes_2_1_io_out_bits_group;
@@ -1201,6 +1422,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_1_io_out_bits_value;
   wire         _coreLanes_2_1_io_busy;
   wire         _coreLanes_2_1_io_rawStall;
+  wire         _coreLanes_2_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_1_io_debugOutValue;
   wire         _coreLanes_2_0_io_inReady;
   wire         _coreLanes_2_0_io_out_valid;
   wire [13:0]  _coreLanes_2_0_io_out_bits_group;
@@ -1208,6 +1431,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_2_0_io_out_bits_value;
   wire         _coreLanes_2_0_io_busy;
   wire         _coreLanes_2_0_io_rawStall;
+  wire         _coreLanes_2_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_2_0_io_debugOutValue;
   wire         _coreLanes_1_7_io_inReady;
   wire         _coreLanes_1_7_io_out_valid;
   wire [13:0]  _coreLanes_1_7_io_out_bits_group;
@@ -1215,6 +1440,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_7_io_out_bits_value;
   wire         _coreLanes_1_7_io_busy;
   wire         _coreLanes_1_7_io_rawStall;
+  wire         _coreLanes_1_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_7_io_debugOutValue;
   wire         _coreLanes_1_6_io_inReady;
   wire         _coreLanes_1_6_io_out_valid;
   wire [13:0]  _coreLanes_1_6_io_out_bits_group;
@@ -1222,6 +1449,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_6_io_out_bits_value;
   wire         _coreLanes_1_6_io_busy;
   wire         _coreLanes_1_6_io_rawStall;
+  wire         _coreLanes_1_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_6_io_debugOutValue;
   wire         _coreLanes_1_5_io_inReady;
   wire         _coreLanes_1_5_io_out_valid;
   wire [13:0]  _coreLanes_1_5_io_out_bits_group;
@@ -1229,6 +1458,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_5_io_out_bits_value;
   wire         _coreLanes_1_5_io_busy;
   wire         _coreLanes_1_5_io_rawStall;
+  wire         _coreLanes_1_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_5_io_debugOutValue;
   wire         _coreLanes_1_4_io_inReady;
   wire         _coreLanes_1_4_io_out_valid;
   wire [13:0]  _coreLanes_1_4_io_out_bits_group;
@@ -1236,6 +1467,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_4_io_out_bits_value;
   wire         _coreLanes_1_4_io_busy;
   wire         _coreLanes_1_4_io_rawStall;
+  wire         _coreLanes_1_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_4_io_debugOutValue;
   wire         _coreLanes_1_3_io_inReady;
   wire         _coreLanes_1_3_io_out_valid;
   wire [13:0]  _coreLanes_1_3_io_out_bits_group;
@@ -1243,6 +1476,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_3_io_out_bits_value;
   wire         _coreLanes_1_3_io_busy;
   wire         _coreLanes_1_3_io_rawStall;
+  wire         _coreLanes_1_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_3_io_debugOutValue;
   wire         _coreLanes_1_2_io_inReady;
   wire         _coreLanes_1_2_io_out_valid;
   wire [13:0]  _coreLanes_1_2_io_out_bits_group;
@@ -1250,6 +1485,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_2_io_out_bits_value;
   wire         _coreLanes_1_2_io_busy;
   wire         _coreLanes_1_2_io_rawStall;
+  wire         _coreLanes_1_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_2_io_debugOutValue;
   wire         _coreLanes_1_1_io_inReady;
   wire         _coreLanes_1_1_io_out_valid;
   wire [13:0]  _coreLanes_1_1_io_out_bits_group;
@@ -1257,6 +1494,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_1_io_out_bits_value;
   wire         _coreLanes_1_1_io_busy;
   wire         _coreLanes_1_1_io_rawStall;
+  wire         _coreLanes_1_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_1_io_debugOutValue;
   wire         _coreLanes_1_0_io_inReady;
   wire         _coreLanes_1_0_io_out_valid;
   wire [13:0]  _coreLanes_1_0_io_out_bits_group;
@@ -1264,6 +1503,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_1_0_io_out_bits_value;
   wire         _coreLanes_1_0_io_busy;
   wire         _coreLanes_1_0_io_rawStall;
+  wire         _coreLanes_1_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_1_0_io_debugOutValue;
   wire         _coreLanes_0_7_io_inReady;
   wire         _coreLanes_0_7_io_out_valid;
   wire [13:0]  _coreLanes_0_7_io_out_bits_group;
@@ -1271,6 +1512,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_7_io_out_bits_value;
   wire         _coreLanes_0_7_io_busy;
   wire         _coreLanes_0_7_io_rawStall;
+  wire         _coreLanes_0_7_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_7_io_debugOutValue;
   wire         _coreLanes_0_6_io_inReady;
   wire         _coreLanes_0_6_io_out_valid;
   wire [13:0]  _coreLanes_0_6_io_out_bits_group;
@@ -1278,6 +1521,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_6_io_out_bits_value;
   wire         _coreLanes_0_6_io_busy;
   wire         _coreLanes_0_6_io_rawStall;
+  wire         _coreLanes_0_6_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_6_io_debugOutValue;
   wire         _coreLanes_0_5_io_inReady;
   wire         _coreLanes_0_5_io_out_valid;
   wire [13:0]  _coreLanes_0_5_io_out_bits_group;
@@ -1285,6 +1530,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_5_io_out_bits_value;
   wire         _coreLanes_0_5_io_busy;
   wire         _coreLanes_0_5_io_rawStall;
+  wire         _coreLanes_0_5_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_5_io_debugOutValue;
   wire         _coreLanes_0_4_io_inReady;
   wire         _coreLanes_0_4_io_out_valid;
   wire [13:0]  _coreLanes_0_4_io_out_bits_group;
@@ -1292,6 +1539,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_4_io_out_bits_value;
   wire         _coreLanes_0_4_io_busy;
   wire         _coreLanes_0_4_io_rawStall;
+  wire         _coreLanes_0_4_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_4_io_debugOutValue;
   wire         _coreLanes_0_3_io_inReady;
   wire         _coreLanes_0_3_io_out_valid;
   wire [13:0]  _coreLanes_0_3_io_out_bits_group;
@@ -1299,6 +1548,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_3_io_out_bits_value;
   wire         _coreLanes_0_3_io_busy;
   wire         _coreLanes_0_3_io_rawStall;
+  wire         _coreLanes_0_3_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_3_io_debugOutValue;
   wire         _coreLanes_0_2_io_inReady;
   wire         _coreLanes_0_2_io_out_valid;
   wire [13:0]  _coreLanes_0_2_io_out_bits_group;
@@ -1306,6 +1557,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_2_io_out_bits_value;
   wire         _coreLanes_0_2_io_busy;
   wire         _coreLanes_0_2_io_rawStall;
+  wire         _coreLanes_0_2_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_2_io_debugOutValue;
   wire         _coreLanes_0_1_io_inReady;
   wire         _coreLanes_0_1_io_out_valid;
   wire [13:0]  _coreLanes_0_1_io_out_bits_group;
@@ -1313,6 +1566,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_1_io_out_bits_value;
   wire         _coreLanes_0_1_io_busy;
   wire         _coreLanes_0_1_io_rawStall;
+  wire         _coreLanes_0_1_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_1_io_debugOutValue;
   wire         _coreLanes_0_0_io_inReady;
   wire         _coreLanes_0_0_io_out_valid;
   wire [13:0]  _coreLanes_0_0_io_out_bits_group;
@@ -1320,6 +1575,8 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [31:0]  _coreLanes_0_0_io_out_bits_value;
   wire         _coreLanes_0_0_io_busy;
   wire         _coreLanes_0_0_io_rawStall;
+  wire         _coreLanes_0_0_io_debugOutAccept;
+  wire [31:0]  _coreLanes_0_0_io_debugOutValue;
   wire [31:0]  _xMem_ext_R0_data;
   reg  [4:0]   state;
   reg          donePulse;
@@ -1421,11 +1678,20 @@ module CuperSpmvOnly_ChiselDataPath8(
   reg  [63:0]  counterOutputWrites;
   reg  [63:0]  counterNonzeroOutputWrites;
   reg  [63:0]  counterWriterBackpressure;
+  reg  [63:0]  counterCoreNonzeroOut;
+  reg  [63:0]  counterFaddNonzeroOut;
+  reg  [63:0]  counterPartialReadNonzero;
   reg          firstNonzeroTaggedSeen;
   reg  [31:0]  firstNonzeroTaggedPacket;
   reg  [31:0]  firstNonzeroTaggedPair;
   reg  [31:0]  firstNonzeroTaggedPing;
   reg  [31:0]  firstNonzeroTaggedPong;
+  reg          firstNonzeroCoreOutSeen;
+  reg  [31:0]  firstNonzeroCoreOut;
+  reg          firstNonzeroFaddOutSeen;
+  reg  [31:0]  firstNonzeroFaddOut;
+  reg          firstNonzeroPartialReadSeen;
+  reg  [31:0]  firstNonzeroPartialRead;
   wire         _ap_idle_T = state == 5'h0;
   wire         accumLanes_7_7_io_initValid = state == 5'h2;
   wire         _accumLanes_7_7_io_outRead_T = state == 5'hC;
@@ -1567,19 +1833,20 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire         coreLanes_7_5_io_inValid = _GEN_7 & _activeCoreReady_T_184;
   wire         coreLanes_7_6_io_inValid = _GEN_7 & _activeCoreReady_T_187;
   wire         coreLanes_7_7_io_inValid = _GEN_7 & (&issueOwner);
-  wire         _GEN_8 = state == 5'hE;
-  wire         _GEN_9 = state == 5'h1;
-  wire         _GEN_10 = state == 5'h3;
-  wire         _GEN_11 = state == 5'h4;
-  wire         _GEN_12 = xPacketIdx >= xPacketLimit;
-  wire         _GEN_13 = _ap_idle_T | _GEN_9;
-  wire         _GEN_14 = _GEN_13 | accumLanes_7_7_io_initValid | _GEN_10;
-  wire         _GEN_15 = state == 5'h5;
-  wire         _GEN_16 = _GEN_14 | _GEN_11;
-  wire         _GEN_17 = _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11;
-  wire         _GEN_18 = _ap_idle_T | _GEN_17 | ~_GEN_15;
-  wire         _GEN_19 = state == 5'h6;
-  wire         _GEN_20 = _GEN_11 | _GEN_15;
+  wire         _GEN_8 = state == 5'hD;
+  wire         _GEN_9 = state == 5'hE;
+  wire         _GEN_10 = state == 5'h1;
+  wire         _GEN_11 = state == 5'h3;
+  wire         _GEN_12 = state == 5'h4;
+  wire         _GEN_13 = xPacketIdx >= xPacketLimit;
+  wire         _GEN_14 = _ap_idle_T | _GEN_10;
+  wire         _GEN_15 = _GEN_14 | accumLanes_7_7_io_initValid | _GEN_11;
+  wire         _GEN_16 = state == 5'h5;
+  wire         _GEN_17 = _GEN_15 | _GEN_12;
+  wire         _GEN_18 = _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12;
+  wire         _GEN_19 = _ap_idle_T | _GEN_18 | ~_GEN_16;
+  wire         _GEN_20 = state == 5'h6;
+  wire         _GEN_21 = _GEN_12 | _GEN_16;
   reg  [31:0]  casez_tmp;
   always @(*) begin
     casez (boundaryCount[2:0])
@@ -1601,12 +1868,12 @@ module CuperSpmvOnly_ChiselDataPath8(
         casez_tmp = start_7;
     endcase
   end // always
-  wire         _GEN_21 = state == 5'h8;
-  wire         _GEN_22 =
-    _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
+  wire         _GEN_22 = state == 5'h8;
+  wire         _GEN_23 =
+    _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16 | _GEN_20
     | _matrixRead_7_T;
-  wire         _GEN_23 = _ap_idle_T | _GEN_22 | ~(_GEN_21 & ~(issueSlot[49]));
-  wire         _GEN_24 = _GEN_16 | _GEN_15 | _GEN_19 | _matrixRead_7_T;
+  wire         _GEN_24 = _ap_idle_T | _GEN_23 | ~(_GEN_22 & ~(issueSlot[49]));
+  wire         _GEN_25 = _GEN_17 | _GEN_16 | _GEN_20 | _matrixRead_7_T;
   reg  [31:0]  casez_tmp_0;
   always @(*) begin
     casez (issueSource)
@@ -1649,31 +1916,30 @@ module CuperSpmvOnly_ChiselDataPath8(
         casez_tmp_1 = counterMatrixBeats_7;
     endcase
   end // always
-  wire         _GEN_25 = state == 5'h9;
-  wire         _GEN_26 = state == 5'hB;
-  wire         _GEN_27 = state == 5'hD;
+  wire         _GEN_26 = state == 5'h9;
+  wire         _GEN_27 = state == 5'hB;
   wire         _GEN_28 =
-    _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
-    | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
-    | _GEN_27;
+    _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16 | _GEN_20
+    | _matrixRead_7_T | _GEN_22 | _GEN_26 | _GEN | _GEN_27 | _accumLanes_7_7_io_outRead_T
+    | _GEN_8;
   wire         _GEN_29 = _ap_idle_T | _GEN_28;
-  wire         _GEN_30 = _GEN_29 | ~_GEN_8;
+  wire         _GEN_30 = _GEN_29 | ~_GEN_9;
   wire         _taggedWrite_0_T = outValid_0 & Vector_Y_Tagged_Stream_0_s_full_n;
-  wire         taggedWrite_0 = ~_GEN_29 & _GEN_8 & _taggedWrite_0_T;
+  wire         taggedWrite_0 = ~_GEN_29 & _GEN_9 & _taggedWrite_0_T;
   wire         _taggedWrite_1_T = outValid_1 & Vector_Y_Tagged_Stream_1_s_full_n;
-  wire         taggedWrite_1 = ~_GEN_29 & _GEN_8 & _taggedWrite_1_T;
+  wire         taggedWrite_1 = ~_GEN_29 & _GEN_9 & _taggedWrite_1_T;
   wire         _taggedWrite_2_T = outValid_2 & Vector_Y_Tagged_Stream_2_s_full_n;
-  wire         taggedWrite_2 = ~_GEN_29 & _GEN_8 & _taggedWrite_2_T;
+  wire         taggedWrite_2 = ~_GEN_29 & _GEN_9 & _taggedWrite_2_T;
   wire         _taggedWrite_3_T = outValid_3 & Vector_Y_Tagged_Stream_3_s_full_n;
-  wire         taggedWrite_3 = ~_GEN_29 & _GEN_8 & _taggedWrite_3_T;
+  wire         taggedWrite_3 = ~_GEN_29 & _GEN_9 & _taggedWrite_3_T;
   wire         _taggedWrite_4_T = outValid_4 & Vector_Y_Tagged_Stream_4_s_full_n;
-  wire         taggedWrite_4 = ~_GEN_29 & _GEN_8 & _taggedWrite_4_T;
+  wire         taggedWrite_4 = ~_GEN_29 & _GEN_9 & _taggedWrite_4_T;
   wire         _taggedWrite_5_T = outValid_5 & Vector_Y_Tagged_Stream_5_s_full_n;
-  wire         taggedWrite_5 = ~_GEN_29 & _GEN_8 & _taggedWrite_5_T;
+  wire         taggedWrite_5 = ~_GEN_29 & _GEN_9 & _taggedWrite_5_T;
   wire         _taggedWrite_6_T = outValid_6 & Vector_Y_Tagged_Stream_6_s_full_n;
-  wire         taggedWrite_6 = ~_GEN_29 & _GEN_8 & _taggedWrite_6_T;
+  wire         taggedWrite_6 = ~_GEN_29 & _GEN_9 & _taggedWrite_6_T;
   wire         _taggedWrite_7_T = outValid_7 & Vector_Y_Tagged_Stream_7_s_full_n;
-  wire         taggedWrite_7 = ~_GEN_29 & _GEN_8 & _taggedWrite_7_T;
+  wire         taggedWrite_7 = ~_GEN_29 & _GEN_9 & _taggedWrite_7_T;
   wire [512:0] _unused_T = {480'h0, PE_Param_in_peek_dout} ^ Vector_X_Stream_in_peek_dout;
   wire [7:0]   _GEN_31 =
     _unused_T[7:0]
@@ -1702,10 +1968,10 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [63:0]  _counterMatrixBeats_T = casez_tmp_1 + 64'h1;
   wire [63:0]  _counterMatrixBeats_T_2 = casez_tmp_1 + 64'h1;
   wire         _GEN_32 =
-    _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19
-    | _matrixRead_7_T | _GEN_21 | _GEN_25;
-  wire         _GEN_33 = _GEN_28 | ~_GEN_8;
-  wire         _GEN_34 = _accumLanes_7_7_io_outRead_T | _GEN_27 | _GEN_8;
+    _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16 | _GEN_20
+    | _matrixRead_7_T | _GEN_22 | _GEN_26;
+  wire         _GEN_33 = _GEN_28 | ~_GEN_9;
+  wire         _GEN_34 = _accumLanes_7_7_io_outRead_T | _GEN_8 | _GEN_9;
   wire [6:0]   totalAccumAccepts =
     {1'h0,
      {1'h0,
@@ -1821,9 +2087,397 @@ module CuperSpmvOnly_ChiselDataPath8(
   wire [63:0]  _GEN_40 = {outPing_5, outPong_5};
   wire [63:0]  _GEN_41 = {outPing_6, outPong_6};
   wire [63:0]  _GEN_42 = {outPing_7, outPong_7};
+  wire         coreNonzeroFlags_0 =
+    _coreLanes_0_0_io_debugOutAccept & (|_coreLanes_0_0_io_debugOutValue);
+  wire         coreNonzeroFlags_1 =
+    _coreLanes_0_1_io_debugOutAccept & (|_coreLanes_0_1_io_debugOutValue);
+  wire         coreNonzeroFlags_2 =
+    _coreLanes_0_2_io_debugOutAccept & (|_coreLanes_0_2_io_debugOutValue);
+  wire         coreNonzeroFlags_3 =
+    _coreLanes_0_3_io_debugOutAccept & (|_coreLanes_0_3_io_debugOutValue);
+  wire         coreNonzeroFlags_4 =
+    _coreLanes_0_4_io_debugOutAccept & (|_coreLanes_0_4_io_debugOutValue);
+  wire         coreNonzeroFlags_5 =
+    _coreLanes_0_5_io_debugOutAccept & (|_coreLanes_0_5_io_debugOutValue);
+  wire         coreNonzeroFlags_6 =
+    _coreLanes_0_6_io_debugOutAccept & (|_coreLanes_0_6_io_debugOutValue);
+  wire         coreNonzeroFlags_7 =
+    _coreLanes_0_7_io_debugOutAccept & (|_coreLanes_0_7_io_debugOutValue);
+  wire         coreNonzeroFlags_8 =
+    _coreLanes_1_0_io_debugOutAccept & (|_coreLanes_1_0_io_debugOutValue);
+  wire         coreNonzeroFlags_9 =
+    _coreLanes_1_1_io_debugOutAccept & (|_coreLanes_1_1_io_debugOutValue);
+  wire         coreNonzeroFlags_10 =
+    _coreLanes_1_2_io_debugOutAccept & (|_coreLanes_1_2_io_debugOutValue);
+  wire         coreNonzeroFlags_11 =
+    _coreLanes_1_3_io_debugOutAccept & (|_coreLanes_1_3_io_debugOutValue);
+  wire         coreNonzeroFlags_12 =
+    _coreLanes_1_4_io_debugOutAccept & (|_coreLanes_1_4_io_debugOutValue);
+  wire         coreNonzeroFlags_13 =
+    _coreLanes_1_5_io_debugOutAccept & (|_coreLanes_1_5_io_debugOutValue);
+  wire         coreNonzeroFlags_14 =
+    _coreLanes_1_6_io_debugOutAccept & (|_coreLanes_1_6_io_debugOutValue);
+  wire         coreNonzeroFlags_15 =
+    _coreLanes_1_7_io_debugOutAccept & (|_coreLanes_1_7_io_debugOutValue);
+  wire         coreNonzeroFlags_16 =
+    _coreLanes_2_0_io_debugOutAccept & (|_coreLanes_2_0_io_debugOutValue);
+  wire         coreNonzeroFlags_17 =
+    _coreLanes_2_1_io_debugOutAccept & (|_coreLanes_2_1_io_debugOutValue);
+  wire         coreNonzeroFlags_18 =
+    _coreLanes_2_2_io_debugOutAccept & (|_coreLanes_2_2_io_debugOutValue);
+  wire         coreNonzeroFlags_19 =
+    _coreLanes_2_3_io_debugOutAccept & (|_coreLanes_2_3_io_debugOutValue);
+  wire         coreNonzeroFlags_20 =
+    _coreLanes_2_4_io_debugOutAccept & (|_coreLanes_2_4_io_debugOutValue);
+  wire         coreNonzeroFlags_21 =
+    _coreLanes_2_5_io_debugOutAccept & (|_coreLanes_2_5_io_debugOutValue);
+  wire         coreNonzeroFlags_22 =
+    _coreLanes_2_6_io_debugOutAccept & (|_coreLanes_2_6_io_debugOutValue);
+  wire         coreNonzeroFlags_23 =
+    _coreLanes_2_7_io_debugOutAccept & (|_coreLanes_2_7_io_debugOutValue);
+  wire         coreNonzeroFlags_24 =
+    _coreLanes_3_0_io_debugOutAccept & (|_coreLanes_3_0_io_debugOutValue);
+  wire         coreNonzeroFlags_25 =
+    _coreLanes_3_1_io_debugOutAccept & (|_coreLanes_3_1_io_debugOutValue);
+  wire         coreNonzeroFlags_26 =
+    _coreLanes_3_2_io_debugOutAccept & (|_coreLanes_3_2_io_debugOutValue);
+  wire         coreNonzeroFlags_27 =
+    _coreLanes_3_3_io_debugOutAccept & (|_coreLanes_3_3_io_debugOutValue);
+  wire         coreNonzeroFlags_28 =
+    _coreLanes_3_4_io_debugOutAccept & (|_coreLanes_3_4_io_debugOutValue);
+  wire         coreNonzeroFlags_29 =
+    _coreLanes_3_5_io_debugOutAccept & (|_coreLanes_3_5_io_debugOutValue);
+  wire         coreNonzeroFlags_30 =
+    _coreLanes_3_6_io_debugOutAccept & (|_coreLanes_3_6_io_debugOutValue);
+  wire         coreNonzeroFlags_31 =
+    _coreLanes_3_7_io_debugOutAccept & (|_coreLanes_3_7_io_debugOutValue);
+  wire         coreNonzeroFlags_32 =
+    _coreLanes_4_0_io_debugOutAccept & (|_coreLanes_4_0_io_debugOutValue);
+  wire         coreNonzeroFlags_33 =
+    _coreLanes_4_1_io_debugOutAccept & (|_coreLanes_4_1_io_debugOutValue);
+  wire         coreNonzeroFlags_34 =
+    _coreLanes_4_2_io_debugOutAccept & (|_coreLanes_4_2_io_debugOutValue);
+  wire         coreNonzeroFlags_35 =
+    _coreLanes_4_3_io_debugOutAccept & (|_coreLanes_4_3_io_debugOutValue);
+  wire         coreNonzeroFlags_36 =
+    _coreLanes_4_4_io_debugOutAccept & (|_coreLanes_4_4_io_debugOutValue);
+  wire         coreNonzeroFlags_37 =
+    _coreLanes_4_5_io_debugOutAccept & (|_coreLanes_4_5_io_debugOutValue);
+  wire         coreNonzeroFlags_38 =
+    _coreLanes_4_6_io_debugOutAccept & (|_coreLanes_4_6_io_debugOutValue);
+  wire         coreNonzeroFlags_39 =
+    _coreLanes_4_7_io_debugOutAccept & (|_coreLanes_4_7_io_debugOutValue);
+  wire         coreNonzeroFlags_40 =
+    _coreLanes_5_0_io_debugOutAccept & (|_coreLanes_5_0_io_debugOutValue);
+  wire         coreNonzeroFlags_41 =
+    _coreLanes_5_1_io_debugOutAccept & (|_coreLanes_5_1_io_debugOutValue);
+  wire         coreNonzeroFlags_42 =
+    _coreLanes_5_2_io_debugOutAccept & (|_coreLanes_5_2_io_debugOutValue);
+  wire         coreNonzeroFlags_43 =
+    _coreLanes_5_3_io_debugOutAccept & (|_coreLanes_5_3_io_debugOutValue);
+  wire         coreNonzeroFlags_44 =
+    _coreLanes_5_4_io_debugOutAccept & (|_coreLanes_5_4_io_debugOutValue);
+  wire         coreNonzeroFlags_45 =
+    _coreLanes_5_5_io_debugOutAccept & (|_coreLanes_5_5_io_debugOutValue);
+  wire         coreNonzeroFlags_46 =
+    _coreLanes_5_6_io_debugOutAccept & (|_coreLanes_5_6_io_debugOutValue);
+  wire         coreNonzeroFlags_47 =
+    _coreLanes_5_7_io_debugOutAccept & (|_coreLanes_5_7_io_debugOutValue);
+  wire         coreNonzeroFlags_48 =
+    _coreLanes_6_0_io_debugOutAccept & (|_coreLanes_6_0_io_debugOutValue);
+  wire         coreNonzeroFlags_49 =
+    _coreLanes_6_1_io_debugOutAccept & (|_coreLanes_6_1_io_debugOutValue);
+  wire         coreNonzeroFlags_50 =
+    _coreLanes_6_2_io_debugOutAccept & (|_coreLanes_6_2_io_debugOutValue);
+  wire         coreNonzeroFlags_51 =
+    _coreLanes_6_3_io_debugOutAccept & (|_coreLanes_6_3_io_debugOutValue);
+  wire         coreNonzeroFlags_52 =
+    _coreLanes_6_4_io_debugOutAccept & (|_coreLanes_6_4_io_debugOutValue);
+  wire         coreNonzeroFlags_53 =
+    _coreLanes_6_5_io_debugOutAccept & (|_coreLanes_6_5_io_debugOutValue);
+  wire         coreNonzeroFlags_54 =
+    _coreLanes_6_6_io_debugOutAccept & (|_coreLanes_6_6_io_debugOutValue);
+  wire         coreNonzeroFlags_55 =
+    _coreLanes_6_7_io_debugOutAccept & (|_coreLanes_6_7_io_debugOutValue);
+  wire         coreNonzeroFlags_56 =
+    _coreLanes_7_0_io_debugOutAccept & (|_coreLanes_7_0_io_debugOutValue);
+  wire         coreNonzeroFlags_57 =
+    _coreLanes_7_1_io_debugOutAccept & (|_coreLanes_7_1_io_debugOutValue);
+  wire         coreNonzeroFlags_58 =
+    _coreLanes_7_2_io_debugOutAccept & (|_coreLanes_7_2_io_debugOutValue);
+  wire         coreNonzeroFlags_59 =
+    _coreLanes_7_3_io_debugOutAccept & (|_coreLanes_7_3_io_debugOutValue);
+  wire         coreNonzeroFlags_60 =
+    _coreLanes_7_4_io_debugOutAccept & (|_coreLanes_7_4_io_debugOutValue);
+  wire         coreNonzeroFlags_61 =
+    _coreLanes_7_5_io_debugOutAccept & (|_coreLanes_7_5_io_debugOutValue);
+  wire         coreNonzeroFlags_62 =
+    _coreLanes_7_6_io_debugOutAccept & (|_coreLanes_7_6_io_debugOutValue);
+  wire         coreNonzeroFlags_63 =
+    _coreLanes_7_7_io_debugOutAccept & (|_coreLanes_7_7_io_debugOutValue);
+  wire [6:0]   totalCoreNonzeroOuts =
+    {1'h0,
+     {1'h0,
+      {1'h0,
+       {1'h0,
+        {1'h0, {1'h0, coreNonzeroFlags_0} + {1'h0, coreNonzeroFlags_1}}
+          + {1'h0, {1'h0, coreNonzeroFlags_2} + {1'h0, coreNonzeroFlags_3}}}
+         + {1'h0,
+            {1'h0, {1'h0, coreNonzeroFlags_4} + {1'h0, coreNonzeroFlags_5}}
+              + {1'h0, {1'h0, coreNonzeroFlags_6} + {1'h0, coreNonzeroFlags_7}}}}
+        + {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, coreNonzeroFlags_8} + {1'h0, coreNonzeroFlags_9}}
+              + {1'h0, {1'h0, coreNonzeroFlags_10} + {1'h0, coreNonzeroFlags_11}}}
+             + {1'h0,
+                {1'h0, {1'h0, coreNonzeroFlags_12} + {1'h0, coreNonzeroFlags_13}}
+                  + {1'h0, {1'h0, coreNonzeroFlags_14} + {1'h0, coreNonzeroFlags_15}}}}}
+       + {1'h0,
+          {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, coreNonzeroFlags_16} + {1'h0, coreNonzeroFlags_17}}
+              + {1'h0, {1'h0, coreNonzeroFlags_18} + {1'h0, coreNonzeroFlags_19}}}
+             + {1'h0,
+                {1'h0, {1'h0, coreNonzeroFlags_20} + {1'h0, coreNonzeroFlags_21}}
+                  + {1'h0, {1'h0, coreNonzeroFlags_22} + {1'h0, coreNonzeroFlags_23}}}}
+            + {1'h0,
+               {1'h0,
+                {1'h0, {1'h0, coreNonzeroFlags_24} + {1'h0, coreNonzeroFlags_25}}
+                  + {1'h0, {1'h0, coreNonzeroFlags_26} + {1'h0, coreNonzeroFlags_27}}}
+                 + {1'h0,
+                    {1'h0, {1'h0, coreNonzeroFlags_28} + {1'h0, coreNonzeroFlags_29}}
+                      + {1'h0,
+                         {1'h0, coreNonzeroFlags_30} + {1'h0, coreNonzeroFlags_31}}}}}}
+    + {1'h0,
+       {1'h0,
+        {1'h0,
+         {1'h0,
+          {1'h0, {1'h0, coreNonzeroFlags_32} + {1'h0, coreNonzeroFlags_33}}
+            + {1'h0, {1'h0, coreNonzeroFlags_34} + {1'h0, coreNonzeroFlags_35}}}
+           + {1'h0,
+              {1'h0, {1'h0, coreNonzeroFlags_36} + {1'h0, coreNonzeroFlags_37}}
+                + {1'h0, {1'h0, coreNonzeroFlags_38} + {1'h0, coreNonzeroFlags_39}}}}
+          + {1'h0,
+             {1'h0,
+              {1'h0, {1'h0, coreNonzeroFlags_40} + {1'h0, coreNonzeroFlags_41}}
+                + {1'h0, {1'h0, coreNonzeroFlags_42} + {1'h0, coreNonzeroFlags_43}}}
+               + {1'h0,
+                  {1'h0, {1'h0, coreNonzeroFlags_44} + {1'h0, coreNonzeroFlags_45}}
+                    + {1'h0, {1'h0, coreNonzeroFlags_46} + {1'h0, coreNonzeroFlags_47}}}}}
+         + {1'h0,
+            {1'h0,
+             {1'h0,
+              {1'h0, {1'h0, coreNonzeroFlags_48} + {1'h0, coreNonzeroFlags_49}}
+                + {1'h0, {1'h0, coreNonzeroFlags_50} + {1'h0, coreNonzeroFlags_51}}}
+               + {1'h0,
+                  {1'h0, {1'h0, coreNonzeroFlags_52} + {1'h0, coreNonzeroFlags_53}}
+                    + {1'h0, {1'h0, coreNonzeroFlags_54} + {1'h0, coreNonzeroFlags_55}}}}
+              + {1'h0,
+                 {1'h0,
+                  {1'h0, {1'h0, coreNonzeroFlags_56} + {1'h0, coreNonzeroFlags_57}}
+                    + {1'h0, {1'h0, coreNonzeroFlags_58} + {1'h0, coreNonzeroFlags_59}}}
+                   + {1'h0,
+                      {1'h0, {1'h0, coreNonzeroFlags_60} + {1'h0, coreNonzeroFlags_61}}
+                        + {1'h0,
+                           {1'h0, coreNonzeroFlags_62} + {1'h0, coreNonzeroFlags_63}}}}}};
+  wire         faddNonzeroFlags_0 =
+    _accumLanes_0_0_io_debugFaddValid & (|_accumLanes_0_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_1 =
+    _accumLanes_0_1_io_debugFaddValid & (|_accumLanes_0_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_2 =
+    _accumLanes_0_2_io_debugFaddValid & (|_accumLanes_0_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_3 =
+    _accumLanes_0_3_io_debugFaddValid & (|_accumLanes_0_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_4 =
+    _accumLanes_0_4_io_debugFaddValid & (|_accumLanes_0_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_5 =
+    _accumLanes_0_5_io_debugFaddValid & (|_accumLanes_0_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_6 =
+    _accumLanes_0_6_io_debugFaddValid & (|_accumLanes_0_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_7 =
+    _accumLanes_0_7_io_debugFaddValid & (|_accumLanes_0_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_8 =
+    _accumLanes_1_0_io_debugFaddValid & (|_accumLanes_1_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_9 =
+    _accumLanes_1_1_io_debugFaddValid & (|_accumLanes_1_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_10 =
+    _accumLanes_1_2_io_debugFaddValid & (|_accumLanes_1_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_11 =
+    _accumLanes_1_3_io_debugFaddValid & (|_accumLanes_1_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_12 =
+    _accumLanes_1_4_io_debugFaddValid & (|_accumLanes_1_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_13 =
+    _accumLanes_1_5_io_debugFaddValid & (|_accumLanes_1_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_14 =
+    _accumLanes_1_6_io_debugFaddValid & (|_accumLanes_1_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_15 =
+    _accumLanes_1_7_io_debugFaddValid & (|_accumLanes_1_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_16 =
+    _accumLanes_2_0_io_debugFaddValid & (|_accumLanes_2_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_17 =
+    _accumLanes_2_1_io_debugFaddValid & (|_accumLanes_2_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_18 =
+    _accumLanes_2_2_io_debugFaddValid & (|_accumLanes_2_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_19 =
+    _accumLanes_2_3_io_debugFaddValid & (|_accumLanes_2_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_20 =
+    _accumLanes_2_4_io_debugFaddValid & (|_accumLanes_2_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_21 =
+    _accumLanes_2_5_io_debugFaddValid & (|_accumLanes_2_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_22 =
+    _accumLanes_2_6_io_debugFaddValid & (|_accumLanes_2_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_23 =
+    _accumLanes_2_7_io_debugFaddValid & (|_accumLanes_2_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_24 =
+    _accumLanes_3_0_io_debugFaddValid & (|_accumLanes_3_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_25 =
+    _accumLanes_3_1_io_debugFaddValid & (|_accumLanes_3_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_26 =
+    _accumLanes_3_2_io_debugFaddValid & (|_accumLanes_3_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_27 =
+    _accumLanes_3_3_io_debugFaddValid & (|_accumLanes_3_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_28 =
+    _accumLanes_3_4_io_debugFaddValid & (|_accumLanes_3_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_29 =
+    _accumLanes_3_5_io_debugFaddValid & (|_accumLanes_3_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_30 =
+    _accumLanes_3_6_io_debugFaddValid & (|_accumLanes_3_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_31 =
+    _accumLanes_3_7_io_debugFaddValid & (|_accumLanes_3_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_32 =
+    _accumLanes_4_0_io_debugFaddValid & (|_accumLanes_4_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_33 =
+    _accumLanes_4_1_io_debugFaddValid & (|_accumLanes_4_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_34 =
+    _accumLanes_4_2_io_debugFaddValid & (|_accumLanes_4_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_35 =
+    _accumLanes_4_3_io_debugFaddValid & (|_accumLanes_4_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_36 =
+    _accumLanes_4_4_io_debugFaddValid & (|_accumLanes_4_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_37 =
+    _accumLanes_4_5_io_debugFaddValid & (|_accumLanes_4_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_38 =
+    _accumLanes_4_6_io_debugFaddValid & (|_accumLanes_4_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_39 =
+    _accumLanes_4_7_io_debugFaddValid & (|_accumLanes_4_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_40 =
+    _accumLanes_5_0_io_debugFaddValid & (|_accumLanes_5_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_41 =
+    _accumLanes_5_1_io_debugFaddValid & (|_accumLanes_5_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_42 =
+    _accumLanes_5_2_io_debugFaddValid & (|_accumLanes_5_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_43 =
+    _accumLanes_5_3_io_debugFaddValid & (|_accumLanes_5_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_44 =
+    _accumLanes_5_4_io_debugFaddValid & (|_accumLanes_5_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_45 =
+    _accumLanes_5_5_io_debugFaddValid & (|_accumLanes_5_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_46 =
+    _accumLanes_5_6_io_debugFaddValid & (|_accumLanes_5_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_47 =
+    _accumLanes_5_7_io_debugFaddValid & (|_accumLanes_5_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_48 =
+    _accumLanes_6_0_io_debugFaddValid & (|_accumLanes_6_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_49 =
+    _accumLanes_6_1_io_debugFaddValid & (|_accumLanes_6_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_50 =
+    _accumLanes_6_2_io_debugFaddValid & (|_accumLanes_6_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_51 =
+    _accumLanes_6_3_io_debugFaddValid & (|_accumLanes_6_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_52 =
+    _accumLanes_6_4_io_debugFaddValid & (|_accumLanes_6_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_53 =
+    _accumLanes_6_5_io_debugFaddValid & (|_accumLanes_6_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_54 =
+    _accumLanes_6_6_io_debugFaddValid & (|_accumLanes_6_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_55 =
+    _accumLanes_6_7_io_debugFaddValid & (|_accumLanes_6_7_io_debugFaddValue);
+  wire         faddNonzeroFlags_56 =
+    _accumLanes_7_0_io_debugFaddValid & (|_accumLanes_7_0_io_debugFaddValue);
+  wire         faddNonzeroFlags_57 =
+    _accumLanes_7_1_io_debugFaddValid & (|_accumLanes_7_1_io_debugFaddValue);
+  wire         faddNonzeroFlags_58 =
+    _accumLanes_7_2_io_debugFaddValid & (|_accumLanes_7_2_io_debugFaddValue);
+  wire         faddNonzeroFlags_59 =
+    _accumLanes_7_3_io_debugFaddValid & (|_accumLanes_7_3_io_debugFaddValue);
+  wire         faddNonzeroFlags_60 =
+    _accumLanes_7_4_io_debugFaddValid & (|_accumLanes_7_4_io_debugFaddValue);
+  wire         faddNonzeroFlags_61 =
+    _accumLanes_7_5_io_debugFaddValid & (|_accumLanes_7_5_io_debugFaddValue);
+  wire         faddNonzeroFlags_62 =
+    _accumLanes_7_6_io_debugFaddValid & (|_accumLanes_7_6_io_debugFaddValue);
+  wire         faddNonzeroFlags_63 =
+    _accumLanes_7_7_io_debugFaddValid & (|_accumLanes_7_7_io_debugFaddValue);
+  wire [6:0]   totalFaddNonzeroOuts =
+    {1'h0,
+     {1'h0,
+      {1'h0,
+       {1'h0,
+        {1'h0, {1'h0, faddNonzeroFlags_0} + {1'h0, faddNonzeroFlags_1}}
+          + {1'h0, {1'h0, faddNonzeroFlags_2} + {1'h0, faddNonzeroFlags_3}}}
+         + {1'h0,
+            {1'h0, {1'h0, faddNonzeroFlags_4} + {1'h0, faddNonzeroFlags_5}}
+              + {1'h0, {1'h0, faddNonzeroFlags_6} + {1'h0, faddNonzeroFlags_7}}}}
+        + {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, faddNonzeroFlags_8} + {1'h0, faddNonzeroFlags_9}}
+              + {1'h0, {1'h0, faddNonzeroFlags_10} + {1'h0, faddNonzeroFlags_11}}}
+             + {1'h0,
+                {1'h0, {1'h0, faddNonzeroFlags_12} + {1'h0, faddNonzeroFlags_13}}
+                  + {1'h0, {1'h0, faddNonzeroFlags_14} + {1'h0, faddNonzeroFlags_15}}}}}
+       + {1'h0,
+          {1'h0,
+           {1'h0,
+            {1'h0, {1'h0, faddNonzeroFlags_16} + {1'h0, faddNonzeroFlags_17}}
+              + {1'h0, {1'h0, faddNonzeroFlags_18} + {1'h0, faddNonzeroFlags_19}}}
+             + {1'h0,
+                {1'h0, {1'h0, faddNonzeroFlags_20} + {1'h0, faddNonzeroFlags_21}}
+                  + {1'h0, {1'h0, faddNonzeroFlags_22} + {1'h0, faddNonzeroFlags_23}}}}
+            + {1'h0,
+               {1'h0,
+                {1'h0, {1'h0, faddNonzeroFlags_24} + {1'h0, faddNonzeroFlags_25}}
+                  + {1'h0, {1'h0, faddNonzeroFlags_26} + {1'h0, faddNonzeroFlags_27}}}
+                 + {1'h0,
+                    {1'h0, {1'h0, faddNonzeroFlags_28} + {1'h0, faddNonzeroFlags_29}}
+                      + {1'h0,
+                         {1'h0, faddNonzeroFlags_30} + {1'h0, faddNonzeroFlags_31}}}}}}
+    + {1'h0,
+       {1'h0,
+        {1'h0,
+         {1'h0,
+          {1'h0, {1'h0, faddNonzeroFlags_32} + {1'h0, faddNonzeroFlags_33}}
+            + {1'h0, {1'h0, faddNonzeroFlags_34} + {1'h0, faddNonzeroFlags_35}}}
+           + {1'h0,
+              {1'h0, {1'h0, faddNonzeroFlags_36} + {1'h0, faddNonzeroFlags_37}}
+                + {1'h0, {1'h0, faddNonzeroFlags_38} + {1'h0, faddNonzeroFlags_39}}}}
+          + {1'h0,
+             {1'h0,
+              {1'h0, {1'h0, faddNonzeroFlags_40} + {1'h0, faddNonzeroFlags_41}}
+                + {1'h0, {1'h0, faddNonzeroFlags_42} + {1'h0, faddNonzeroFlags_43}}}
+               + {1'h0,
+                  {1'h0, {1'h0, faddNonzeroFlags_44} + {1'h0, faddNonzeroFlags_45}}
+                    + {1'h0, {1'h0, faddNonzeroFlags_46} + {1'h0, faddNonzeroFlags_47}}}}}
+         + {1'h0,
+            {1'h0,
+             {1'h0,
+              {1'h0, {1'h0, faddNonzeroFlags_48} + {1'h0, faddNonzeroFlags_49}}
+                + {1'h0, {1'h0, faddNonzeroFlags_50} + {1'h0, faddNonzeroFlags_51}}}
+               + {1'h0,
+                  {1'h0, {1'h0, faddNonzeroFlags_52} + {1'h0, faddNonzeroFlags_53}}
+                    + {1'h0, {1'h0, faddNonzeroFlags_54} + {1'h0, faddNonzeroFlags_55}}}}
+              + {1'h0,
+                 {1'h0,
+                  {1'h0, {1'h0, faddNonzeroFlags_56} + {1'h0, faddNonzeroFlags_57}}
+                    + {1'h0, {1'h0, faddNonzeroFlags_58} + {1'h0, faddNonzeroFlags_59}}}
+                   + {1'h0,
+                      {1'h0, {1'h0, faddNonzeroFlags_60} + {1'h0, faddNonzeroFlags_61}}
+                        + {1'h0,
+                           {1'h0, faddNonzeroFlags_62} + {1'h0, faddNonzeroFlags_63}}}}}};
+  wire         _GEN_43 = (|totalCoreNonzeroOuts) & ~firstNonzeroCoreOutSeen;
+  wire         _GEN_44 = (|totalFaddNonzeroOuts) & ~firstNonzeroFaddOutSeen;
   wire [13:0]  _initGroup_T = initGroup + 14'h1;
-  wire         _GEN_43 = _initGroup_T >= numOwnerGroups[13:0];
-  wire         _GEN_44 =
+  wire         _GEN_45 = _initGroup_T >= numOwnerGroups[13:0];
+  wire         _GEN_46 =
     {_coreLanes_7_7_io_busy | _accumLanes_7_7_io_busy,
      _coreLanes_7_6_io_busy | _accumLanes_7_6_io_busy,
      _coreLanes_7_5_io_busy | _accumLanes_7_5_io_busy,
@@ -1888,42 +2542,42 @@ module CuperSpmvOnly_ChiselDataPath8(
      _coreLanes_0_2_io_busy | _accumLanes_0_2_io_busy,
      _coreLanes_0_1_io_busy | _accumLanes_0_1_io_busy,
      _coreLanes_0_0_io_busy | _accumLanes_0_0_io_busy} == 64'h0;
-  wire         _GEN_45 = state == 5'hF;
-  wire         _GEN_46 = outPair != 3'h7;
+  wire         _GEN_47 = state == 5'hF;
+  wire         _GEN_48 = outPair != 3'h7;
   wire [13:0]  _outGroup_T = outGroup + 14'h1;
-  wire         _GEN_47 = _outGroup_T < numOwnerGroups[13:0];
-  wire         _GEN_48 = state == 5'h10;
+  wire         _GEN_49 = _outGroup_T < numOwnerGroups[13:0];
+  wire         _GEN_50 = state == 5'h10;
   wire [31:0]  _iterIdx_T = iterIdx + 32'h1;
-  wire         _GEN_49 = _iterIdx_T >= iterationTime;
-  wire         _GEN_50 =
-    _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
-    | _GEN_27 | _GEN_8 | _GEN_45;
-  wire         _GEN_51 = state == 5'h11;
-  wire         _GEN_52 = _taggedWrite_0_T & (|_GEN_35) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_53 = (|_GEN_36) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_54 = _taggedWrite_1_T & _GEN_53;
-  wire         _GEN_55 = _taggedWrite_1_T & _GEN_53 | _GEN_52;
-  wire         _GEN_56 = _taggedWrite_2_T & (|_GEN_37) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_57 = (|_GEN_38) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_58 = _GEN_57 | _GEN_56;
-  wire         _GEN_59 = _taggedWrite_3_T & _GEN_57;
-  wire         _GEN_60 = _taggedWrite_3_T ? _GEN_58 | _GEN_55 : _GEN_56 | _GEN_55;
-  wire         _GEN_61 = _taggedWrite_4_T & (|_GEN_39) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_62 = (|_GEN_40) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_63 = _GEN_62 | _GEN_61;
-  wire         _GEN_64 = _taggedWrite_5_T & _GEN_62;
-  wire         _GEN_65 = _taggedWrite_5_T ? _GEN_63 | _GEN_60 : _GEN_61 | _GEN_60;
-  wire         _GEN_66 = _taggedWrite_6_T & (|_GEN_41) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_67 = (|_GEN_42) & ~firstNonzeroTaggedSeen;
-  wire         _GEN_68 = _GEN_67 | _GEN_66;
-  wire         _GEN_69 = _taggedWrite_7_T & _GEN_67;
-  wire         _GEN_70 = _GEN_10 | _GEN_11 | _GEN_15 | _GEN_19 | _GEN_50;
-  wire         _GEN_71 =
+  wire         _GEN_51 = _iterIdx_T >= iterationTime;
+  wire         _GEN_52 =
+    _matrixRead_7_T | _GEN_22 | _GEN_26 | _GEN | _GEN_27 | _accumLanes_7_7_io_outRead_T
+    | _GEN_8 | _GEN_9 | _GEN_47;
+  wire         _GEN_53 = state == 5'h11;
+  wire         _GEN_54 = _taggedWrite_0_T & (|_GEN_35) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_55 = (|_GEN_36) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_56 = _taggedWrite_1_T & _GEN_55;
+  wire         _GEN_57 = _taggedWrite_1_T & _GEN_55 | _GEN_54;
+  wire         _GEN_58 = _taggedWrite_2_T & (|_GEN_37) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_59 = (|_GEN_38) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_60 = _GEN_59 | _GEN_58;
+  wire         _GEN_61 = _taggedWrite_3_T & _GEN_59;
+  wire         _GEN_62 = _taggedWrite_3_T ? _GEN_60 | _GEN_57 : _GEN_58 | _GEN_57;
+  wire         _GEN_63 = _taggedWrite_4_T & (|_GEN_39) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_64 = (|_GEN_40) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_65 = _GEN_64 | _GEN_63;
+  wire         _GEN_66 = _taggedWrite_5_T & _GEN_64;
+  wire         _GEN_67 = _taggedWrite_5_T ? _GEN_65 | _GEN_62 : _GEN_63 | _GEN_62;
+  wire         _GEN_68 = _taggedWrite_6_T & (|_GEN_41) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_69 = (|_GEN_42) & ~firstNonzeroTaggedSeen;
+  wire         _GEN_70 = _GEN_69 | _GEN_68;
+  wire         _GEN_71 = _taggedWrite_7_T & _GEN_69;
+  wire         _GEN_72 = _GEN_11 | _GEN_12 | _GEN_16 | _GEN_20 | _GEN_52;
+  wire         _GEN_73 =
     _taggedWrite_1_T
-      ? _GEN_53 | _GEN_52 | firstNonzeroTaggedSeen
-      : _GEN_52 | firstNonzeroTaggedSeen;
-  wire         _GEN_72 = _taggedWrite_3_T ? _GEN_58 | _GEN_71 : _GEN_56 | _GEN_71;
-  wire         _GEN_73 = _taggedWrite_5_T ? _GEN_63 | _GEN_72 : _GEN_61 | _GEN_72;
+      ? _GEN_55 | _GEN_54 | firstNonzeroTaggedSeen
+      : _GEN_54 | firstNonzeroTaggedSeen;
+  wire         _GEN_74 = _taggedWrite_3_T ? _GEN_60 | _GEN_73 : _GEN_58 | _GEN_73;
+  wire         _GEN_75 = _taggedWrite_5_T ? _GEN_65 | _GEN_74 : _GEN_63 | _GEN_74;
   wire [3:0]   nonzeroOutputWrites =
     {1'h0,
      {1'h0, {1'h0, taggedWrite_0 & (|_GEN_35)} + {1'h0, taggedWrite_1 & (|_GEN_36)}}
@@ -1932,10 +2586,268 @@ module CuperSpmvOnly_ChiselDataPath8(
        {1'h0, {1'h0, taggedWrite_4 & (|_GEN_39)} + {1'h0, taggedWrite_5 & (|_GEN_40)}}
          + {1'h0,
             {1'h0, taggedWrite_6 & (|_GEN_41)} + {1'h0, taggedWrite_7 & (|_GEN_42)}}};
+  wire [63:0]  coreFirstNonzeroOh =
+    coreNonzeroFlags_0
+      ? 64'h1
+      : coreNonzeroFlags_1
+          ? 64'h2
+          : coreNonzeroFlags_2
+              ? 64'h4
+              : coreNonzeroFlags_3
+                  ? 64'h8
+                  : coreNonzeroFlags_4
+                      ? 64'h10
+                      : coreNonzeroFlags_5
+                          ? 64'h20
+                          : coreNonzeroFlags_6
+                              ? 64'h40
+                              : coreNonzeroFlags_7
+                                  ? 64'h80
+                                  : coreNonzeroFlags_8
+                                      ? 64'h100
+                                      : coreNonzeroFlags_9
+                                          ? 64'h200
+                                          : coreNonzeroFlags_10
+                                              ? 64'h400
+                                              : coreNonzeroFlags_11
+                                                  ? 64'h800
+                                                  : coreNonzeroFlags_12
+                                                      ? 64'h1000
+                                                      : coreNonzeroFlags_13
+                                                          ? 64'h2000
+                                                          : coreNonzeroFlags_14
+                                                              ? 64'h4000
+                                                              : coreNonzeroFlags_15
+                                                                  ? 64'h8000
+                                                                  : coreNonzeroFlags_16
+                                                                      ? 64'h10000
+                                                                      : coreNonzeroFlags_17
+                                                                          ? 64'h20000
+                                                                          : coreNonzeroFlags_18
+                                                                              ? 64'h40000
+                                                                              : coreNonzeroFlags_19
+                                                                                  ? 64'h80000
+                                                                                  : coreNonzeroFlags_20
+                                                                                      ? 64'h100000
+                                                                                      : coreNonzeroFlags_21
+                                                                                          ? 64'h200000
+                                                                                          : coreNonzeroFlags_22
+                                                                                              ? 64'h400000
+                                                                                              : coreNonzeroFlags_23
+                                                                                                  ? 64'h800000
+                                                                                                  : coreNonzeroFlags_24
+                                                                                                      ? 64'h1000000
+                                                                                                      : coreNonzeroFlags_25
+                                                                                                          ? 64'h2000000
+                                                                                                          : coreNonzeroFlags_26
+                                                                                                              ? 64'h4000000
+                                                                                                              : coreNonzeroFlags_27
+                                                                                                                  ? 64'h8000000
+                                                                                                                  : coreNonzeroFlags_28
+                                                                                                                      ? 64'h10000000
+                                                                                                                      : coreNonzeroFlags_29
+                                                                                                                          ? 64'h20000000
+                                                                                                                          : coreNonzeroFlags_30
+                                                                                                                              ? 64'h40000000
+                                                                                                                              : coreNonzeroFlags_31
+                                                                                                                                  ? 64'h80000000
+                                                                                                                                  : coreNonzeroFlags_32
+                                                                                                                                      ? 64'h100000000
+                                                                                                                                      : coreNonzeroFlags_33
+                                                                                                                                          ? 64'h200000000
+                                                                                                                                          : coreNonzeroFlags_34
+                                                                                                                                              ? 64'h400000000
+                                                                                                                                              : coreNonzeroFlags_35
+                                                                                                                                                  ? 64'h800000000
+                                                                                                                                                  : coreNonzeroFlags_36
+                                                                                                                                                      ? 64'h1000000000
+                                                                                                                                                      : coreNonzeroFlags_37
+                                                                                                                                                          ? 64'h2000000000
+                                                                                                                                                          : coreNonzeroFlags_38
+                                                                                                                                                              ? 64'h4000000000
+                                                                                                                                                              : coreNonzeroFlags_39
+                                                                                                                                                                  ? 64'h8000000000
+                                                                                                                                                                  : coreNonzeroFlags_40
+                                                                                                                                                                      ? 64'h10000000000
+                                                                                                                                                                      : coreNonzeroFlags_41
+                                                                                                                                                                          ? 64'h20000000000
+                                                                                                                                                                          : coreNonzeroFlags_42
+                                                                                                                                                                              ? 64'h40000000000
+                                                                                                                                                                              : coreNonzeroFlags_43
+                                                                                                                                                                                  ? 64'h80000000000
+                                                                                                                                                                                  : coreNonzeroFlags_44
+                                                                                                                                                                                      ? 64'h100000000000
+                                                                                                                                                                                      : coreNonzeroFlags_45
+                                                                                                                                                                                          ? 64'h200000000000
+                                                                                                                                                                                          : coreNonzeroFlags_46
+                                                                                                                                                                                              ? 64'h400000000000
+                                                                                                                                                                                              : coreNonzeroFlags_47
+                                                                                                                                                                                                  ? 64'h800000000000
+                                                                                                                                                                                                  : coreNonzeroFlags_48
+                                                                                                                                                                                                      ? 64'h1000000000000
+                                                                                                                                                                                                      : coreNonzeroFlags_49
+                                                                                                                                                                                                          ? 64'h2000000000000
+                                                                                                                                                                                                          : coreNonzeroFlags_50
+                                                                                                                                                                                                              ? 64'h4000000000000
+                                                                                                                                                                                                              : coreNonzeroFlags_51
+                                                                                                                                                                                                                  ? 64'h8000000000000
+                                                                                                                                                                                                                  : coreNonzeroFlags_52
+                                                                                                                                                                                                                      ? 64'h10000000000000
+                                                                                                                                                                                                                      : coreNonzeroFlags_53
+                                                                                                                                                                                                                          ? 64'h20000000000000
+                                                                                                                                                                                                                          : coreNonzeroFlags_54
+                                                                                                                                                                                                                              ? 64'h40000000000000
+                                                                                                                                                                                                                              : coreNonzeroFlags_55
+                                                                                                                                                                                                                                  ? 64'h80000000000000
+                                                                                                                                                                                                                                  : coreNonzeroFlags_56
+                                                                                                                                                                                                                                      ? 64'h100000000000000
+                                                                                                                                                                                                                                      : coreNonzeroFlags_57
+                                                                                                                                                                                                                                          ? 64'h200000000000000
+                                                                                                                                                                                                                                          : coreNonzeroFlags_58
+                                                                                                                                                                                                                                              ? 64'h400000000000000
+                                                                                                                                                                                                                                              : coreNonzeroFlags_59
+                                                                                                                                                                                                                                                  ? 64'h800000000000000
+                                                                                                                                                                                                                                                  : coreNonzeroFlags_60
+                                                                                                                                                                                                                                                      ? 64'h1000000000000000
+                                                                                                                                                                                                                                                      : coreNonzeroFlags_61
+                                                                                                                                                                                                                                                          ? 64'h2000000000000000
+                                                                                                                                                                                                                                                          : coreNonzeroFlags_62
+                                                                                                                                                                                                                                                              ? 64'h4000000000000000
+                                                                                                                                                                                                                                                              : {coreNonzeroFlags_63,
+                                                                                                                                                                                                                                                                 63'h0};
+  wire [63:0]  faddFirstNonzeroOh =
+    faddNonzeroFlags_0
+      ? 64'h1
+      : faddNonzeroFlags_1
+          ? 64'h2
+          : faddNonzeroFlags_2
+              ? 64'h4
+              : faddNonzeroFlags_3
+                  ? 64'h8
+                  : faddNonzeroFlags_4
+                      ? 64'h10
+                      : faddNonzeroFlags_5
+                          ? 64'h20
+                          : faddNonzeroFlags_6
+                              ? 64'h40
+                              : faddNonzeroFlags_7
+                                  ? 64'h80
+                                  : faddNonzeroFlags_8
+                                      ? 64'h100
+                                      : faddNonzeroFlags_9
+                                          ? 64'h200
+                                          : faddNonzeroFlags_10
+                                              ? 64'h400
+                                              : faddNonzeroFlags_11
+                                                  ? 64'h800
+                                                  : faddNonzeroFlags_12
+                                                      ? 64'h1000
+                                                      : faddNonzeroFlags_13
+                                                          ? 64'h2000
+                                                          : faddNonzeroFlags_14
+                                                              ? 64'h4000
+                                                              : faddNonzeroFlags_15
+                                                                  ? 64'h8000
+                                                                  : faddNonzeroFlags_16
+                                                                      ? 64'h10000
+                                                                      : faddNonzeroFlags_17
+                                                                          ? 64'h20000
+                                                                          : faddNonzeroFlags_18
+                                                                              ? 64'h40000
+                                                                              : faddNonzeroFlags_19
+                                                                                  ? 64'h80000
+                                                                                  : faddNonzeroFlags_20
+                                                                                      ? 64'h100000
+                                                                                      : faddNonzeroFlags_21
+                                                                                          ? 64'h200000
+                                                                                          : faddNonzeroFlags_22
+                                                                                              ? 64'h400000
+                                                                                              : faddNonzeroFlags_23
+                                                                                                  ? 64'h800000
+                                                                                                  : faddNonzeroFlags_24
+                                                                                                      ? 64'h1000000
+                                                                                                      : faddNonzeroFlags_25
+                                                                                                          ? 64'h2000000
+                                                                                                          : faddNonzeroFlags_26
+                                                                                                              ? 64'h4000000
+                                                                                                              : faddNonzeroFlags_27
+                                                                                                                  ? 64'h8000000
+                                                                                                                  : faddNonzeroFlags_28
+                                                                                                                      ? 64'h10000000
+                                                                                                                      : faddNonzeroFlags_29
+                                                                                                                          ? 64'h20000000
+                                                                                                                          : faddNonzeroFlags_30
+                                                                                                                              ? 64'h40000000
+                                                                                                                              : faddNonzeroFlags_31
+                                                                                                                                  ? 64'h80000000
+                                                                                                                                  : faddNonzeroFlags_32
+                                                                                                                                      ? 64'h100000000
+                                                                                                                                      : faddNonzeroFlags_33
+                                                                                                                                          ? 64'h200000000
+                                                                                                                                          : faddNonzeroFlags_34
+                                                                                                                                              ? 64'h400000000
+                                                                                                                                              : faddNonzeroFlags_35
+                                                                                                                                                  ? 64'h800000000
+                                                                                                                                                  : faddNonzeroFlags_36
+                                                                                                                                                      ? 64'h1000000000
+                                                                                                                                                      : faddNonzeroFlags_37
+                                                                                                                                                          ? 64'h2000000000
+                                                                                                                                                          : faddNonzeroFlags_38
+                                                                                                                                                              ? 64'h4000000000
+                                                                                                                                                              : faddNonzeroFlags_39
+                                                                                                                                                                  ? 64'h8000000000
+                                                                                                                                                                  : faddNonzeroFlags_40
+                                                                                                                                                                      ? 64'h10000000000
+                                                                                                                                                                      : faddNonzeroFlags_41
+                                                                                                                                                                          ? 64'h20000000000
+                                                                                                                                                                          : faddNonzeroFlags_42
+                                                                                                                                                                              ? 64'h40000000000
+                                                                                                                                                                              : faddNonzeroFlags_43
+                                                                                                                                                                                  ? 64'h80000000000
+                                                                                                                                                                                  : faddNonzeroFlags_44
+                                                                                                                                                                                      ? 64'h100000000000
+                                                                                                                                                                                      : faddNonzeroFlags_45
+                                                                                                                                                                                          ? 64'h200000000000
+                                                                                                                                                                                          : faddNonzeroFlags_46
+                                                                                                                                                                                              ? 64'h400000000000
+                                                                                                                                                                                              : faddNonzeroFlags_47
+                                                                                                                                                                                                  ? 64'h800000000000
+                                                                                                                                                                                                  : faddNonzeroFlags_48
+                                                                                                                                                                                                      ? 64'h1000000000000
+                                                                                                                                                                                                      : faddNonzeroFlags_49
+                                                                                                                                                                                                          ? 64'h2000000000000
+                                                                                                                                                                                                          : faddNonzeroFlags_50
+                                                                                                                                                                                                              ? 64'h4000000000000
+                                                                                                                                                                                                              : faddNonzeroFlags_51
+                                                                                                                                                                                                                  ? 64'h8000000000000
+                                                                                                                                                                                                                  : faddNonzeroFlags_52
+                                                                                                                                                                                                                      ? 64'h10000000000000
+                                                                                                                                                                                                                      : faddNonzeroFlags_53
+                                                                                                                                                                                                                          ? 64'h20000000000000
+                                                                                                                                                                                                                          : faddNonzeroFlags_54
+                                                                                                                                                                                                                              ? 64'h40000000000000
+                                                                                                                                                                                                                              : faddNonzeroFlags_55
+                                                                                                                                                                                                                                  ? 64'h80000000000000
+                                                                                                                                                                                                                                  : faddNonzeroFlags_56
+                                                                                                                                                                                                                                      ? 64'h100000000000000
+                                                                                                                                                                                                                                      : faddNonzeroFlags_57
+                                                                                                                                                                                                                                          ? 64'h200000000000000
+                                                                                                                                                                                                                                          : faddNonzeroFlags_58
+                                                                                                                                                                                                                                              ? 64'h400000000000000
+                                                                                                                                                                                                                                              : faddNonzeroFlags_59
+                                                                                                                                                                                                                                                  ? 64'h800000000000000
+                                                                                                                                                                                                                                                  : faddNonzeroFlags_60
+                                                                                                                                                                                                                                                      ? 64'h1000000000000000
+                                                                                                                                                                                                                                                      : faddNonzeroFlags_61
+                                                                                                                                                                                                                                                          ? 64'h2000000000000000
+                                                                                                                                                                                                                                                          : faddNonzeroFlags_62
+                                                                                                                                                                                                                                                              ? 64'h4000000000000000
+                                                                                                                                                                                                                                                              : {faddNonzeroFlags_63,
+                                                                                                                                                                                                                                                                 63'h0};
   wire [31:0]  _numOwnerGroups_T = Row_num + 32'hF;
   wire [27:0]  _numOwnerGroups_T_3 = _numOwnerGroups_T[31:4] + 28'h7;
   wire [31:0]  _totalVectorPackets_T = Column_num + 32'hF;
-  wire [40:0]  _GEN_74 = {9'h0, totalVectorPackets};
+  wire [40:0]  _GEN_76 = {9'h0, totalVectorPackets};
   wire [31:0]  _remaining_T_3 = casez_tmp_0 - 32'h1;
   wire [31:0]  _remaining_T_5 = casez_tmp_0 - 32'h1;
   wire [13:0]  _issueSlotReuse_T = issuePrevCol & issueSlot[63:50];
@@ -2004,20 +2916,164 @@ module CuperSpmvOnly_ChiselDataPath8(
     & _coreLanes_7_5_io_inReady | (&issueSource) & _activeCoreReady_T_187
     & _coreLanes_7_6_io_inReady | (&issueSource) & (&issueOwner)
     & _coreLanes_7_7_io_inReady;
-  wire         _GEN_75 = _ap_idle_T & ap_start;
-  wire         _GEN_76 = PE_Param_in_s_empty_n & boundaryCount == 4'h7;
-  wire         _GEN_77 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10;
-  wire         _GEN_78 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h0;
-  wire         _GEN_79 =
-    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_20;
-  wire         _GEN_80 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h1;
-  wire         _GEN_81 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h2;
-  wire         _GEN_82 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h3;
-  wire         _GEN_83 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h4;
-  wire         _GEN_84 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h5;
-  wire         _GEN_85 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h6;
-  wire         _GEN_86 = PE_Param_in_s_empty_n & (&(boundaryCount[2:0]));
-  wire         _GEN_87 =
+  wire [31:0]  selectedPing_0 =
+    (_selectedPong_7_T ? _accumLanes_0_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_0_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_0_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_0_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_0 =
+    (_selectedPong_7_T ? _accumLanes_0_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_0_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_0_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_0_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_1 =
+    (_selectedPong_7_T ? _accumLanes_0_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_1_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_1_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_1_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_1 =
+    (_selectedPong_7_T ? _accumLanes_0_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_1_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_1_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_1_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_2 =
+    (_selectedPong_7_T ? _accumLanes_0_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_2_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_2_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_2_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_2 =
+    (_selectedPong_7_T ? _accumLanes_0_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_2_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_2_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_2_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_3 =
+    (_selectedPong_7_T ? _accumLanes_0_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_3_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_3_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_3_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_3 =
+    (_selectedPong_7_T ? _accumLanes_0_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_3_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_3_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_3_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_4 =
+    (_selectedPong_7_T ? _accumLanes_0_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_4_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_4_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_4_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_4 =
+    (_selectedPong_7_T ? _accumLanes_0_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_4_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_4_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_4_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_5 =
+    (_selectedPong_7_T ? _accumLanes_0_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_5_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_5_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_5_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_5 =
+    (_selectedPong_7_T ? _accumLanes_0_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_5_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_5_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_5_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_6 =
+    (_selectedPong_7_T ? _accumLanes_0_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_6_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_6_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_6_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_6 =
+    (_selectedPong_7_T ? _accumLanes_0_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_6_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_6_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_6_io_outPong : 32'h0);
+  wire [31:0]  selectedPing_7 =
+    (_selectedPong_7_T ? _accumLanes_0_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_7_io_outPing : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_7_io_outPing : 32'h0)
+    | ((&outPair) ? _accumLanes_7_7_io_outPing : 32'h0);
+  wire [31:0]  selectedPong_7 =
+    (_selectedPong_7_T ? _accumLanes_0_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_1 ? _accumLanes_1_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_2 ? _accumLanes_2_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_3 ? _accumLanes_3_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_4 ? _accumLanes_4_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_5 ? _accumLanes_5_7_io_outPong : 32'h0)
+    | (_selectedPong_7_T_6 ? _accumLanes_6_7_io_outPong : 32'h0)
+    | ((&outPair) ? _accumLanes_7_7_io_outPong : 32'h0);
+  wire         _GEN_77 = _ap_idle_T & ap_start;
+  wire         _GEN_78 = PE_Param_in_s_empty_n & boundaryCount == 4'h7;
+  wire         _GEN_79 = _ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11;
+  wire         _GEN_80 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h0;
+  wire         _GEN_81 =
+    _ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_21;
+  wire         _GEN_82 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h1;
+  wire         _GEN_83 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h2;
+  wire         _GEN_84 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h3;
+  wire         _GEN_85 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h4;
+  wire         _GEN_86 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h5;
+  wire         _GEN_87 = PE_Param_in_s_empty_n & boundaryCount[2:0] == 3'h6;
+  wire         _GEN_88 = PE_Param_in_s_empty_n & (&(boundaryCount[2:0]));
+  wire         _GEN_89 =
     {remaining_0,
      remaining_1,
      remaining_2,
@@ -2027,52 +3083,93 @@ module CuperSpmvOnly_ChiselDataPath8(
      remaining_6,
      remaining_7} == 256'h0;
   wire [31:0]  _nextBatch_T = batchIdx + 32'h1;
-  wire         _GEN_88 = _nextBatch_T >= Batch_num;
-  wire         _GEN_89 = _matrixRead_7_T & _GEN_87;
-  wire         _GEN_90 = _GEN_11 | _GEN_15 | _GEN_19;
-  wire         _GEN_91 = _GEN_90 | ~_GEN_89 | _GEN_88;
-  wire         _GEN_92 = _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid;
-  wire         _GEN_93 =
-    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_90;
-  wire         _GEN_94 = _GEN_93 | ~_matrixRead_7_T | _GEN_87 | ~(|_anySourceCanRead_T);
-  wire         _GEN_95 = (&issueOwner) & ~(|issueSource);
-  wire         _GEN_96 = issueSlot[49] & _GEN_95;
-  wire         _GEN_97 = (&issueOwner) & issueSource == 3'h1;
+  wire         _GEN_90 = _nextBatch_T >= Batch_num;
+  wire         _GEN_91 = _matrixRead_7_T & _GEN_89;
+  wire         _GEN_92 = _GEN_12 | _GEN_16 | _GEN_20;
+  wire         _GEN_93 = _GEN_92 | ~_GEN_91 | _GEN_90;
+  wire         _GEN_94 = _ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid;
+  wire         _GEN_95 =
+    _ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_92;
+  wire         _GEN_96 = _GEN_95 | ~_matrixRead_7_T | _GEN_89 | ~(|_anySourceCanRead_T);
+  wire         _GEN_97 = (&issueOwner) & ~(|issueSource);
   wire         _GEN_98 = issueSlot[49] & _GEN_97;
-  wire         _GEN_99 = (&issueOwner) & issueSource == 3'h2;
+  wire         _GEN_99 = (&issueOwner) & issueSource == 3'h1;
   wire         _GEN_100 = issueSlot[49] & _GEN_99;
-  wire         _GEN_101 = (&issueOwner) & issueSource == 3'h3;
+  wire         _GEN_101 = (&issueOwner) & issueSource == 3'h2;
   wire         _GEN_102 = issueSlot[49] & _GEN_101;
-  wire         _GEN_103 = (&issueOwner) & issueSource == 3'h4;
+  wire         _GEN_103 = (&issueOwner) & issueSource == 3'h3;
   wire         _GEN_104 = issueSlot[49] & _GEN_103;
-  wire         _GEN_105 = (&issueOwner) & issueSource == 3'h5;
+  wire         _GEN_105 = (&issueOwner) & issueSource == 3'h4;
   wire         _GEN_106 = issueSlot[49] & _GEN_105;
-  wire         _GEN_107 = (&issueOwner) & issueSource == 3'h6;
+  wire         _GEN_107 = (&issueOwner) & issueSource == 3'h5;
   wire         _GEN_108 = issueSlot[49] & _GEN_107;
-  wire         _GEN_109 = (&issueOwner) & (&issueSource);
+  wire         _GEN_109 = (&issueOwner) & issueSource == 3'h6;
   wire         _GEN_110 = issueSlot[49] & _GEN_109;
-  wire         _GEN_111 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_95);
-  wire         _GEN_112 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_97);
-  wire         _GEN_113 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_99);
-  wire         _GEN_114 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_101);
-  wire         _GEN_115 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_103);
-  wire         _GEN_116 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_105);
-  wire         _GEN_117 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_107);
-  wire         _GEN_118 = _GEN_25 | ~(_GEN & activeCoreReady & _GEN_109);
-  wire [31:0]  _GEN_119 = {15'h0, outGroup, 3'h0};
-  wire         _GEN_120 =
-    _ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15
-    | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26;
-  wire [16:0]  _GEN_121 = {outGroup, 3'h0};
-  wire [31:0]  _GEN_122 = {15'h0, _GEN_121 + 17'h1};
-  wire [31:0]  _GEN_123 = {15'h0, _GEN_121 + 17'h2};
-  wire [31:0]  _GEN_124 = {15'h0, _GEN_121 + 17'h3};
-  wire [31:0]  _GEN_125 = {15'h0, _GEN_121 + 17'h4};
-  wire [31:0]  _GEN_126 = {15'h0, _GEN_121 + 17'h5};
-  wire [31:0]  _GEN_127 = {15'h0, _GEN_121 + 17'h6};
-  wire [31:0]  _GEN_128 = {15'h0, _GEN_121 + 17'h7};
-  wire         _GEN_129 = _GEN & activeCoreReady;
-  wire [40:0]  _xPacketLimit_T_8 = _GEN_74 - {_nextBatch_T, 9'h0};
+  wire         _GEN_111 = (&issueOwner) & (&issueSource);
+  wire         _GEN_112 = issueSlot[49] & _GEN_111;
+  wire         _GEN_113 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_97);
+  wire         _GEN_114 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_99);
+  wire         _GEN_115 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_101);
+  wire         _GEN_116 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_103);
+  wire         _GEN_117 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_105);
+  wire         _GEN_118 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_107);
+  wire         _GEN_119 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_109);
+  wire         _GEN_120 = _GEN_26 | ~(_GEN & activeCoreReady & _GEN_111);
+  wire [31:0]  _GEN_121 = {15'h0, outGroup, 3'h0};
+  wire         _GEN_122 =
+    _ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16
+    | _GEN_20 | _matrixRead_7_T | _GEN_22 | _GEN_26 | _GEN | _GEN_27;
+  wire [16:0]  _GEN_123 = {outGroup, 3'h0};
+  wire [31:0]  _GEN_124 = {15'h0, _GEN_123 + 17'h1};
+  wire [31:0]  _GEN_125 = {15'h0, _GEN_123 + 17'h2};
+  wire [31:0]  _GEN_126 = {15'h0, _GEN_123 + 17'h3};
+  wire [31:0]  _GEN_127 = {15'h0, _GEN_123 + 17'h4};
+  wire [31:0]  _GEN_128 = {15'h0, _GEN_123 + 17'h5};
+  wire [31:0]  _GEN_129 = {15'h0, _GEN_123 + 17'h6};
+  wire [31:0]  _GEN_130 = {15'h0, _GEN_123 + 17'h7};
+  wire         partialReadNonzeroFlags_0 =
+    outValid_0 & (|{selectedPing_0, selectedPong_0});
+  wire         partialReadNonzeroFlags_1 =
+    outValid_1 & (|{selectedPing_1, selectedPong_1});
+  wire         partialReadNonzeroFlags_2 =
+    outValid_2 & (|{selectedPing_2, selectedPong_2});
+  wire         partialReadNonzeroFlags_3 =
+    outValid_3 & (|{selectedPing_3, selectedPong_3});
+  wire         partialReadNonzeroFlags_4 =
+    outValid_4 & (|{selectedPing_4, selectedPong_4});
+  wire         partialReadNonzeroFlags_5 =
+    outValid_5 & (|{selectedPing_5, selectedPong_5});
+  wire         partialReadNonzeroFlags_6 =
+    outValid_6 & (|{selectedPing_6, selectedPong_6});
+  wire         partialReadNonzeroFlags_7 =
+    outValid_7 & (|{selectedPing_7, selectedPong_7});
+  wire [3:0]   totalPartialReadNonzero =
+    {1'h0,
+     {1'h0, {1'h0, partialReadNonzeroFlags_0} + {1'h0, partialReadNonzeroFlags_1}}
+       + {1'h0, {1'h0, partialReadNonzeroFlags_2} + {1'h0, partialReadNonzeroFlags_3}}}
+    + {1'h0,
+       {1'h0, {1'h0, partialReadNonzeroFlags_4} + {1'h0, partialReadNonzeroFlags_5}}
+         + {1'h0, {1'h0, partialReadNonzeroFlags_6} + {1'h0, partialReadNonzeroFlags_7}}};
+  wire         _GEN_131 = _GEN_8 & (|totalPartialReadNonzero);
+  wire         _GEN_132 = _GEN_131 & ~firstNonzeroPartialReadSeen;
+  wire         _GEN_133 = _GEN & activeCoreReady;
+  wire [7:0]   partialReadFirstNonzeroOh =
+    partialReadNonzeroFlags_0
+      ? 8'h1
+      : partialReadNonzeroFlags_1
+          ? 8'h2
+          : partialReadNonzeroFlags_2
+              ? 8'h4
+              : partialReadNonzeroFlags_3
+                  ? 8'h8
+                  : partialReadNonzeroFlags_4
+                      ? 8'h10
+                      : partialReadNonzeroFlags_5
+                          ? 8'h20
+                          : partialReadNonzeroFlags_6
+                              ? 8'h40
+                              : {partialReadNonzeroFlags_7, 7'h0};
+  wire [40:0]  _xPacketLimit_T_8 = _GEN_76 - {_nextBatch_T, 9'h0};
   wire [31:0]  _remaining_T_1 = PE_Param_in_s_dout[31:0] - casez_tmp;
   always @(posedge ap_clk) begin
     if (~ap_rst_n) begin
@@ -2117,11 +3214,20 @@ module CuperSpmvOnly_ChiselDataPath8(
       counterOutputWrites <= 64'h0;
       counterNonzeroOutputWrites <= 64'h0;
       counterWriterBackpressure <= 64'h0;
+      counterCoreNonzeroOut <= 64'h0;
+      counterFaddNonzeroOut <= 64'h0;
+      counterPartialReadNonzero <= 64'h0;
       firstNonzeroTaggedSeen <= 1'h0;
       firstNonzeroTaggedPacket <= 32'h0;
       firstNonzeroTaggedPair <= 32'h0;
       firstNonzeroTaggedPing <= 32'h0;
       firstNonzeroTaggedPong <= 32'h0;
+      firstNonzeroCoreOutSeen <= 1'h0;
+      firstNonzeroCoreOut <= 32'h0;
+      firstNonzeroFaddOutSeen <= 1'h0;
+      firstNonzeroFaddOut <= 32'h0;
+      firstNonzeroPartialReadSeen <= 1'h0;
+      firstNonzeroPartialRead <= 32'h0;
     end
     else begin
       if (_ap_idle_T) begin
@@ -2150,44 +3256,44 @@ module CuperSpmvOnly_ChiselDataPath8(
         firstNonzeroTaggedSeen <= ~ap_start & firstNonzeroTaggedSeen;
       end
       else begin
-        if (_GEN_9) begin
+        if (_GEN_10) begin
           if (PE_Param_in_s_empty_n & headerCount == 3'h3) begin
             state <= 5'h2;
             initGroup <= 14'h0;
           end
         end
         else if (accumLanes_7_7_io_initValid) begin
-          if (_GEN_43)
+          if (_GEN_45)
             state <= 5'h3;
           else
             initGroup <= _initGroup_T;
         end
         else begin
-          if (_GEN_10) begin
-            if (_GEN_76)
+          if (_GEN_11) begin
+            if (_GEN_78)
               state <= 5'h4;
           end
-          else if (_GEN_11) begin
-            if (_GEN_12)
+          else if (_GEN_12) begin
+            if (_GEN_13)
               state <= 5'h6;
             else if (Vector_X_Stream_in_s_empty_n)
               state <= 5'h5;
           end
-          else if (_GEN_15) begin
+          else if (_GEN_16) begin
             if (&xWriteLane)
               state <= 5'h4;
           end
-          else if (_GEN_19) begin
-            if (_GEN_76)
+          else if (_GEN_20) begin
+            if (_GEN_78)
               state <= 5'h7;
           end
           else if (_matrixRead_7_T) begin
-            if (_GEN_87)
-              state <= _GEN_88 ? 5'hB : 5'h4;
+            if (_GEN_89)
+              state <= _GEN_90 ? 5'hB : 5'h4;
             else if (|_anySourceCanRead_T)
               state <= 5'h8;
           end
-          else if (_GEN_21) begin
+          else if (_GEN_22) begin
             if (issueSlot[49]) begin
               if (&issueOwner)
                 state <= 5'h7;
@@ -2195,21 +3301,21 @@ module CuperSpmvOnly_ChiselDataPath8(
             else
               state <= 5'h9;
           end
-          else if (_GEN_25)
+          else if (_GEN_26)
             state <= 5'hA;
           else if (_GEN) begin
             if (activeCoreReady)
               state <= (&issueOwner) ? 5'h7 : 5'h8;
           end
-          else if (_GEN_26) begin
-            if (_GEN_44)
+          else if (_GEN_27) begin
+            if (_GEN_46)
               state <= 5'hC;
           end
           else if (_accumLanes_7_7_io_outRead_T)
             state <= 5'hD;
-          else if (_GEN_27)
+          else if (_GEN_8)
             state <= 5'hE;
-          else if (_GEN_8) begin
+          else if (_GEN_9) begin
             if (~(outValid_0 & ~Vector_Y_Tagged_Stream_0_s_full_n | outValid_1
                   & ~Vector_Y_Tagged_Stream_1_s_full_n | outValid_2
                   & ~Vector_Y_Tagged_Stream_2_s_full_n | outValid_3
@@ -2220,86 +3326,86 @@ module CuperSpmvOnly_ChiselDataPath8(
                   & ~Vector_Y_Tagged_Stream_7_s_full_n))
               state <= 5'hF;
           end
-          else if (_GEN_45)
-            state <= _GEN_46 | _GEN_47 ? 5'hC : 5'h10;
-          else if (_GEN_48)
-            state <= _GEN_49 ? 5'h11 : 5'h2;
-          else if (_GEN_51)
+          else if (_GEN_47)
+            state <= _GEN_48 | _GEN_49 ? 5'hC : 5'h10;
+          else if (_GEN_50)
+            state <= _GEN_51 ? 5'h11 : 5'h2;
+          else if (_GEN_53)
             state <= 5'h0;
-          if (_GEN_70 | ~_GEN_48 | _GEN_49) begin
+          if (_GEN_72 | ~_GEN_50 | _GEN_51) begin
           end
           else
             initGroup <= 14'h0;
         end
-        if (_GEN_9 | accumLanes_7_7_io_initValid | _GEN_70 | ~_GEN_48 | _GEN_49) begin
+        if (_GEN_10 | accumLanes_7_7_io_initValid | _GEN_72 | ~_GEN_50 | _GEN_51) begin
         end
         else
           iterIdx <= _iterIdx_T;
-        if (_GEN_9 & PE_Param_in_s_empty_n)
+        if (_GEN_10 & PE_Param_in_s_empty_n)
           headerCount <= headerCount + 3'h1;
-        if (_GEN_17 | ~(_GEN_15 & (&xWriteLane))) begin
+        if (_GEN_18 | ~(_GEN_16 & (&xWriteLane))) begin
         end
         else
           counterXPackets <= counterXPackets + 64'h1;
-        if (~_GEN_22) begin
-          if (_GEN_21) begin
-            if (_GEN_96)
-              counterMatrixBeats_0 <= _counterMatrixBeats_T;
+        if (~_GEN_23) begin
+          if (_GEN_22) begin
             if (_GEN_98)
-              counterMatrixBeats_1 <= _counterMatrixBeats_T;
+              counterMatrixBeats_0 <= _counterMatrixBeats_T;
             if (_GEN_100)
-              counterMatrixBeats_2 <= _counterMatrixBeats_T;
+              counterMatrixBeats_1 <= _counterMatrixBeats_T;
             if (_GEN_102)
-              counterMatrixBeats_3 <= _counterMatrixBeats_T;
+              counterMatrixBeats_2 <= _counterMatrixBeats_T;
             if (_GEN_104)
-              counterMatrixBeats_4 <= _counterMatrixBeats_T;
+              counterMatrixBeats_3 <= _counterMatrixBeats_T;
             if (_GEN_106)
-              counterMatrixBeats_5 <= _counterMatrixBeats_T;
+              counterMatrixBeats_4 <= _counterMatrixBeats_T;
             if (_GEN_108)
-              counterMatrixBeats_6 <= _counterMatrixBeats_T;
+              counterMatrixBeats_5 <= _counterMatrixBeats_T;
             if (_GEN_110)
+              counterMatrixBeats_6 <= _counterMatrixBeats_T;
+            if (_GEN_112)
               counterMatrixBeats_7 <= _counterMatrixBeats_T;
           end
           else begin
-            if (_GEN_111) begin
-            end
-            else
-              counterMatrixBeats_0 <= _counterMatrixBeats_T_2;
-            if (_GEN_112) begin
-            end
-            else
-              counterMatrixBeats_1 <= _counterMatrixBeats_T_2;
             if (_GEN_113) begin
             end
             else
-              counterMatrixBeats_2 <= _counterMatrixBeats_T_2;
+              counterMatrixBeats_0 <= _counterMatrixBeats_T_2;
             if (_GEN_114) begin
             end
             else
-              counterMatrixBeats_3 <= _counterMatrixBeats_T_2;
+              counterMatrixBeats_1 <= _counterMatrixBeats_T_2;
             if (_GEN_115) begin
             end
             else
-              counterMatrixBeats_4 <= _counterMatrixBeats_T_2;
+              counterMatrixBeats_2 <= _counterMatrixBeats_T_2;
             if (_GEN_116) begin
             end
             else
-              counterMatrixBeats_5 <= _counterMatrixBeats_T_2;
+              counterMatrixBeats_3 <= _counterMatrixBeats_T_2;
             if (_GEN_117) begin
             end
             else
-              counterMatrixBeats_6 <= _counterMatrixBeats_T_2;
+              counterMatrixBeats_4 <= _counterMatrixBeats_T_2;
             if (_GEN_118) begin
+            end
+            else
+              counterMatrixBeats_5 <= _counterMatrixBeats_T_2;
+            if (_GEN_119) begin
+            end
+            else
+              counterMatrixBeats_6 <= _counterMatrixBeats_T_2;
+            if (_GEN_120) begin
             end
             else
               counterMatrixBeats_7 <= _counterMatrixBeats_T_2;
           end
         end
-        if (_GEN_32 | ~_GEN_129) begin
+        if (_GEN_32 | ~_GEN_133) begin
         end
         else
           counterValidSlots <= counterValidSlots + 64'h1;
-        if (_GEN_22 | ~(_GEN_21 & issueSlot[49])) begin
+        if (_GEN_23 | ~(_GEN_22 & issueSlot[49])) begin
         end
         else
           counterPaddingSlots <= counterPaddingSlots + 64'h1;
@@ -2315,135 +3421,135 @@ module CuperSpmvOnly_ChiselDataPath8(
         end
         else begin
           firstNonzeroTaggedSeen <=
-            _taggedWrite_7_T ? _GEN_68 | _GEN_73 : _GEN_66 | _GEN_73;
-          if (_GEN_69)
+            _taggedWrite_7_T ? _GEN_70 | _GEN_75 : _GEN_68 | _GEN_75;
+          if (_GEN_71)
             firstNonzeroTaggedPacket <= outPacket_7;
-          else if (_GEN_66)
+          else if (_GEN_68)
             firstNonzeroTaggedPacket <= outPacket_6;
-          else if (_GEN_64)
+          else if (_GEN_66)
             firstNonzeroTaggedPacket <= outPacket_5;
-          else if (_GEN_61)
+          else if (_GEN_63)
             firstNonzeroTaggedPacket <= outPacket_4;
-          else if (_GEN_59)
+          else if (_GEN_61)
             firstNonzeroTaggedPacket <= outPacket_3;
-          else if (_GEN_56)
+          else if (_GEN_58)
             firstNonzeroTaggedPacket <= outPacket_2;
-          else if (_GEN_54)
+          else if (_GEN_56)
             firstNonzeroTaggedPacket <= outPacket_1;
-          else if (_GEN_52)
+          else if (_GEN_54)
             firstNonzeroTaggedPacket <= outPacket_0;
         end
         if (_GEN_28
-            | ~(_GEN_8
-                & (_taggedWrite_7_T ? _GEN_68 | _GEN_65 : _GEN_66 | _GEN_65))) begin
+            | ~(_GEN_9
+                & (_taggedWrite_7_T ? _GEN_70 | _GEN_67 : _GEN_68 | _GEN_67))) begin
         end
         else
           firstNonzeroTaggedPair <= {29'h0, outPair};
         if (_GEN_33) begin
         end
-        else if (_GEN_69) begin
+        else if (_GEN_71) begin
           firstNonzeroTaggedPing <= outPing_7;
           firstNonzeroTaggedPong <= outPong_7;
         end
-        else if (_GEN_66) begin
+        else if (_GEN_68) begin
           firstNonzeroTaggedPing <= outPing_6;
           firstNonzeroTaggedPong <= outPong_6;
         end
-        else if (_GEN_64) begin
+        else if (_GEN_66) begin
           firstNonzeroTaggedPing <= outPing_5;
           firstNonzeroTaggedPong <= outPong_5;
         end
-        else if (_GEN_61) begin
+        else if (_GEN_63) begin
           firstNonzeroTaggedPing <= outPing_4;
           firstNonzeroTaggedPong <= outPong_4;
         end
-        else if (_GEN_59) begin
+        else if (_GEN_61) begin
           firstNonzeroTaggedPing <= outPing_3;
           firstNonzeroTaggedPong <= outPong_3;
         end
-        else if (_GEN_56) begin
+        else if (_GEN_58) begin
           firstNonzeroTaggedPing <= outPing_2;
           firstNonzeroTaggedPong <= outPong_2;
         end
-        else if (_GEN_54) begin
+        else if (_GEN_56) begin
           firstNonzeroTaggedPing <= outPing_1;
           firstNonzeroTaggedPong <= outPong_1;
         end
-        else if (_GEN_52) begin
+        else if (_GEN_54) begin
           firstNonzeroTaggedPing <= outPing_0;
           firstNonzeroTaggedPong <= outPong_0;
         end
       end
       donePulse <=
-        ~(_GEN_24 | _GEN_21 | _GEN_25 | _GEN | _GEN_26 | _accumLanes_7_7_io_outRead_T
-          | _GEN_27 | _GEN_8 | _GEN_45 | _GEN_48) & _GEN_51;
-      if (~_GEN_13) begin
+        ~(_GEN_25 | _GEN_22 | _GEN_26 | _GEN | _GEN_27 | _accumLanes_7_7_io_outRead_T
+          | _GEN_8 | _GEN_9 | _GEN_47 | _GEN_50) & _GEN_53;
+      if (~_GEN_14) begin
         if (accumLanes_7_7_io_initValid) begin
-          if (_GEN_43)
+          if (_GEN_45)
             boundaryCount <= 4'h0;
         end
-        else if (_GEN_10) begin
+        else if (_GEN_11) begin
           if (PE_Param_in_s_empty_n)
             boundaryCount <= boundaryCount + 4'h1;
         end
-        else if (_GEN_11) begin
-          if (_GEN_12)
+        else if (_GEN_12) begin
+          if (_GEN_13)
             boundaryCount <= 4'h0;
         end
-        else if (~_GEN_15) begin
-          if (_GEN_19) begin
+        else if (~_GEN_16) begin
+          if (_GEN_20) begin
             if (PE_Param_in_s_empty_n)
               boundaryCount <= boundaryCount + 4'h1;
           end
-          else if (_GEN_50 | ~_GEN_48 | _GEN_49) begin
+          else if (_GEN_52 | ~_GEN_50 | _GEN_51) begin
           end
           else
             boundaryCount <= 4'h0;
         end
       end
-      if (~_GEN_92) begin
-        if (_GEN_10) begin
-          if (_GEN_76) begin
+      if (~_GEN_94) begin
+        if (_GEN_11) begin
+          if (_GEN_78) begin
             batchIdx <= 32'h0;
             xPacketIdx <= 10'h0;
           end
         end
         else begin
-          if (_GEN_91) begin
+          if (_GEN_93) begin
           end
           else
             batchIdx <= _nextBatch_T;
-          if (~_GEN_11) begin
-            if (_GEN_15) begin
+          if (~_GEN_12) begin
+            if (_GEN_16) begin
               if (&xWriteLane)
                 xPacketIdx <= xPacketIdx + 10'h1;
             end
-            else if (_GEN_19 | ~_GEN_89 | _GEN_88) begin
+            else if (_GEN_20 | ~_GEN_91 | _GEN_90) begin
             end
             else
               xPacketIdx <= 10'h0;
           end
         end
       end
-      if (~_GEN_77) begin
-        if (_GEN_11) begin
-          if (_GEN_12 | ~Vector_X_Stream_in_s_empty_n) begin
+      if (~_GEN_79) begin
+        if (_GEN_12) begin
+          if (_GEN_13 | ~Vector_X_Stream_in_s_empty_n) begin
           end
           else
             xWriteLane <= 4'h0;
         end
-        else if (~_GEN_15 | (&xWriteLane)) begin
+        else if (~_GEN_16 | (&xWriteLane)) begin
         end
         else
           xWriteLane <= xWriteLane + 4'h1;
       end
-      if (_GEN_94) begin
+      if (_GEN_96) begin
       end
       else
         issueSource <= selectedSource;
-      if (~_GEN_93) begin
+      if (~_GEN_95) begin
         if (_matrixRead_7_T) begin
-          if (_GEN_87 | ~(|_anySourceCanRead_T)) begin
+          if (_GEN_89 | ~(|_anySourceCanRead_T)) begin
           end
           else begin
             issueOwner <= 3'h0;
@@ -2452,82 +3558,88 @@ module CuperSpmvOnly_ChiselDataPath8(
           end
         end
         else begin
-          if (_GEN_21) begin
+          if (_GEN_22) begin
             if (~(~(issueSlot[49]) | (&issueOwner)))
               issueOwner <= issueOwner + 3'h1;
             issuePrevCol <= issueSlot[63:50];
           end
-          else if (_GEN_25 | ~_GEN_129 | (&issueOwner)) begin
+          else if (_GEN_26 | ~_GEN_133 | (&issueOwner)) begin
           end
           else
             issueOwner <= issueOwner + 3'h1;
-          if (~_GEN_21 | (&_issueSlotReuse_T)) begin
+          if (~_GEN_22 | (&_issueSlotReuse_T)) begin
           end
           else
             issuePrevVal <= issueSlot[31:0];
         end
       end
-      if (~(_ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11
-            | _GEN_15 | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN)) begin
-        if (_GEN_26) begin
-          if (_GEN_44) begin
+      if (~(_ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12
+            | _GEN_16 | _GEN_20 | _matrixRead_7_T | _GEN_22 | _GEN_26 | _GEN)) begin
+        if (_GEN_27) begin
+          if (_GEN_46) begin
             outGroup <= 14'h0;
             outPair <= 3'h0;
           end
         end
         else begin
-          if (_GEN_34 | ~_GEN_45 | _GEN_46 | ~_GEN_47) begin
+          if (_GEN_34 | ~_GEN_47 | _GEN_48 | ~_GEN_49) begin
           end
           else
             outGroup <= _outGroup_T;
-          if (_GEN_34 | ~_GEN_45) begin
+          if (_GEN_34 | ~_GEN_47) begin
           end
-          else if (_GEN_46)
+          else if (_GEN_48)
             outPair <= outPair + 3'h1;
-          else if (_GEN_47)
+          else if (_GEN_49)
             outPair <= 3'h0;
         end
       end
-      if (~_GEN_120) begin
+      if (~_GEN_122) begin
         outValid_0 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_119 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_0_T)) & outValid_0;
+            ? _GEN_121 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_0_T)) & outValid_0;
         outValid_1 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_122 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_1_T)) & outValid_1;
+            ? _GEN_124 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_1_T)) & outValid_1;
         outValid_2 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_123 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_2_T)) & outValid_2;
+            ? _GEN_125 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_2_T)) & outValid_2;
         outValid_3 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_124 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_3_T)) & outValid_3;
+            ? _GEN_126 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_3_T)) & outValid_3;
         outValid_4 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_125 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_4_T)) & outValid_4;
+            ? _GEN_127 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_4_T)) & outValid_4;
         outValid_5 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_126 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_5_T)) & outValid_5;
+            ? _GEN_128 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_5_T)) & outValid_5;
         outValid_6 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_127 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_6_T)) & outValid_6;
+            ? _GEN_129 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_6_T)) & outValid_6;
         outValid_7 <=
           _accumLanes_7_7_io_outRead_T
-            ? _GEN_128 < numOutPackets
-            : (_GEN_27 | ~(_GEN_8 & _taggedWrite_7_T)) & outValid_7;
+            ? _GEN_130 < numOutPackets
+            : (_GEN_8 | ~(_GEN_9 & _taggedWrite_7_T)) & outValid_7;
       end
-      if (_GEN_75) begin
+      if (_GEN_77) begin
         counterAccumAccepts <= 64'h0;
         counterRawStall <= 64'h0;
         counterOutputWrites <= 64'h0;
         counterNonzeroOutputWrites <= 64'h0;
         counterWriterBackpressure <= 64'h0;
+        counterCoreNonzeroOut <= 64'h0;
+        counterFaddNonzeroOut <= 64'h0;
+        counterPartialReadNonzero <= 64'h0;
+        firstNonzeroCoreOut <= 32'h0;
+        firstNonzeroFaddOut <= 32'h0;
+        firstNonzeroPartialRead <= 32'h0;
       end
       else begin
         if (|totalAccumAccepts)
@@ -2602,7 +3714,7 @@ module CuperSpmvOnly_ChiselDataPath8(
         if (|nonzeroOutputWrites)
           counterNonzeroOutputWrites <=
             counterNonzeroOutputWrites + {60'h0, nonzeroOutputWrites};
-        if (_GEN_8
+        if (_GEN_9
             & (outValid_0 & ~Vector_Y_Tagged_Stream_0_s_full_n | outValid_1
                & ~Vector_Y_Tagged_Stream_1_s_full_n | outValid_2
                & ~Vector_Y_Tagged_Stream_2_s_full_n | outValid_3
@@ -2612,17 +3724,185 @@ module CuperSpmvOnly_ChiselDataPath8(
                & ~Vector_Y_Tagged_Stream_6_s_full_n | outValid_7
                & ~Vector_Y_Tagged_Stream_7_s_full_n))
           counterWriterBackpressure <= counterWriterBackpressure + 64'h1;
+        if (|totalCoreNonzeroOuts)
+          counterCoreNonzeroOut <= counterCoreNonzeroOut + {57'h0, totalCoreNonzeroOuts};
+        if (|totalFaddNonzeroOuts)
+          counterFaddNonzeroOut <= counterFaddNonzeroOut + {57'h0, totalFaddNonzeroOuts};
+        if (_GEN_131)
+          counterPartialReadNonzero <=
+            counterPartialReadNonzero + {60'h0, totalPartialReadNonzero};
+        if (_GEN_43)
+          firstNonzeroCoreOut <=
+            (coreFirstNonzeroOh[0] ? _coreLanes_0_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[1] ? _coreLanes_0_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[2] ? _coreLanes_0_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[3] ? _coreLanes_0_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[4] ? _coreLanes_0_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[5] ? _coreLanes_0_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[6] ? _coreLanes_0_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[7] ? _coreLanes_0_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[8] ? _coreLanes_1_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[9] ? _coreLanes_1_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[10] ? _coreLanes_1_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[11] ? _coreLanes_1_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[12] ? _coreLanes_1_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[13] ? _coreLanes_1_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[14] ? _coreLanes_1_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[15] ? _coreLanes_1_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[16] ? _coreLanes_2_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[17] ? _coreLanes_2_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[18] ? _coreLanes_2_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[19] ? _coreLanes_2_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[20] ? _coreLanes_2_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[21] ? _coreLanes_2_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[22] ? _coreLanes_2_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[23] ? _coreLanes_2_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[24] ? _coreLanes_3_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[25] ? _coreLanes_3_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[26] ? _coreLanes_3_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[27] ? _coreLanes_3_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[28] ? _coreLanes_3_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[29] ? _coreLanes_3_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[30] ? _coreLanes_3_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[31] ? _coreLanes_3_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[32] ? _coreLanes_4_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[33] ? _coreLanes_4_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[34] ? _coreLanes_4_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[35] ? _coreLanes_4_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[36] ? _coreLanes_4_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[37] ? _coreLanes_4_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[38] ? _coreLanes_4_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[39] ? _coreLanes_4_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[40] ? _coreLanes_5_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[41] ? _coreLanes_5_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[42] ? _coreLanes_5_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[43] ? _coreLanes_5_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[44] ? _coreLanes_5_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[45] ? _coreLanes_5_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[46] ? _coreLanes_5_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[47] ? _coreLanes_5_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[48] ? _coreLanes_6_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[49] ? _coreLanes_6_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[50] ? _coreLanes_6_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[51] ? _coreLanes_6_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[52] ? _coreLanes_6_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[53] ? _coreLanes_6_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[54] ? _coreLanes_6_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[55] ? _coreLanes_6_7_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[56] ? _coreLanes_7_0_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[57] ? _coreLanes_7_1_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[58] ? _coreLanes_7_2_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[59] ? _coreLanes_7_3_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[60] ? _coreLanes_7_4_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[61] ? _coreLanes_7_5_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[62] ? _coreLanes_7_6_io_debugOutValue : 32'h0)
+            | (coreFirstNonzeroOh[63] ? _coreLanes_7_7_io_debugOutValue : 32'h0);
+        if (_GEN_44)
+          firstNonzeroFaddOut <=
+            (faddFirstNonzeroOh[0] ? _accumLanes_0_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[1] ? _accumLanes_0_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[2] ? _accumLanes_0_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[3] ? _accumLanes_0_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[4] ? _accumLanes_0_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[5] ? _accumLanes_0_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[6] ? _accumLanes_0_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[7] ? _accumLanes_0_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[8] ? _accumLanes_1_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[9] ? _accumLanes_1_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[10] ? _accumLanes_1_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[11] ? _accumLanes_1_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[12] ? _accumLanes_1_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[13] ? _accumLanes_1_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[14] ? _accumLanes_1_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[15] ? _accumLanes_1_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[16] ? _accumLanes_2_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[17] ? _accumLanes_2_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[18] ? _accumLanes_2_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[19] ? _accumLanes_2_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[20] ? _accumLanes_2_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[21] ? _accumLanes_2_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[22] ? _accumLanes_2_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[23] ? _accumLanes_2_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[24] ? _accumLanes_3_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[25] ? _accumLanes_3_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[26] ? _accumLanes_3_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[27] ? _accumLanes_3_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[28] ? _accumLanes_3_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[29] ? _accumLanes_3_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[30] ? _accumLanes_3_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[31] ? _accumLanes_3_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[32] ? _accumLanes_4_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[33] ? _accumLanes_4_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[34] ? _accumLanes_4_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[35] ? _accumLanes_4_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[36] ? _accumLanes_4_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[37] ? _accumLanes_4_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[38] ? _accumLanes_4_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[39] ? _accumLanes_4_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[40] ? _accumLanes_5_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[41] ? _accumLanes_5_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[42] ? _accumLanes_5_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[43] ? _accumLanes_5_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[44] ? _accumLanes_5_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[45] ? _accumLanes_5_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[46] ? _accumLanes_5_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[47] ? _accumLanes_5_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[48] ? _accumLanes_6_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[49] ? _accumLanes_6_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[50] ? _accumLanes_6_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[51] ? _accumLanes_6_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[52] ? _accumLanes_6_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[53] ? _accumLanes_6_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[54] ? _accumLanes_6_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[55] ? _accumLanes_6_7_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[56] ? _accumLanes_7_0_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[57] ? _accumLanes_7_1_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[58] ? _accumLanes_7_2_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[59] ? _accumLanes_7_3_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[60] ? _accumLanes_7_4_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[61] ? _accumLanes_7_5_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[62] ? _accumLanes_7_6_io_debugFaddValue : 32'h0)
+            | (faddFirstNonzeroOh[63] ? _accumLanes_7_7_io_debugFaddValue : 32'h0);
+        if (_GEN_132)
+          firstNonzeroPartialRead <=
+            (partialReadFirstNonzeroOh[0]
+               ? ((|selectedPing_0) ? selectedPing_0 : selectedPong_0)
+               : 32'h0)
+            | (partialReadFirstNonzeroOh[1]
+                 ? ((|selectedPing_1) ? selectedPing_1 : selectedPong_1)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[2]
+                 ? ((|selectedPing_2) ? selectedPing_2 : selectedPong_2)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[3]
+                 ? ((|selectedPing_3) ? selectedPing_3 : selectedPong_3)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[4]
+                 ? ((|selectedPing_4) ? selectedPing_4 : selectedPong_4)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[5]
+                 ? ((|selectedPing_5) ? selectedPing_5 : selectedPong_5)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[6]
+                 ? ((|selectedPing_6) ? selectedPing_6 : selectedPong_6)
+                 : 32'h0)
+            | (partialReadFirstNonzeroOh[7]
+                 ? ((|selectedPing_7) ? selectedPing_7 : selectedPong_7)
+                 : 32'h0);
       end
+      firstNonzeroCoreOutSeen <= ~_GEN_77 & (_GEN_43 | firstNonzeroCoreOutSeen);
+      firstNonzeroFaddOutSeen <= ~_GEN_77 & (_GEN_44 | firstNonzeroFaddOutSeen);
+      firstNonzeroPartialReadSeen <= ~_GEN_77 & (_GEN_132 | firstNonzeroPartialReadSeen);
     end
-    if (_GEN_75) begin
+    if (_GEN_77) begin
       iterationTime <= Iteration_num == 32'h0 ? 32'h1 : Iteration_num;
       numOutPackets <= {4'h0, _numOwnerGroups_T[31:4]};
       numOwnerGroups <= {7'h0, _numOwnerGroups_T_3[27:3]};
       totalVectorPackets <= {4'h0, _totalVectorPackets_T[31:4]};
     end
-    if (~_GEN_92) begin
-      if (_GEN_10) begin
-        if (_GEN_76) begin
+    if (~_GEN_94) begin
+      if (_GEN_11) begin
+        if (_GEN_78) begin
           xPacketLimit <=
             totalVectorPackets == 32'h0
               ? 10'h0
@@ -2646,11 +3926,11 @@ module CuperSpmvOnly_ChiselDataPath8(
         if (PE_Param_in_s_empty_n & (&(boundaryCount[2:0])))
           start_7 <= PE_Param_in_s_dout[31:0];
       end
-      else if (_GEN_91) begin
+      else if (_GEN_93) begin
       end
       else begin
         xPacketLimit <=
-          {_nextBatch_T, 9'h0} >= _GEN_74
+          {_nextBatch_T, 9'h0} >= _GEN_76
             ? 10'h0
             : _xPacketLimit_T_8 > 41'h200 ? 10'h200 : _xPacketLimit_T_8[9:0];
         xPacketBase <= {_nextBatch_T[22:0], 9'h0};
@@ -2664,117 +3944,117 @@ module CuperSpmvOnly_ChiselDataPath8(
         start_7 <= end_7;
       end
     end
-    if (_GEN_77 | ~_GEN_11 | _GEN_12 | ~Vector_X_Stream_in_s_empty_n) begin
+    if (_GEN_79 | ~_GEN_12 | _GEN_13 | ~Vector_X_Stream_in_s_empty_n) begin
     end
     else
       xWriteWord <= Vector_X_Stream_in_s_dout[511:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_78)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_80)) begin
     end
     else
       end_0 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_80)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_82)) begin
     end
     else
       end_1 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_81)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_83)) begin
     end
     else
       end_2 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_82)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_84)) begin
     end
     else
       end_3 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_83)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_85)) begin
     end
     else
       end_4 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_84)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_86)) begin
     end
     else
       end_5 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_85)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_87)) begin
     end
     else
       end_6 <= PE_Param_in_s_dout[31:0];
-    if (_GEN_79 | ~(_GEN_19 & _GEN_86)) begin
+    if (_GEN_81 | ~(_GEN_20 & _GEN_88)) begin
     end
     else
       end_7 <= PE_Param_in_s_dout[31:0];
-    if (~_GEN_79) begin
-      if (_GEN_19) begin
-        if (_GEN_78)
-          remaining_0 <= _remaining_T_1;
+    if (~_GEN_81) begin
+      if (_GEN_20) begin
         if (_GEN_80)
-          remaining_1 <= _remaining_T_1;
-        if (_GEN_81)
-          remaining_2 <= _remaining_T_1;
+          remaining_0 <= _remaining_T_1;
         if (_GEN_82)
-          remaining_3 <= _remaining_T_1;
+          remaining_1 <= _remaining_T_1;
         if (_GEN_83)
-          remaining_4 <= _remaining_T_1;
+          remaining_2 <= _remaining_T_1;
         if (_GEN_84)
-          remaining_5 <= _remaining_T_1;
+          remaining_3 <= _remaining_T_1;
         if (_GEN_85)
-          remaining_6 <= _remaining_T_1;
+          remaining_4 <= _remaining_T_1;
         if (_GEN_86)
+          remaining_5 <= _remaining_T_1;
+        if (_GEN_87)
+          remaining_6 <= _remaining_T_1;
+        if (_GEN_88)
           remaining_7 <= _remaining_T_1;
       end
       else if (~_matrixRead_7_T) begin
-        if (_GEN_21) begin
-          if (_GEN_96)
-            remaining_0 <= _remaining_T_3;
+        if (_GEN_22) begin
           if (_GEN_98)
-            remaining_1 <= _remaining_T_3;
+            remaining_0 <= _remaining_T_3;
           if (_GEN_100)
-            remaining_2 <= _remaining_T_3;
+            remaining_1 <= _remaining_T_3;
           if (_GEN_102)
-            remaining_3 <= _remaining_T_3;
+            remaining_2 <= _remaining_T_3;
           if (_GEN_104)
-            remaining_4 <= _remaining_T_3;
+            remaining_3 <= _remaining_T_3;
           if (_GEN_106)
-            remaining_5 <= _remaining_T_3;
+            remaining_4 <= _remaining_T_3;
           if (_GEN_108)
-            remaining_6 <= _remaining_T_3;
+            remaining_5 <= _remaining_T_3;
           if (_GEN_110)
+            remaining_6 <= _remaining_T_3;
+          if (_GEN_112)
             remaining_7 <= _remaining_T_3;
         end
         else begin
-          if (_GEN_111) begin
-          end
-          else
-            remaining_0 <= _remaining_T_5;
-          if (_GEN_112) begin
-          end
-          else
-            remaining_1 <= _remaining_T_5;
           if (_GEN_113) begin
           end
           else
-            remaining_2 <= _remaining_T_5;
+            remaining_0 <= _remaining_T_5;
           if (_GEN_114) begin
           end
           else
-            remaining_3 <= _remaining_T_5;
+            remaining_1 <= _remaining_T_5;
           if (_GEN_115) begin
           end
           else
-            remaining_4 <= _remaining_T_5;
+            remaining_2 <= _remaining_T_5;
           if (_GEN_116) begin
           end
           else
-            remaining_5 <= _remaining_T_5;
+            remaining_3 <= _remaining_T_5;
           if (_GEN_117) begin
           end
           else
-            remaining_6 <= _remaining_T_5;
+            remaining_4 <= _remaining_T_5;
           if (_GEN_118) begin
+          end
+          else
+            remaining_5 <= _remaining_T_5;
+          if (_GEN_119) begin
+          end
+          else
+            remaining_6 <= _remaining_T_5;
+          if (_GEN_120) begin
           end
           else
             remaining_7 <= _remaining_T_5;
         end
       end
     end
-    if (_GEN_94) begin
+    if (_GEN_96) begin
     end
     else
       issueWord <=
@@ -2786,190 +4066,62 @@ module CuperSpmvOnly_ChiselDataPath8(
         | (_matrixRead_5_T_2 ? Matrix_A_Stream_5_s_dout[511:0] : 512'h0)
         | (_matrixRead_6_T_2 ? Matrix_A_Stream_6_s_dout[511:0] : 512'h0)
         | ((&selectedSource) ? Matrix_A_Stream_7_s_dout[511:0] : 512'h0);
-    if (_GEN_23) begin
+    if (_GEN_24) begin
     end
     else begin
       issueRow <= issueSlot[49:32];
       issueValue <= (&_issueSlotReuse_T) ? issuePrevVal : issueSlot[31:0];
     end
-    if (_ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15
-        | _GEN_19 | _matrixRead_7_T | _GEN_21 | ~_GEN_25) begin
+    if (_ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16
+        | _GEN_20 | _matrixRead_7_T | _GEN_22 | ~_GEN_26) begin
     end
     else
       issueX <= _xMem_ext_R0_data;
-    if (_ap_idle_T | _GEN_9 | accumLanes_7_7_io_initValid | _GEN_10 | _GEN_11 | _GEN_15
-        | _GEN_19 | _matrixRead_7_T | _GEN_21 | _GEN_25 | _GEN | _GEN_26
-        | _accumLanes_7_7_io_outRead_T | ~_GEN_27) begin
+    if (_ap_idle_T | _GEN_10 | accumLanes_7_7_io_initValid | _GEN_11 | _GEN_12 | _GEN_16
+        | _GEN_20 | _matrixRead_7_T | _GEN_22 | _GEN_26 | _GEN | _GEN_27
+        | _accumLanes_7_7_io_outRead_T | ~_GEN_8) begin
     end
     else begin
-      outPing_0 <=
-        (_selectedPong_7_T ? _accumLanes_0_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_0_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_0_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_0_io_outPing : 32'h0);
-      outPing_1 <=
-        (_selectedPong_7_T ? _accumLanes_0_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_1_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_1_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_1_io_outPing : 32'h0);
-      outPing_2 <=
-        (_selectedPong_7_T ? _accumLanes_0_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_2_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_2_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_2_io_outPing : 32'h0);
-      outPing_3 <=
-        (_selectedPong_7_T ? _accumLanes_0_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_3_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_3_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_3_io_outPing : 32'h0);
-      outPing_4 <=
-        (_selectedPong_7_T ? _accumLanes_0_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_4_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_4_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_4_io_outPing : 32'h0);
-      outPing_5 <=
-        (_selectedPong_7_T ? _accumLanes_0_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_5_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_5_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_5_io_outPing : 32'h0);
-      outPing_6 <=
-        (_selectedPong_7_T ? _accumLanes_0_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_6_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_6_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_6_io_outPing : 32'h0);
-      outPing_7 <=
-        (_selectedPong_7_T ? _accumLanes_0_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_7_io_outPing : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_7_io_outPing : 32'h0)
-        | ((&outPair) ? _accumLanes_7_7_io_outPing : 32'h0);
-      outPong_0 <=
-        (_selectedPong_7_T ? _accumLanes_0_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_0_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_0_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_0_io_outPong : 32'h0);
-      outPong_1 <=
-        (_selectedPong_7_T ? _accumLanes_0_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_1_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_1_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_1_io_outPong : 32'h0);
-      outPong_2 <=
-        (_selectedPong_7_T ? _accumLanes_0_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_2_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_2_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_2_io_outPong : 32'h0);
-      outPong_3 <=
-        (_selectedPong_7_T ? _accumLanes_0_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_3_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_3_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_3_io_outPong : 32'h0);
-      outPong_4 <=
-        (_selectedPong_7_T ? _accumLanes_0_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_4_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_4_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_4_io_outPong : 32'h0);
-      outPong_5 <=
-        (_selectedPong_7_T ? _accumLanes_0_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_5_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_5_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_5_io_outPong : 32'h0);
-      outPong_6 <=
-        (_selectedPong_7_T ? _accumLanes_0_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_6_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_6_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_6_io_outPong : 32'h0);
-      outPong_7 <=
-        (_selectedPong_7_T ? _accumLanes_0_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_1 ? _accumLanes_1_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_2 ? _accumLanes_2_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_3 ? _accumLanes_3_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_4 ? _accumLanes_4_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_5 ? _accumLanes_5_7_io_outPong : 32'h0)
-        | (_selectedPong_7_T_6 ? _accumLanes_6_7_io_outPong : 32'h0)
-        | ((&outPair) ? _accumLanes_7_7_io_outPong : 32'h0);
+      outPing_0 <= selectedPing_0;
+      outPing_1 <= selectedPing_1;
+      outPing_2 <= selectedPing_2;
+      outPing_3 <= selectedPing_3;
+      outPing_4 <= selectedPing_4;
+      outPing_5 <= selectedPing_5;
+      outPing_6 <= selectedPing_6;
+      outPing_7 <= selectedPing_7;
+      outPong_0 <= selectedPong_0;
+      outPong_1 <= selectedPong_1;
+      outPong_2 <= selectedPong_2;
+      outPong_3 <= selectedPong_3;
+      outPong_4 <= selectedPong_4;
+      outPong_5 <= selectedPong_5;
+      outPong_6 <= selectedPong_6;
+      outPong_7 <= selectedPong_7;
     end
-    if (_GEN_120 | ~_accumLanes_7_7_io_outRead_T) begin
+    if (_GEN_122 | ~_accumLanes_7_7_io_outRead_T) begin
     end
     else begin
-      outPacket_0 <= _GEN_119;
-      outPacket_1 <= _GEN_122;
-      outPacket_2 <= _GEN_123;
-      outPacket_3 <= _GEN_124;
-      outPacket_4 <= _GEN_125;
-      outPacket_5 <= _GEN_126;
-      outPacket_6 <= _GEN_127;
-      outPacket_7 <= _GEN_128;
+      outPacket_0 <= _GEN_121;
+      outPacket_1 <= _GEN_124;
+      outPacket_2 <= _GEN_125;
+      outPacket_3 <= _GEN_126;
+      outPacket_4 <= _GEN_127;
+      outPacket_5 <= _GEN_128;
+      outPacket_6 <= _GEN_129;
+      outPacket_7 <= _GEN_130;
     end
   end // always @(posedge)
   xMem_8192x32 xMem_ext (
-    .R0_addr (_GEN_23 ? 13'h0 : issueSlot[62:50]),
-    .R0_en   (~_GEN_24 & _GEN_21 & ~(issueSlot[49])),
+    .R0_addr (_GEN_24 ? 13'h0 : issueSlot[62:50]),
+    .R0_en   (~_GEN_25 & _GEN_22 & ~(issueSlot[49])),
     .R0_clk  (ap_clk),
     .R0_data (_xMem_ext_R0_data),
-    .W0_addr (_GEN_18 ? 13'h0 : {xPacketIdx[8:0], 4'h0} + {9'h0, xWriteLane}),
-    .W0_en   (~_GEN_16 & _GEN_15),
+    .W0_addr (_GEN_19 ? 13'h0 : {xPacketIdx[8:0], 4'h0} + {9'h0, xWriteLane}),
+    .W0_en   (~_GEN_17 & _GEN_16),
     .W0_clk  (ap_clk),
     .W0_data
-      (_GEN_18
+      (_GEN_19
          ? 32'h0
          : (xWriteLane == 4'h0 ? xWriteWord[31:0] : 32'h0)
            | (xWriteLane == 4'h1 ? xWriteWord[63:32] : 32'h0)
@@ -3003,7 +4155,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_0_io_out_bits_value),
     .io_busy           (_coreLanes_0_0_io_busy),
-    .io_rawStall       (_coreLanes_0_0_io_rawStall)
+    .io_rawStall       (_coreLanes_0_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_1 (
     .clock             (ap_clk),
@@ -3020,7 +4174,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_1_io_out_bits_value),
     .io_busy           (_coreLanes_0_1_io_busy),
-    .io_rawStall       (_coreLanes_0_1_io_rawStall)
+    .io_rawStall       (_coreLanes_0_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_2 (
     .clock             (ap_clk),
@@ -3037,7 +4193,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_2_io_out_bits_value),
     .io_busy           (_coreLanes_0_2_io_busy),
-    .io_rawStall       (_coreLanes_0_2_io_rawStall)
+    .io_rawStall       (_coreLanes_0_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_3 (
     .clock             (ap_clk),
@@ -3054,7 +4212,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_3_io_out_bits_value),
     .io_busy           (_coreLanes_0_3_io_busy),
-    .io_rawStall       (_coreLanes_0_3_io_rawStall)
+    .io_rawStall       (_coreLanes_0_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_4 (
     .clock             (ap_clk),
@@ -3071,7 +4231,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_4_io_out_bits_value),
     .io_busy           (_coreLanes_0_4_io_busy),
-    .io_rawStall       (_coreLanes_0_4_io_rawStall)
+    .io_rawStall       (_coreLanes_0_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_5 (
     .clock             (ap_clk),
@@ -3088,7 +4250,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_5_io_out_bits_value),
     .io_busy           (_coreLanes_0_5_io_busy),
-    .io_rawStall       (_coreLanes_0_5_io_rawStall)
+    .io_rawStall       (_coreLanes_0_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_6 (
     .clock             (ap_clk),
@@ -3105,7 +4269,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_6_io_out_bits_value),
     .io_busy           (_coreLanes_0_6_io_busy),
-    .io_rawStall       (_coreLanes_0_6_io_rawStall)
+    .io_rawStall       (_coreLanes_0_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_0_7 (
     .clock             (ap_clk),
@@ -3122,7 +4288,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_0_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_0_7_io_out_bits_value),
     .io_busy           (_coreLanes_0_7_io_busy),
-    .io_rawStall       (_coreLanes_0_7_io_rawStall)
+    .io_rawStall       (_coreLanes_0_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_0_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_0_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_0 (
     .clock             (ap_clk),
@@ -3139,7 +4307,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_0_io_out_bits_value),
     .io_busy           (_coreLanes_1_0_io_busy),
-    .io_rawStall       (_coreLanes_1_0_io_rawStall)
+    .io_rawStall       (_coreLanes_1_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_1 (
     .clock             (ap_clk),
@@ -3156,7 +4326,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_1_io_out_bits_value),
     .io_busy           (_coreLanes_1_1_io_busy),
-    .io_rawStall       (_coreLanes_1_1_io_rawStall)
+    .io_rawStall       (_coreLanes_1_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_2 (
     .clock             (ap_clk),
@@ -3173,7 +4345,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_2_io_out_bits_value),
     .io_busy           (_coreLanes_1_2_io_busy),
-    .io_rawStall       (_coreLanes_1_2_io_rawStall)
+    .io_rawStall       (_coreLanes_1_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_3 (
     .clock             (ap_clk),
@@ -3190,7 +4364,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_3_io_out_bits_value),
     .io_busy           (_coreLanes_1_3_io_busy),
-    .io_rawStall       (_coreLanes_1_3_io_rawStall)
+    .io_rawStall       (_coreLanes_1_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_4 (
     .clock             (ap_clk),
@@ -3207,7 +4383,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_4_io_out_bits_value),
     .io_busy           (_coreLanes_1_4_io_busy),
-    .io_rawStall       (_coreLanes_1_4_io_rawStall)
+    .io_rawStall       (_coreLanes_1_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_5 (
     .clock             (ap_clk),
@@ -3224,7 +4402,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_5_io_out_bits_value),
     .io_busy           (_coreLanes_1_5_io_busy),
-    .io_rawStall       (_coreLanes_1_5_io_rawStall)
+    .io_rawStall       (_coreLanes_1_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_6 (
     .clock             (ap_clk),
@@ -3241,7 +4421,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_6_io_out_bits_value),
     .io_busy           (_coreLanes_1_6_io_busy),
-    .io_rawStall       (_coreLanes_1_6_io_rawStall)
+    .io_rawStall       (_coreLanes_1_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_1_7 (
     .clock             (ap_clk),
@@ -3258,7 +4440,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_1_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_1_7_io_out_bits_value),
     .io_busy           (_coreLanes_1_7_io_busy),
-    .io_rawStall       (_coreLanes_1_7_io_rawStall)
+    .io_rawStall       (_coreLanes_1_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_1_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_1_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_0 (
     .clock             (ap_clk),
@@ -3275,7 +4459,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_0_io_out_bits_value),
     .io_busy           (_coreLanes_2_0_io_busy),
-    .io_rawStall       (_coreLanes_2_0_io_rawStall)
+    .io_rawStall       (_coreLanes_2_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_1 (
     .clock             (ap_clk),
@@ -3292,7 +4478,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_1_io_out_bits_value),
     .io_busy           (_coreLanes_2_1_io_busy),
-    .io_rawStall       (_coreLanes_2_1_io_rawStall)
+    .io_rawStall       (_coreLanes_2_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_2 (
     .clock             (ap_clk),
@@ -3309,7 +4497,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_2_io_out_bits_value),
     .io_busy           (_coreLanes_2_2_io_busy),
-    .io_rawStall       (_coreLanes_2_2_io_rawStall)
+    .io_rawStall       (_coreLanes_2_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_3 (
     .clock             (ap_clk),
@@ -3326,7 +4516,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_3_io_out_bits_value),
     .io_busy           (_coreLanes_2_3_io_busy),
-    .io_rawStall       (_coreLanes_2_3_io_rawStall)
+    .io_rawStall       (_coreLanes_2_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_4 (
     .clock             (ap_clk),
@@ -3343,7 +4535,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_4_io_out_bits_value),
     .io_busy           (_coreLanes_2_4_io_busy),
-    .io_rawStall       (_coreLanes_2_4_io_rawStall)
+    .io_rawStall       (_coreLanes_2_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_5 (
     .clock             (ap_clk),
@@ -3360,7 +4554,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_5_io_out_bits_value),
     .io_busy           (_coreLanes_2_5_io_busy),
-    .io_rawStall       (_coreLanes_2_5_io_rawStall)
+    .io_rawStall       (_coreLanes_2_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_6 (
     .clock             (ap_clk),
@@ -3377,7 +4573,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_6_io_out_bits_value),
     .io_busy           (_coreLanes_2_6_io_busy),
-    .io_rawStall       (_coreLanes_2_6_io_rawStall)
+    .io_rawStall       (_coreLanes_2_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_2_7 (
     .clock             (ap_clk),
@@ -3394,7 +4592,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_2_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_2_7_io_out_bits_value),
     .io_busy           (_coreLanes_2_7_io_busy),
-    .io_rawStall       (_coreLanes_2_7_io_rawStall)
+    .io_rawStall       (_coreLanes_2_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_2_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_2_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_0 (
     .clock             (ap_clk),
@@ -3411,7 +4611,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_0_io_out_bits_value),
     .io_busy           (_coreLanes_3_0_io_busy),
-    .io_rawStall       (_coreLanes_3_0_io_rawStall)
+    .io_rawStall       (_coreLanes_3_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_1 (
     .clock             (ap_clk),
@@ -3428,7 +4630,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_1_io_out_bits_value),
     .io_busy           (_coreLanes_3_1_io_busy),
-    .io_rawStall       (_coreLanes_3_1_io_rawStall)
+    .io_rawStall       (_coreLanes_3_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_2 (
     .clock             (ap_clk),
@@ -3445,7 +4649,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_2_io_out_bits_value),
     .io_busy           (_coreLanes_3_2_io_busy),
-    .io_rawStall       (_coreLanes_3_2_io_rawStall)
+    .io_rawStall       (_coreLanes_3_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_3 (
     .clock             (ap_clk),
@@ -3462,7 +4668,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_3_io_out_bits_value),
     .io_busy           (_coreLanes_3_3_io_busy),
-    .io_rawStall       (_coreLanes_3_3_io_rawStall)
+    .io_rawStall       (_coreLanes_3_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_4 (
     .clock             (ap_clk),
@@ -3479,7 +4687,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_4_io_out_bits_value),
     .io_busy           (_coreLanes_3_4_io_busy),
-    .io_rawStall       (_coreLanes_3_4_io_rawStall)
+    .io_rawStall       (_coreLanes_3_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_5 (
     .clock             (ap_clk),
@@ -3496,7 +4706,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_5_io_out_bits_value),
     .io_busy           (_coreLanes_3_5_io_busy),
-    .io_rawStall       (_coreLanes_3_5_io_rawStall)
+    .io_rawStall       (_coreLanes_3_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_6 (
     .clock             (ap_clk),
@@ -3513,7 +4725,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_6_io_out_bits_value),
     .io_busy           (_coreLanes_3_6_io_busy),
-    .io_rawStall       (_coreLanes_3_6_io_rawStall)
+    .io_rawStall       (_coreLanes_3_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_3_7 (
     .clock             (ap_clk),
@@ -3530,7 +4744,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_3_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_3_7_io_out_bits_value),
     .io_busy           (_coreLanes_3_7_io_busy),
-    .io_rawStall       (_coreLanes_3_7_io_rawStall)
+    .io_rawStall       (_coreLanes_3_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_3_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_3_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_0 (
     .clock             (ap_clk),
@@ -3547,7 +4763,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_0_io_out_bits_value),
     .io_busy           (_coreLanes_4_0_io_busy),
-    .io_rawStall       (_coreLanes_4_0_io_rawStall)
+    .io_rawStall       (_coreLanes_4_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_1 (
     .clock             (ap_clk),
@@ -3564,7 +4782,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_1_io_out_bits_value),
     .io_busy           (_coreLanes_4_1_io_busy),
-    .io_rawStall       (_coreLanes_4_1_io_rawStall)
+    .io_rawStall       (_coreLanes_4_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_2 (
     .clock             (ap_clk),
@@ -3581,7 +4801,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_2_io_out_bits_value),
     .io_busy           (_coreLanes_4_2_io_busy),
-    .io_rawStall       (_coreLanes_4_2_io_rawStall)
+    .io_rawStall       (_coreLanes_4_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_3 (
     .clock             (ap_clk),
@@ -3598,7 +4820,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_3_io_out_bits_value),
     .io_busy           (_coreLanes_4_3_io_busy),
-    .io_rawStall       (_coreLanes_4_3_io_rawStall)
+    .io_rawStall       (_coreLanes_4_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_4 (
     .clock             (ap_clk),
@@ -3615,7 +4839,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_4_io_out_bits_value),
     .io_busy           (_coreLanes_4_4_io_busy),
-    .io_rawStall       (_coreLanes_4_4_io_rawStall)
+    .io_rawStall       (_coreLanes_4_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_5 (
     .clock             (ap_clk),
@@ -3632,7 +4858,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_5_io_out_bits_value),
     .io_busy           (_coreLanes_4_5_io_busy),
-    .io_rawStall       (_coreLanes_4_5_io_rawStall)
+    .io_rawStall       (_coreLanes_4_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_6 (
     .clock             (ap_clk),
@@ -3649,7 +4877,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_6_io_out_bits_value),
     .io_busy           (_coreLanes_4_6_io_busy),
-    .io_rawStall       (_coreLanes_4_6_io_rawStall)
+    .io_rawStall       (_coreLanes_4_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_4_7 (
     .clock             (ap_clk),
@@ -3666,7 +4896,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_4_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_4_7_io_out_bits_value),
     .io_busy           (_coreLanes_4_7_io_busy),
-    .io_rawStall       (_coreLanes_4_7_io_rawStall)
+    .io_rawStall       (_coreLanes_4_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_4_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_4_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_0 (
     .clock             (ap_clk),
@@ -3683,7 +4915,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_0_io_out_bits_value),
     .io_busy           (_coreLanes_5_0_io_busy),
-    .io_rawStall       (_coreLanes_5_0_io_rawStall)
+    .io_rawStall       (_coreLanes_5_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_1 (
     .clock             (ap_clk),
@@ -3700,7 +4934,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_1_io_out_bits_value),
     .io_busy           (_coreLanes_5_1_io_busy),
-    .io_rawStall       (_coreLanes_5_1_io_rawStall)
+    .io_rawStall       (_coreLanes_5_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_2 (
     .clock             (ap_clk),
@@ -3717,7 +4953,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_2_io_out_bits_value),
     .io_busy           (_coreLanes_5_2_io_busy),
-    .io_rawStall       (_coreLanes_5_2_io_rawStall)
+    .io_rawStall       (_coreLanes_5_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_3 (
     .clock             (ap_clk),
@@ -3734,7 +4972,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_3_io_out_bits_value),
     .io_busy           (_coreLanes_5_3_io_busy),
-    .io_rawStall       (_coreLanes_5_3_io_rawStall)
+    .io_rawStall       (_coreLanes_5_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_4 (
     .clock             (ap_clk),
@@ -3751,7 +4991,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_4_io_out_bits_value),
     .io_busy           (_coreLanes_5_4_io_busy),
-    .io_rawStall       (_coreLanes_5_4_io_rawStall)
+    .io_rawStall       (_coreLanes_5_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_5 (
     .clock             (ap_clk),
@@ -3768,7 +5010,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_5_io_out_bits_value),
     .io_busy           (_coreLanes_5_5_io_busy),
-    .io_rawStall       (_coreLanes_5_5_io_rawStall)
+    .io_rawStall       (_coreLanes_5_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_6 (
     .clock             (ap_clk),
@@ -3785,7 +5029,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_6_io_out_bits_value),
     .io_busy           (_coreLanes_5_6_io_busy),
-    .io_rawStall       (_coreLanes_5_6_io_rawStall)
+    .io_rawStall       (_coreLanes_5_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_5_7 (
     .clock             (ap_clk),
@@ -3802,7 +5048,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_5_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_5_7_io_out_bits_value),
     .io_busy           (_coreLanes_5_7_io_busy),
-    .io_rawStall       (_coreLanes_5_7_io_rawStall)
+    .io_rawStall       (_coreLanes_5_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_5_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_5_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_0 (
     .clock             (ap_clk),
@@ -3819,7 +5067,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_0_io_out_bits_value),
     .io_busy           (_coreLanes_6_0_io_busy),
-    .io_rawStall       (_coreLanes_6_0_io_rawStall)
+    .io_rawStall       (_coreLanes_6_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_1 (
     .clock             (ap_clk),
@@ -3836,7 +5086,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_1_io_out_bits_value),
     .io_busy           (_coreLanes_6_1_io_busy),
-    .io_rawStall       (_coreLanes_6_1_io_rawStall)
+    .io_rawStall       (_coreLanes_6_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_2 (
     .clock             (ap_clk),
@@ -3853,7 +5105,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_2_io_out_bits_value),
     .io_busy           (_coreLanes_6_2_io_busy),
-    .io_rawStall       (_coreLanes_6_2_io_rawStall)
+    .io_rawStall       (_coreLanes_6_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_3 (
     .clock             (ap_clk),
@@ -3870,7 +5124,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_3_io_out_bits_value),
     .io_busy           (_coreLanes_6_3_io_busy),
-    .io_rawStall       (_coreLanes_6_3_io_rawStall)
+    .io_rawStall       (_coreLanes_6_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_4 (
     .clock             (ap_clk),
@@ -3887,7 +5143,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_4_io_out_bits_value),
     .io_busy           (_coreLanes_6_4_io_busy),
-    .io_rawStall       (_coreLanes_6_4_io_rawStall)
+    .io_rawStall       (_coreLanes_6_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_5 (
     .clock             (ap_clk),
@@ -3904,7 +5162,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_5_io_out_bits_value),
     .io_busy           (_coreLanes_6_5_io_busy),
-    .io_rawStall       (_coreLanes_6_5_io_rawStall)
+    .io_rawStall       (_coreLanes_6_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_6 (
     .clock             (ap_clk),
@@ -3921,7 +5181,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_6_io_out_bits_value),
     .io_busy           (_coreLanes_6_6_io_busy),
-    .io_rawStall       (_coreLanes_6_6_io_rawStall)
+    .io_rawStall       (_coreLanes_6_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_6_7 (
     .clock             (ap_clk),
@@ -3938,7 +5200,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_6_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_6_7_io_out_bits_value),
     .io_busy           (_coreLanes_6_7_io_busy),
-    .io_rawStall       (_coreLanes_6_7_io_rawStall)
+    .io_rawStall       (_coreLanes_6_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_6_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_6_7_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_0 (
     .clock             (ap_clk),
@@ -3955,7 +5219,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_0_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_0_io_out_bits_value),
     .io_busy           (_coreLanes_7_0_io_busy),
-    .io_rawStall       (_coreLanes_7_0_io_rawStall)
+    .io_rawStall       (_coreLanes_7_0_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_0_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_0_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_1 (
     .clock             (ap_clk),
@@ -3972,7 +5238,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_1_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_1_io_out_bits_value),
     .io_busy           (_coreLanes_7_1_io_busy),
-    .io_rawStall       (_coreLanes_7_1_io_rawStall)
+    .io_rawStall       (_coreLanes_7_1_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_1_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_1_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_2 (
     .clock             (ap_clk),
@@ -3989,7 +5257,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_2_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_2_io_out_bits_value),
     .io_busy           (_coreLanes_7_2_io_busy),
-    .io_rawStall       (_coreLanes_7_2_io_rawStall)
+    .io_rawStall       (_coreLanes_7_2_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_2_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_2_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_3 (
     .clock             (ap_clk),
@@ -4006,7 +5276,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_3_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_3_io_out_bits_value),
     .io_busy           (_coreLanes_7_3_io_busy),
-    .io_rawStall       (_coreLanes_7_3_io_rawStall)
+    .io_rawStall       (_coreLanes_7_3_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_3_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_3_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_4 (
     .clock             (ap_clk),
@@ -4023,7 +5295,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_4_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_4_io_out_bits_value),
     .io_busy           (_coreLanes_7_4_io_busy),
-    .io_rawStall       (_coreLanes_7_4_io_rawStall)
+    .io_rawStall       (_coreLanes_7_4_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_4_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_4_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_5 (
     .clock             (ap_clk),
@@ -4040,7 +5314,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_5_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_5_io_out_bits_value),
     .io_busy           (_coreLanes_7_5_io_busy),
-    .io_rawStall       (_coreLanes_7_5_io_rawStall)
+    .io_rawStall       (_coreLanes_7_5_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_5_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_5_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_6 (
     .clock             (ap_clk),
@@ -4057,7 +5333,9 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_6_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_6_io_out_bits_value),
     .io_busy           (_coreLanes_7_6_io_busy),
-    .io_rawStall       (_coreLanes_7_6_io_rawStall)
+    .io_rawStall       (_coreLanes_7_6_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_6_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_6_io_debugOutValue)
   );
   StripCoreLane coreLanes_7_7 (
     .clock             (ap_clk),
@@ -4074,1159 +5352,1289 @@ module CuperSpmvOnly_ChiselDataPath8(
     .io_out_bits_pong  (_coreLanes_7_7_io_out_bits_pong),
     .io_out_bits_value (_coreLanes_7_7_io_out_bits_value),
     .io_busy           (_coreLanes_7_7_io_busy),
-    .io_rawStall       (_coreLanes_7_7_io_rawStall)
+    .io_rawStall       (_coreLanes_7_7_io_rawStall),
+    .io_debugOutAccept (_coreLanes_7_7_io_debugOutAccept),
+    .io_debugOutValue  (_coreLanes_7_7_io_debugOutValue)
   );
   StripAccumLane accumLanes_0_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_0_io_in_ready),
-    .io_in_valid      (_coreLanes_0_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_0_io_outPing),
-    .io_outPong       (_accumLanes_0_0_io_outPong),
-    .io_busy          (_accumLanes_0_0_io_busy),
-    .io_rawStall      (_accumLanes_0_0_io_rawStall),
-    .io_accept        (_accumLanes_0_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_0_io_in_ready),
+    .io_in_valid       (_coreLanes_0_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_0_io_outPing),
+    .io_outPong        (_accumLanes_0_0_io_outPong),
+    .io_busy           (_accumLanes_0_0_io_busy),
+    .io_rawStall       (_accumLanes_0_0_io_rawStall),
+    .io_accept         (_accumLanes_0_0_io_accept),
+    .io_debugFaddValid (_accumLanes_0_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_1_io_in_ready),
-    .io_in_valid      (_coreLanes_0_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_1_io_outPing),
-    .io_outPong       (_accumLanes_0_1_io_outPong),
-    .io_busy          (_accumLanes_0_1_io_busy),
-    .io_rawStall      (_accumLanes_0_1_io_rawStall),
-    .io_accept        (_accumLanes_0_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_1_io_in_ready),
+    .io_in_valid       (_coreLanes_0_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_1_io_outPing),
+    .io_outPong        (_accumLanes_0_1_io_outPong),
+    .io_busy           (_accumLanes_0_1_io_busy),
+    .io_rawStall       (_accumLanes_0_1_io_rawStall),
+    .io_accept         (_accumLanes_0_1_io_accept),
+    .io_debugFaddValid (_accumLanes_0_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_2_io_in_ready),
-    .io_in_valid      (_coreLanes_0_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_2_io_outPing),
-    .io_outPong       (_accumLanes_0_2_io_outPong),
-    .io_busy          (_accumLanes_0_2_io_busy),
-    .io_rawStall      (_accumLanes_0_2_io_rawStall),
-    .io_accept        (_accumLanes_0_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_2_io_in_ready),
+    .io_in_valid       (_coreLanes_0_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_2_io_outPing),
+    .io_outPong        (_accumLanes_0_2_io_outPong),
+    .io_busy           (_accumLanes_0_2_io_busy),
+    .io_rawStall       (_accumLanes_0_2_io_rawStall),
+    .io_accept         (_accumLanes_0_2_io_accept),
+    .io_debugFaddValid (_accumLanes_0_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_3_io_in_ready),
-    .io_in_valid      (_coreLanes_0_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_3_io_outPing),
-    .io_outPong       (_accumLanes_0_3_io_outPong),
-    .io_busy          (_accumLanes_0_3_io_busy),
-    .io_rawStall      (_accumLanes_0_3_io_rawStall),
-    .io_accept        (_accumLanes_0_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_3_io_in_ready),
+    .io_in_valid       (_coreLanes_0_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_3_io_outPing),
+    .io_outPong        (_accumLanes_0_3_io_outPong),
+    .io_busy           (_accumLanes_0_3_io_busy),
+    .io_rawStall       (_accumLanes_0_3_io_rawStall),
+    .io_accept         (_accumLanes_0_3_io_accept),
+    .io_debugFaddValid (_accumLanes_0_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_4_io_in_ready),
-    .io_in_valid      (_coreLanes_0_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_4_io_outPing),
-    .io_outPong       (_accumLanes_0_4_io_outPong),
-    .io_busy          (_accumLanes_0_4_io_busy),
-    .io_rawStall      (_accumLanes_0_4_io_rawStall),
-    .io_accept        (_accumLanes_0_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_4_io_in_ready),
+    .io_in_valid       (_coreLanes_0_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_4_io_outPing),
+    .io_outPong        (_accumLanes_0_4_io_outPong),
+    .io_busy           (_accumLanes_0_4_io_busy),
+    .io_rawStall       (_accumLanes_0_4_io_rawStall),
+    .io_accept         (_accumLanes_0_4_io_accept),
+    .io_debugFaddValid (_accumLanes_0_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_5_io_in_ready),
-    .io_in_valid      (_coreLanes_0_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_5_io_outPing),
-    .io_outPong       (_accumLanes_0_5_io_outPong),
-    .io_busy          (_accumLanes_0_5_io_busy),
-    .io_rawStall      (_accumLanes_0_5_io_rawStall),
-    .io_accept        (_accumLanes_0_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_5_io_in_ready),
+    .io_in_valid       (_coreLanes_0_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_5_io_outPing),
+    .io_outPong        (_accumLanes_0_5_io_outPong),
+    .io_busy           (_accumLanes_0_5_io_busy),
+    .io_rawStall       (_accumLanes_0_5_io_rawStall),
+    .io_accept         (_accumLanes_0_5_io_accept),
+    .io_debugFaddValid (_accumLanes_0_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_6_io_in_ready),
-    .io_in_valid      (_coreLanes_0_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_6_io_outPing),
-    .io_outPong       (_accumLanes_0_6_io_outPong),
-    .io_busy          (_accumLanes_0_6_io_busy),
-    .io_rawStall      (_accumLanes_0_6_io_rawStall),
-    .io_accept        (_accumLanes_0_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_6_io_in_ready),
+    .io_in_valid       (_coreLanes_0_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_6_io_outPing),
+    .io_outPong        (_accumLanes_0_6_io_outPong),
+    .io_busy           (_accumLanes_0_6_io_busy),
+    .io_rawStall       (_accumLanes_0_6_io_rawStall),
+    .io_accept         (_accumLanes_0_6_io_accept),
+    .io_debugFaddValid (_accumLanes_0_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_0_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_0_7_io_in_ready),
-    .io_in_valid      (_coreLanes_0_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_0_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_0_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_0_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_0_7_io_outPing),
-    .io_outPong       (_accumLanes_0_7_io_outPong),
-    .io_busy          (_accumLanes_0_7_io_busy),
-    .io_rawStall      (_accumLanes_0_7_io_rawStall),
-    .io_accept        (_accumLanes_0_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_0_7_io_in_ready),
+    .io_in_valid       (_coreLanes_0_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_0_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_0_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_0_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_0_7_io_outPing),
+    .io_outPong        (_accumLanes_0_7_io_outPong),
+    .io_busy           (_accumLanes_0_7_io_busy),
+    .io_rawStall       (_accumLanes_0_7_io_rawStall),
+    .io_accept         (_accumLanes_0_7_io_accept),
+    .io_debugFaddValid (_accumLanes_0_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_0_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_0_io_in_ready),
-    .io_in_valid      (_coreLanes_1_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_0_io_outPing),
-    .io_outPong       (_accumLanes_1_0_io_outPong),
-    .io_busy          (_accumLanes_1_0_io_busy),
-    .io_rawStall      (_accumLanes_1_0_io_rawStall),
-    .io_accept        (_accumLanes_1_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_0_io_in_ready),
+    .io_in_valid       (_coreLanes_1_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_0_io_outPing),
+    .io_outPong        (_accumLanes_1_0_io_outPong),
+    .io_busy           (_accumLanes_1_0_io_busy),
+    .io_rawStall       (_accumLanes_1_0_io_rawStall),
+    .io_accept         (_accumLanes_1_0_io_accept),
+    .io_debugFaddValid (_accumLanes_1_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_1_io_in_ready),
-    .io_in_valid      (_coreLanes_1_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_1_io_outPing),
-    .io_outPong       (_accumLanes_1_1_io_outPong),
-    .io_busy          (_accumLanes_1_1_io_busy),
-    .io_rawStall      (_accumLanes_1_1_io_rawStall),
-    .io_accept        (_accumLanes_1_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_1_io_in_ready),
+    .io_in_valid       (_coreLanes_1_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_1_io_outPing),
+    .io_outPong        (_accumLanes_1_1_io_outPong),
+    .io_busy           (_accumLanes_1_1_io_busy),
+    .io_rawStall       (_accumLanes_1_1_io_rawStall),
+    .io_accept         (_accumLanes_1_1_io_accept),
+    .io_debugFaddValid (_accumLanes_1_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_2_io_in_ready),
-    .io_in_valid      (_coreLanes_1_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_2_io_outPing),
-    .io_outPong       (_accumLanes_1_2_io_outPong),
-    .io_busy          (_accumLanes_1_2_io_busy),
-    .io_rawStall      (_accumLanes_1_2_io_rawStall),
-    .io_accept        (_accumLanes_1_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_2_io_in_ready),
+    .io_in_valid       (_coreLanes_1_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_2_io_outPing),
+    .io_outPong        (_accumLanes_1_2_io_outPong),
+    .io_busy           (_accumLanes_1_2_io_busy),
+    .io_rawStall       (_accumLanes_1_2_io_rawStall),
+    .io_accept         (_accumLanes_1_2_io_accept),
+    .io_debugFaddValid (_accumLanes_1_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_3_io_in_ready),
-    .io_in_valid      (_coreLanes_1_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_3_io_outPing),
-    .io_outPong       (_accumLanes_1_3_io_outPong),
-    .io_busy          (_accumLanes_1_3_io_busy),
-    .io_rawStall      (_accumLanes_1_3_io_rawStall),
-    .io_accept        (_accumLanes_1_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_3_io_in_ready),
+    .io_in_valid       (_coreLanes_1_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_3_io_outPing),
+    .io_outPong        (_accumLanes_1_3_io_outPong),
+    .io_busy           (_accumLanes_1_3_io_busy),
+    .io_rawStall       (_accumLanes_1_3_io_rawStall),
+    .io_accept         (_accumLanes_1_3_io_accept),
+    .io_debugFaddValid (_accumLanes_1_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_4_io_in_ready),
-    .io_in_valid      (_coreLanes_1_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_4_io_outPing),
-    .io_outPong       (_accumLanes_1_4_io_outPong),
-    .io_busy          (_accumLanes_1_4_io_busy),
-    .io_rawStall      (_accumLanes_1_4_io_rawStall),
-    .io_accept        (_accumLanes_1_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_4_io_in_ready),
+    .io_in_valid       (_coreLanes_1_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_4_io_outPing),
+    .io_outPong        (_accumLanes_1_4_io_outPong),
+    .io_busy           (_accumLanes_1_4_io_busy),
+    .io_rawStall       (_accumLanes_1_4_io_rawStall),
+    .io_accept         (_accumLanes_1_4_io_accept),
+    .io_debugFaddValid (_accumLanes_1_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_5_io_in_ready),
-    .io_in_valid      (_coreLanes_1_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_5_io_outPing),
-    .io_outPong       (_accumLanes_1_5_io_outPong),
-    .io_busy          (_accumLanes_1_5_io_busy),
-    .io_rawStall      (_accumLanes_1_5_io_rawStall),
-    .io_accept        (_accumLanes_1_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_5_io_in_ready),
+    .io_in_valid       (_coreLanes_1_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_5_io_outPing),
+    .io_outPong        (_accumLanes_1_5_io_outPong),
+    .io_busy           (_accumLanes_1_5_io_busy),
+    .io_rawStall       (_accumLanes_1_5_io_rawStall),
+    .io_accept         (_accumLanes_1_5_io_accept),
+    .io_debugFaddValid (_accumLanes_1_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_6_io_in_ready),
-    .io_in_valid      (_coreLanes_1_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_6_io_outPing),
-    .io_outPong       (_accumLanes_1_6_io_outPong),
-    .io_busy          (_accumLanes_1_6_io_busy),
-    .io_rawStall      (_accumLanes_1_6_io_rawStall),
-    .io_accept        (_accumLanes_1_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_6_io_in_ready),
+    .io_in_valid       (_coreLanes_1_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_6_io_outPing),
+    .io_outPong        (_accumLanes_1_6_io_outPong),
+    .io_busy           (_accumLanes_1_6_io_busy),
+    .io_rawStall       (_accumLanes_1_6_io_rawStall),
+    .io_accept         (_accumLanes_1_6_io_accept),
+    .io_debugFaddValid (_accumLanes_1_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_1_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_1_7_io_in_ready),
-    .io_in_valid      (_coreLanes_1_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_1_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_1_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_1_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_1_7_io_outPing),
-    .io_outPong       (_accumLanes_1_7_io_outPong),
-    .io_busy          (_accumLanes_1_7_io_busy),
-    .io_rawStall      (_accumLanes_1_7_io_rawStall),
-    .io_accept        (_accumLanes_1_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_1_7_io_in_ready),
+    .io_in_valid       (_coreLanes_1_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_1_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_1_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_1_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_1),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_1_7_io_outPing),
+    .io_outPong        (_accumLanes_1_7_io_outPong),
+    .io_busy           (_accumLanes_1_7_io_busy),
+    .io_rawStall       (_accumLanes_1_7_io_rawStall),
+    .io_accept         (_accumLanes_1_7_io_accept),
+    .io_debugFaddValid (_accumLanes_1_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_1_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_0_io_in_ready),
-    .io_in_valid      (_coreLanes_2_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_0_io_outPing),
-    .io_outPong       (_accumLanes_2_0_io_outPong),
-    .io_busy          (_accumLanes_2_0_io_busy),
-    .io_rawStall      (_accumLanes_2_0_io_rawStall),
-    .io_accept        (_accumLanes_2_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_0_io_in_ready),
+    .io_in_valid       (_coreLanes_2_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_0_io_outPing),
+    .io_outPong        (_accumLanes_2_0_io_outPong),
+    .io_busy           (_accumLanes_2_0_io_busy),
+    .io_rawStall       (_accumLanes_2_0_io_rawStall),
+    .io_accept         (_accumLanes_2_0_io_accept),
+    .io_debugFaddValid (_accumLanes_2_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_1_io_in_ready),
-    .io_in_valid      (_coreLanes_2_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_1_io_outPing),
-    .io_outPong       (_accumLanes_2_1_io_outPong),
-    .io_busy          (_accumLanes_2_1_io_busy),
-    .io_rawStall      (_accumLanes_2_1_io_rawStall),
-    .io_accept        (_accumLanes_2_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_1_io_in_ready),
+    .io_in_valid       (_coreLanes_2_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_1_io_outPing),
+    .io_outPong        (_accumLanes_2_1_io_outPong),
+    .io_busy           (_accumLanes_2_1_io_busy),
+    .io_rawStall       (_accumLanes_2_1_io_rawStall),
+    .io_accept         (_accumLanes_2_1_io_accept),
+    .io_debugFaddValid (_accumLanes_2_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_2_io_in_ready),
-    .io_in_valid      (_coreLanes_2_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_2_io_outPing),
-    .io_outPong       (_accumLanes_2_2_io_outPong),
-    .io_busy          (_accumLanes_2_2_io_busy),
-    .io_rawStall      (_accumLanes_2_2_io_rawStall),
-    .io_accept        (_accumLanes_2_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_2_io_in_ready),
+    .io_in_valid       (_coreLanes_2_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_2_io_outPing),
+    .io_outPong        (_accumLanes_2_2_io_outPong),
+    .io_busy           (_accumLanes_2_2_io_busy),
+    .io_rawStall       (_accumLanes_2_2_io_rawStall),
+    .io_accept         (_accumLanes_2_2_io_accept),
+    .io_debugFaddValid (_accumLanes_2_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_3_io_in_ready),
-    .io_in_valid      (_coreLanes_2_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_3_io_outPing),
-    .io_outPong       (_accumLanes_2_3_io_outPong),
-    .io_busy          (_accumLanes_2_3_io_busy),
-    .io_rawStall      (_accumLanes_2_3_io_rawStall),
-    .io_accept        (_accumLanes_2_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_3_io_in_ready),
+    .io_in_valid       (_coreLanes_2_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_3_io_outPing),
+    .io_outPong        (_accumLanes_2_3_io_outPong),
+    .io_busy           (_accumLanes_2_3_io_busy),
+    .io_rawStall       (_accumLanes_2_3_io_rawStall),
+    .io_accept         (_accumLanes_2_3_io_accept),
+    .io_debugFaddValid (_accumLanes_2_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_4_io_in_ready),
-    .io_in_valid      (_coreLanes_2_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_4_io_outPing),
-    .io_outPong       (_accumLanes_2_4_io_outPong),
-    .io_busy          (_accumLanes_2_4_io_busy),
-    .io_rawStall      (_accumLanes_2_4_io_rawStall),
-    .io_accept        (_accumLanes_2_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_4_io_in_ready),
+    .io_in_valid       (_coreLanes_2_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_4_io_outPing),
+    .io_outPong        (_accumLanes_2_4_io_outPong),
+    .io_busy           (_accumLanes_2_4_io_busy),
+    .io_rawStall       (_accumLanes_2_4_io_rawStall),
+    .io_accept         (_accumLanes_2_4_io_accept),
+    .io_debugFaddValid (_accumLanes_2_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_5_io_in_ready),
-    .io_in_valid      (_coreLanes_2_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_5_io_outPing),
-    .io_outPong       (_accumLanes_2_5_io_outPong),
-    .io_busy          (_accumLanes_2_5_io_busy),
-    .io_rawStall      (_accumLanes_2_5_io_rawStall),
-    .io_accept        (_accumLanes_2_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_5_io_in_ready),
+    .io_in_valid       (_coreLanes_2_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_5_io_outPing),
+    .io_outPong        (_accumLanes_2_5_io_outPong),
+    .io_busy           (_accumLanes_2_5_io_busy),
+    .io_rawStall       (_accumLanes_2_5_io_rawStall),
+    .io_accept         (_accumLanes_2_5_io_accept),
+    .io_debugFaddValid (_accumLanes_2_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_6_io_in_ready),
-    .io_in_valid      (_coreLanes_2_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_6_io_outPing),
-    .io_outPong       (_accumLanes_2_6_io_outPong),
-    .io_busy          (_accumLanes_2_6_io_busy),
-    .io_rawStall      (_accumLanes_2_6_io_rawStall),
-    .io_accept        (_accumLanes_2_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_6_io_in_ready),
+    .io_in_valid       (_coreLanes_2_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_6_io_outPing),
+    .io_outPong        (_accumLanes_2_6_io_outPong),
+    .io_busy           (_accumLanes_2_6_io_busy),
+    .io_rawStall       (_accumLanes_2_6_io_rawStall),
+    .io_accept         (_accumLanes_2_6_io_accept),
+    .io_debugFaddValid (_accumLanes_2_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_2_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_2_7_io_in_ready),
-    .io_in_valid      (_coreLanes_2_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_2_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_2_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_2_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_2_7_io_outPing),
-    .io_outPong       (_accumLanes_2_7_io_outPong),
-    .io_busy          (_accumLanes_2_7_io_busy),
-    .io_rawStall      (_accumLanes_2_7_io_rawStall),
-    .io_accept        (_accumLanes_2_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_2_7_io_in_ready),
+    .io_in_valid       (_coreLanes_2_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_2_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_2_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_2_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_2),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_2_7_io_outPing),
+    .io_outPong        (_accumLanes_2_7_io_outPong),
+    .io_busy           (_accumLanes_2_7_io_busy),
+    .io_rawStall       (_accumLanes_2_7_io_rawStall),
+    .io_accept         (_accumLanes_2_7_io_accept),
+    .io_debugFaddValid (_accumLanes_2_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_2_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_0_io_in_ready),
-    .io_in_valid      (_coreLanes_3_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_0_io_outPing),
-    .io_outPong       (_accumLanes_3_0_io_outPong),
-    .io_busy          (_accumLanes_3_0_io_busy),
-    .io_rawStall      (_accumLanes_3_0_io_rawStall),
-    .io_accept        (_accumLanes_3_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_0_io_in_ready),
+    .io_in_valid       (_coreLanes_3_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_0_io_outPing),
+    .io_outPong        (_accumLanes_3_0_io_outPong),
+    .io_busy           (_accumLanes_3_0_io_busy),
+    .io_rawStall       (_accumLanes_3_0_io_rawStall),
+    .io_accept         (_accumLanes_3_0_io_accept),
+    .io_debugFaddValid (_accumLanes_3_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_1_io_in_ready),
-    .io_in_valid      (_coreLanes_3_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_1_io_outPing),
-    .io_outPong       (_accumLanes_3_1_io_outPong),
-    .io_busy          (_accumLanes_3_1_io_busy),
-    .io_rawStall      (_accumLanes_3_1_io_rawStall),
-    .io_accept        (_accumLanes_3_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_1_io_in_ready),
+    .io_in_valid       (_coreLanes_3_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_1_io_outPing),
+    .io_outPong        (_accumLanes_3_1_io_outPong),
+    .io_busy           (_accumLanes_3_1_io_busy),
+    .io_rawStall       (_accumLanes_3_1_io_rawStall),
+    .io_accept         (_accumLanes_3_1_io_accept),
+    .io_debugFaddValid (_accumLanes_3_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_2_io_in_ready),
-    .io_in_valid      (_coreLanes_3_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_2_io_outPing),
-    .io_outPong       (_accumLanes_3_2_io_outPong),
-    .io_busy          (_accumLanes_3_2_io_busy),
-    .io_rawStall      (_accumLanes_3_2_io_rawStall),
-    .io_accept        (_accumLanes_3_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_2_io_in_ready),
+    .io_in_valid       (_coreLanes_3_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_2_io_outPing),
+    .io_outPong        (_accumLanes_3_2_io_outPong),
+    .io_busy           (_accumLanes_3_2_io_busy),
+    .io_rawStall       (_accumLanes_3_2_io_rawStall),
+    .io_accept         (_accumLanes_3_2_io_accept),
+    .io_debugFaddValid (_accumLanes_3_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_3_io_in_ready),
-    .io_in_valid      (_coreLanes_3_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_3_io_outPing),
-    .io_outPong       (_accumLanes_3_3_io_outPong),
-    .io_busy          (_accumLanes_3_3_io_busy),
-    .io_rawStall      (_accumLanes_3_3_io_rawStall),
-    .io_accept        (_accumLanes_3_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_3_io_in_ready),
+    .io_in_valid       (_coreLanes_3_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_3_io_outPing),
+    .io_outPong        (_accumLanes_3_3_io_outPong),
+    .io_busy           (_accumLanes_3_3_io_busy),
+    .io_rawStall       (_accumLanes_3_3_io_rawStall),
+    .io_accept         (_accumLanes_3_3_io_accept),
+    .io_debugFaddValid (_accumLanes_3_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_4_io_in_ready),
-    .io_in_valid      (_coreLanes_3_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_4_io_outPing),
-    .io_outPong       (_accumLanes_3_4_io_outPong),
-    .io_busy          (_accumLanes_3_4_io_busy),
-    .io_rawStall      (_accumLanes_3_4_io_rawStall),
-    .io_accept        (_accumLanes_3_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_4_io_in_ready),
+    .io_in_valid       (_coreLanes_3_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_4_io_outPing),
+    .io_outPong        (_accumLanes_3_4_io_outPong),
+    .io_busy           (_accumLanes_3_4_io_busy),
+    .io_rawStall       (_accumLanes_3_4_io_rawStall),
+    .io_accept         (_accumLanes_3_4_io_accept),
+    .io_debugFaddValid (_accumLanes_3_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_5_io_in_ready),
-    .io_in_valid      (_coreLanes_3_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_5_io_outPing),
-    .io_outPong       (_accumLanes_3_5_io_outPong),
-    .io_busy          (_accumLanes_3_5_io_busy),
-    .io_rawStall      (_accumLanes_3_5_io_rawStall),
-    .io_accept        (_accumLanes_3_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_5_io_in_ready),
+    .io_in_valid       (_coreLanes_3_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_5_io_outPing),
+    .io_outPong        (_accumLanes_3_5_io_outPong),
+    .io_busy           (_accumLanes_3_5_io_busy),
+    .io_rawStall       (_accumLanes_3_5_io_rawStall),
+    .io_accept         (_accumLanes_3_5_io_accept),
+    .io_debugFaddValid (_accumLanes_3_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_6_io_in_ready),
-    .io_in_valid      (_coreLanes_3_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_6_io_outPing),
-    .io_outPong       (_accumLanes_3_6_io_outPong),
-    .io_busy          (_accumLanes_3_6_io_busy),
-    .io_rawStall      (_accumLanes_3_6_io_rawStall),
-    .io_accept        (_accumLanes_3_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_6_io_in_ready),
+    .io_in_valid       (_coreLanes_3_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_6_io_outPing),
+    .io_outPong        (_accumLanes_3_6_io_outPong),
+    .io_busy           (_accumLanes_3_6_io_busy),
+    .io_rawStall       (_accumLanes_3_6_io_rawStall),
+    .io_accept         (_accumLanes_3_6_io_accept),
+    .io_debugFaddValid (_accumLanes_3_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_3_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_3_7_io_in_ready),
-    .io_in_valid      (_coreLanes_3_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_3_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_3_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_3_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_3_7_io_outPing),
-    .io_outPong       (_accumLanes_3_7_io_outPong),
-    .io_busy          (_accumLanes_3_7_io_busy),
-    .io_rawStall      (_accumLanes_3_7_io_rawStall),
-    .io_accept        (_accumLanes_3_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_3_7_io_in_ready),
+    .io_in_valid       (_coreLanes_3_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_3_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_3_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_3_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_3),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_3_7_io_outPing),
+    .io_outPong        (_accumLanes_3_7_io_outPong),
+    .io_busy           (_accumLanes_3_7_io_busy),
+    .io_rawStall       (_accumLanes_3_7_io_rawStall),
+    .io_accept         (_accumLanes_3_7_io_accept),
+    .io_debugFaddValid (_accumLanes_3_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_3_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_0_io_in_ready),
-    .io_in_valid      (_coreLanes_4_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_0_io_outPing),
-    .io_outPong       (_accumLanes_4_0_io_outPong),
-    .io_busy          (_accumLanes_4_0_io_busy),
-    .io_rawStall      (_accumLanes_4_0_io_rawStall),
-    .io_accept        (_accumLanes_4_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_0_io_in_ready),
+    .io_in_valid       (_coreLanes_4_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_0_io_outPing),
+    .io_outPong        (_accumLanes_4_0_io_outPong),
+    .io_busy           (_accumLanes_4_0_io_busy),
+    .io_rawStall       (_accumLanes_4_0_io_rawStall),
+    .io_accept         (_accumLanes_4_0_io_accept),
+    .io_debugFaddValid (_accumLanes_4_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_1_io_in_ready),
-    .io_in_valid      (_coreLanes_4_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_1_io_outPing),
-    .io_outPong       (_accumLanes_4_1_io_outPong),
-    .io_busy          (_accumLanes_4_1_io_busy),
-    .io_rawStall      (_accumLanes_4_1_io_rawStall),
-    .io_accept        (_accumLanes_4_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_1_io_in_ready),
+    .io_in_valid       (_coreLanes_4_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_1_io_outPing),
+    .io_outPong        (_accumLanes_4_1_io_outPong),
+    .io_busy           (_accumLanes_4_1_io_busy),
+    .io_rawStall       (_accumLanes_4_1_io_rawStall),
+    .io_accept         (_accumLanes_4_1_io_accept),
+    .io_debugFaddValid (_accumLanes_4_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_2_io_in_ready),
-    .io_in_valid      (_coreLanes_4_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_2_io_outPing),
-    .io_outPong       (_accumLanes_4_2_io_outPong),
-    .io_busy          (_accumLanes_4_2_io_busy),
-    .io_rawStall      (_accumLanes_4_2_io_rawStall),
-    .io_accept        (_accumLanes_4_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_2_io_in_ready),
+    .io_in_valid       (_coreLanes_4_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_2_io_outPing),
+    .io_outPong        (_accumLanes_4_2_io_outPong),
+    .io_busy           (_accumLanes_4_2_io_busy),
+    .io_rawStall       (_accumLanes_4_2_io_rawStall),
+    .io_accept         (_accumLanes_4_2_io_accept),
+    .io_debugFaddValid (_accumLanes_4_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_3_io_in_ready),
-    .io_in_valid      (_coreLanes_4_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_3_io_outPing),
-    .io_outPong       (_accumLanes_4_3_io_outPong),
-    .io_busy          (_accumLanes_4_3_io_busy),
-    .io_rawStall      (_accumLanes_4_3_io_rawStall),
-    .io_accept        (_accumLanes_4_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_3_io_in_ready),
+    .io_in_valid       (_coreLanes_4_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_3_io_outPing),
+    .io_outPong        (_accumLanes_4_3_io_outPong),
+    .io_busy           (_accumLanes_4_3_io_busy),
+    .io_rawStall       (_accumLanes_4_3_io_rawStall),
+    .io_accept         (_accumLanes_4_3_io_accept),
+    .io_debugFaddValid (_accumLanes_4_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_4_io_in_ready),
-    .io_in_valid      (_coreLanes_4_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_4_io_outPing),
-    .io_outPong       (_accumLanes_4_4_io_outPong),
-    .io_busy          (_accumLanes_4_4_io_busy),
-    .io_rawStall      (_accumLanes_4_4_io_rawStall),
-    .io_accept        (_accumLanes_4_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_4_io_in_ready),
+    .io_in_valid       (_coreLanes_4_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_4_io_outPing),
+    .io_outPong        (_accumLanes_4_4_io_outPong),
+    .io_busy           (_accumLanes_4_4_io_busy),
+    .io_rawStall       (_accumLanes_4_4_io_rawStall),
+    .io_accept         (_accumLanes_4_4_io_accept),
+    .io_debugFaddValid (_accumLanes_4_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_5_io_in_ready),
-    .io_in_valid      (_coreLanes_4_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_5_io_outPing),
-    .io_outPong       (_accumLanes_4_5_io_outPong),
-    .io_busy          (_accumLanes_4_5_io_busy),
-    .io_rawStall      (_accumLanes_4_5_io_rawStall),
-    .io_accept        (_accumLanes_4_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_5_io_in_ready),
+    .io_in_valid       (_coreLanes_4_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_5_io_outPing),
+    .io_outPong        (_accumLanes_4_5_io_outPong),
+    .io_busy           (_accumLanes_4_5_io_busy),
+    .io_rawStall       (_accumLanes_4_5_io_rawStall),
+    .io_accept         (_accumLanes_4_5_io_accept),
+    .io_debugFaddValid (_accumLanes_4_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_6_io_in_ready),
-    .io_in_valid      (_coreLanes_4_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_6_io_outPing),
-    .io_outPong       (_accumLanes_4_6_io_outPong),
-    .io_busy          (_accumLanes_4_6_io_busy),
-    .io_rawStall      (_accumLanes_4_6_io_rawStall),
-    .io_accept        (_accumLanes_4_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_6_io_in_ready),
+    .io_in_valid       (_coreLanes_4_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_6_io_outPing),
+    .io_outPong        (_accumLanes_4_6_io_outPong),
+    .io_busy           (_accumLanes_4_6_io_busy),
+    .io_rawStall       (_accumLanes_4_6_io_rawStall),
+    .io_accept         (_accumLanes_4_6_io_accept),
+    .io_debugFaddValid (_accumLanes_4_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_4_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_4_7_io_in_ready),
-    .io_in_valid      (_coreLanes_4_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_4_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_4_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_4_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_4_7_io_outPing),
-    .io_outPong       (_accumLanes_4_7_io_outPong),
-    .io_busy          (_accumLanes_4_7_io_busy),
-    .io_rawStall      (_accumLanes_4_7_io_rawStall),
-    .io_accept        (_accumLanes_4_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_4_7_io_in_ready),
+    .io_in_valid       (_coreLanes_4_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_4_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_4_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_4_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_4),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_4_7_io_outPing),
+    .io_outPong        (_accumLanes_4_7_io_outPong),
+    .io_busy           (_accumLanes_4_7_io_busy),
+    .io_rawStall       (_accumLanes_4_7_io_rawStall),
+    .io_accept         (_accumLanes_4_7_io_accept),
+    .io_debugFaddValid (_accumLanes_4_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_4_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_0_io_in_ready),
-    .io_in_valid      (_coreLanes_5_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_0_io_outPing),
-    .io_outPong       (_accumLanes_5_0_io_outPong),
-    .io_busy          (_accumLanes_5_0_io_busy),
-    .io_rawStall      (_accumLanes_5_0_io_rawStall),
-    .io_accept        (_accumLanes_5_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_0_io_in_ready),
+    .io_in_valid       (_coreLanes_5_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_0_io_outPing),
+    .io_outPong        (_accumLanes_5_0_io_outPong),
+    .io_busy           (_accumLanes_5_0_io_busy),
+    .io_rawStall       (_accumLanes_5_0_io_rawStall),
+    .io_accept         (_accumLanes_5_0_io_accept),
+    .io_debugFaddValid (_accumLanes_5_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_1_io_in_ready),
-    .io_in_valid      (_coreLanes_5_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_1_io_outPing),
-    .io_outPong       (_accumLanes_5_1_io_outPong),
-    .io_busy          (_accumLanes_5_1_io_busy),
-    .io_rawStall      (_accumLanes_5_1_io_rawStall),
-    .io_accept        (_accumLanes_5_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_1_io_in_ready),
+    .io_in_valid       (_coreLanes_5_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_1_io_outPing),
+    .io_outPong        (_accumLanes_5_1_io_outPong),
+    .io_busy           (_accumLanes_5_1_io_busy),
+    .io_rawStall       (_accumLanes_5_1_io_rawStall),
+    .io_accept         (_accumLanes_5_1_io_accept),
+    .io_debugFaddValid (_accumLanes_5_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_2_io_in_ready),
-    .io_in_valid      (_coreLanes_5_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_2_io_outPing),
-    .io_outPong       (_accumLanes_5_2_io_outPong),
-    .io_busy          (_accumLanes_5_2_io_busy),
-    .io_rawStall      (_accumLanes_5_2_io_rawStall),
-    .io_accept        (_accumLanes_5_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_2_io_in_ready),
+    .io_in_valid       (_coreLanes_5_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_2_io_outPing),
+    .io_outPong        (_accumLanes_5_2_io_outPong),
+    .io_busy           (_accumLanes_5_2_io_busy),
+    .io_rawStall       (_accumLanes_5_2_io_rawStall),
+    .io_accept         (_accumLanes_5_2_io_accept),
+    .io_debugFaddValid (_accumLanes_5_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_3_io_in_ready),
-    .io_in_valid      (_coreLanes_5_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_3_io_outPing),
-    .io_outPong       (_accumLanes_5_3_io_outPong),
-    .io_busy          (_accumLanes_5_3_io_busy),
-    .io_rawStall      (_accumLanes_5_3_io_rawStall),
-    .io_accept        (_accumLanes_5_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_3_io_in_ready),
+    .io_in_valid       (_coreLanes_5_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_3_io_outPing),
+    .io_outPong        (_accumLanes_5_3_io_outPong),
+    .io_busy           (_accumLanes_5_3_io_busy),
+    .io_rawStall       (_accumLanes_5_3_io_rawStall),
+    .io_accept         (_accumLanes_5_3_io_accept),
+    .io_debugFaddValid (_accumLanes_5_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_4_io_in_ready),
-    .io_in_valid      (_coreLanes_5_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_4_io_outPing),
-    .io_outPong       (_accumLanes_5_4_io_outPong),
-    .io_busy          (_accumLanes_5_4_io_busy),
-    .io_rawStall      (_accumLanes_5_4_io_rawStall),
-    .io_accept        (_accumLanes_5_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_4_io_in_ready),
+    .io_in_valid       (_coreLanes_5_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_4_io_outPing),
+    .io_outPong        (_accumLanes_5_4_io_outPong),
+    .io_busy           (_accumLanes_5_4_io_busy),
+    .io_rawStall       (_accumLanes_5_4_io_rawStall),
+    .io_accept         (_accumLanes_5_4_io_accept),
+    .io_debugFaddValid (_accumLanes_5_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_5_io_in_ready),
-    .io_in_valid      (_coreLanes_5_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_5_io_outPing),
-    .io_outPong       (_accumLanes_5_5_io_outPong),
-    .io_busy          (_accumLanes_5_5_io_busy),
-    .io_rawStall      (_accumLanes_5_5_io_rawStall),
-    .io_accept        (_accumLanes_5_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_5_io_in_ready),
+    .io_in_valid       (_coreLanes_5_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_5_io_outPing),
+    .io_outPong        (_accumLanes_5_5_io_outPong),
+    .io_busy           (_accumLanes_5_5_io_busy),
+    .io_rawStall       (_accumLanes_5_5_io_rawStall),
+    .io_accept         (_accumLanes_5_5_io_accept),
+    .io_debugFaddValid (_accumLanes_5_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_6_io_in_ready),
-    .io_in_valid      (_coreLanes_5_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_6_io_outPing),
-    .io_outPong       (_accumLanes_5_6_io_outPong),
-    .io_busy          (_accumLanes_5_6_io_busy),
-    .io_rawStall      (_accumLanes_5_6_io_rawStall),
-    .io_accept        (_accumLanes_5_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_6_io_in_ready),
+    .io_in_valid       (_coreLanes_5_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_6_io_outPing),
+    .io_outPong        (_accumLanes_5_6_io_outPong),
+    .io_busy           (_accumLanes_5_6_io_busy),
+    .io_rawStall       (_accumLanes_5_6_io_rawStall),
+    .io_accept         (_accumLanes_5_6_io_accept),
+    .io_debugFaddValid (_accumLanes_5_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_5_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_5_7_io_in_ready),
-    .io_in_valid      (_coreLanes_5_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_5_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_5_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_5_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_5_7_io_outPing),
-    .io_outPong       (_accumLanes_5_7_io_outPong),
-    .io_busy          (_accumLanes_5_7_io_busy),
-    .io_rawStall      (_accumLanes_5_7_io_rawStall),
-    .io_accept        (_accumLanes_5_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_5_7_io_in_ready),
+    .io_in_valid       (_coreLanes_5_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_5_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_5_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_5_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_5),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_5_7_io_outPing),
+    .io_outPong        (_accumLanes_5_7_io_outPong),
+    .io_busy           (_accumLanes_5_7_io_busy),
+    .io_rawStall       (_accumLanes_5_7_io_rawStall),
+    .io_accept         (_accumLanes_5_7_io_accept),
+    .io_debugFaddValid (_accumLanes_5_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_5_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_0_io_in_ready),
-    .io_in_valid      (_coreLanes_6_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_0_io_outPing),
-    .io_outPong       (_accumLanes_6_0_io_outPong),
-    .io_busy          (_accumLanes_6_0_io_busy),
-    .io_rawStall      (_accumLanes_6_0_io_rawStall),
-    .io_accept        (_accumLanes_6_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_0_io_in_ready),
+    .io_in_valid       (_coreLanes_6_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_0_io_outPing),
+    .io_outPong        (_accumLanes_6_0_io_outPong),
+    .io_busy           (_accumLanes_6_0_io_busy),
+    .io_rawStall       (_accumLanes_6_0_io_rawStall),
+    .io_accept         (_accumLanes_6_0_io_accept),
+    .io_debugFaddValid (_accumLanes_6_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_1_io_in_ready),
-    .io_in_valid      (_coreLanes_6_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_1_io_outPing),
-    .io_outPong       (_accumLanes_6_1_io_outPong),
-    .io_busy          (_accumLanes_6_1_io_busy),
-    .io_rawStall      (_accumLanes_6_1_io_rawStall),
-    .io_accept        (_accumLanes_6_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_1_io_in_ready),
+    .io_in_valid       (_coreLanes_6_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_1_io_outPing),
+    .io_outPong        (_accumLanes_6_1_io_outPong),
+    .io_busy           (_accumLanes_6_1_io_busy),
+    .io_rawStall       (_accumLanes_6_1_io_rawStall),
+    .io_accept         (_accumLanes_6_1_io_accept),
+    .io_debugFaddValid (_accumLanes_6_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_2_io_in_ready),
-    .io_in_valid      (_coreLanes_6_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_2_io_outPing),
-    .io_outPong       (_accumLanes_6_2_io_outPong),
-    .io_busy          (_accumLanes_6_2_io_busy),
-    .io_rawStall      (_accumLanes_6_2_io_rawStall),
-    .io_accept        (_accumLanes_6_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_2_io_in_ready),
+    .io_in_valid       (_coreLanes_6_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_2_io_outPing),
+    .io_outPong        (_accumLanes_6_2_io_outPong),
+    .io_busy           (_accumLanes_6_2_io_busy),
+    .io_rawStall       (_accumLanes_6_2_io_rawStall),
+    .io_accept         (_accumLanes_6_2_io_accept),
+    .io_debugFaddValid (_accumLanes_6_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_3_io_in_ready),
-    .io_in_valid      (_coreLanes_6_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_3_io_outPing),
-    .io_outPong       (_accumLanes_6_3_io_outPong),
-    .io_busy          (_accumLanes_6_3_io_busy),
-    .io_rawStall      (_accumLanes_6_3_io_rawStall),
-    .io_accept        (_accumLanes_6_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_3_io_in_ready),
+    .io_in_valid       (_coreLanes_6_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_3_io_outPing),
+    .io_outPong        (_accumLanes_6_3_io_outPong),
+    .io_busy           (_accumLanes_6_3_io_busy),
+    .io_rawStall       (_accumLanes_6_3_io_rawStall),
+    .io_accept         (_accumLanes_6_3_io_accept),
+    .io_debugFaddValid (_accumLanes_6_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_4_io_in_ready),
-    .io_in_valid      (_coreLanes_6_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_4_io_outPing),
-    .io_outPong       (_accumLanes_6_4_io_outPong),
-    .io_busy          (_accumLanes_6_4_io_busy),
-    .io_rawStall      (_accumLanes_6_4_io_rawStall),
-    .io_accept        (_accumLanes_6_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_4_io_in_ready),
+    .io_in_valid       (_coreLanes_6_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_4_io_outPing),
+    .io_outPong        (_accumLanes_6_4_io_outPong),
+    .io_busy           (_accumLanes_6_4_io_busy),
+    .io_rawStall       (_accumLanes_6_4_io_rawStall),
+    .io_accept         (_accumLanes_6_4_io_accept),
+    .io_debugFaddValid (_accumLanes_6_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_5_io_in_ready),
-    .io_in_valid      (_coreLanes_6_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_5_io_outPing),
-    .io_outPong       (_accumLanes_6_5_io_outPong),
-    .io_busy          (_accumLanes_6_5_io_busy),
-    .io_rawStall      (_accumLanes_6_5_io_rawStall),
-    .io_accept        (_accumLanes_6_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_5_io_in_ready),
+    .io_in_valid       (_coreLanes_6_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_5_io_outPing),
+    .io_outPong        (_accumLanes_6_5_io_outPong),
+    .io_busy           (_accumLanes_6_5_io_busy),
+    .io_rawStall       (_accumLanes_6_5_io_rawStall),
+    .io_accept         (_accumLanes_6_5_io_accept),
+    .io_debugFaddValid (_accumLanes_6_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_6_io_in_ready),
-    .io_in_valid      (_coreLanes_6_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_6_io_outPing),
-    .io_outPong       (_accumLanes_6_6_io_outPong),
-    .io_busy          (_accumLanes_6_6_io_busy),
-    .io_rawStall      (_accumLanes_6_6_io_rawStall),
-    .io_accept        (_accumLanes_6_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_6_io_in_ready),
+    .io_in_valid       (_coreLanes_6_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_6_io_outPing),
+    .io_outPong        (_accumLanes_6_6_io_outPong),
+    .io_busy           (_accumLanes_6_6_io_busy),
+    .io_rawStall       (_accumLanes_6_6_io_rawStall),
+    .io_accept         (_accumLanes_6_6_io_accept),
+    .io_debugFaddValid (_accumLanes_6_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_6_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_6_7_io_in_ready),
-    .io_in_valid      (_coreLanes_6_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_6_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_6_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_6_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_6_7_io_outPing),
-    .io_outPong       (_accumLanes_6_7_io_outPong),
-    .io_busy          (_accumLanes_6_7_io_busy),
-    .io_rawStall      (_accumLanes_6_7_io_rawStall),
-    .io_accept        (_accumLanes_6_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_6_7_io_in_ready),
+    .io_in_valid       (_coreLanes_6_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_6_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_6_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_6_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & _selectedPong_7_T_6),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_6_7_io_outPing),
+    .io_outPong        (_accumLanes_6_7_io_outPong),
+    .io_busy           (_accumLanes_6_7_io_busy),
+    .io_rawStall       (_accumLanes_6_7_io_rawStall),
+    .io_accept         (_accumLanes_6_7_io_accept),
+    .io_debugFaddValid (_accumLanes_6_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_6_7_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_0 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_0_io_in_ready),
-    .io_in_valid      (_coreLanes_7_0_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_0_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_0_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_0_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_0_io_outPing),
-    .io_outPong       (_accumLanes_7_0_io_outPong),
-    .io_busy          (_accumLanes_7_0_io_busy),
-    .io_rawStall      (_accumLanes_7_0_io_rawStall),
-    .io_accept        (_accumLanes_7_0_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_0_io_in_ready),
+    .io_in_valid       (_coreLanes_7_0_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_0_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_0_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_0_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_0_io_outPing),
+    .io_outPong        (_accumLanes_7_0_io_outPong),
+    .io_busy           (_accumLanes_7_0_io_busy),
+    .io_rawStall       (_accumLanes_7_0_io_rawStall),
+    .io_accept         (_accumLanes_7_0_io_accept),
+    .io_debugFaddValid (_accumLanes_7_0_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_0_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_1 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_1_io_in_ready),
-    .io_in_valid      (_coreLanes_7_1_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_1_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_1_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_1_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_1_io_outPing),
-    .io_outPong       (_accumLanes_7_1_io_outPong),
-    .io_busy          (_accumLanes_7_1_io_busy),
-    .io_rawStall      (_accumLanes_7_1_io_rawStall),
-    .io_accept        (_accumLanes_7_1_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_1_io_in_ready),
+    .io_in_valid       (_coreLanes_7_1_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_1_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_1_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_1_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_1_io_outPing),
+    .io_outPong        (_accumLanes_7_1_io_outPong),
+    .io_busy           (_accumLanes_7_1_io_busy),
+    .io_rawStall       (_accumLanes_7_1_io_rawStall),
+    .io_accept         (_accumLanes_7_1_io_accept),
+    .io_debugFaddValid (_accumLanes_7_1_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_1_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_2 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_2_io_in_ready),
-    .io_in_valid      (_coreLanes_7_2_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_2_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_2_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_2_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_2_io_outPing),
-    .io_outPong       (_accumLanes_7_2_io_outPong),
-    .io_busy          (_accumLanes_7_2_io_busy),
-    .io_rawStall      (_accumLanes_7_2_io_rawStall),
-    .io_accept        (_accumLanes_7_2_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_2_io_in_ready),
+    .io_in_valid       (_coreLanes_7_2_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_2_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_2_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_2_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_2_io_outPing),
+    .io_outPong        (_accumLanes_7_2_io_outPong),
+    .io_busy           (_accumLanes_7_2_io_busy),
+    .io_rawStall       (_accumLanes_7_2_io_rawStall),
+    .io_accept         (_accumLanes_7_2_io_accept),
+    .io_debugFaddValid (_accumLanes_7_2_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_2_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_3 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_3_io_in_ready),
-    .io_in_valid      (_coreLanes_7_3_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_3_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_3_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_3_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_3_io_outPing),
-    .io_outPong       (_accumLanes_7_3_io_outPong),
-    .io_busy          (_accumLanes_7_3_io_busy),
-    .io_rawStall      (_accumLanes_7_3_io_rawStall),
-    .io_accept        (_accumLanes_7_3_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_3_io_in_ready),
+    .io_in_valid       (_coreLanes_7_3_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_3_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_3_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_3_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_3_io_outPing),
+    .io_outPong        (_accumLanes_7_3_io_outPong),
+    .io_busy           (_accumLanes_7_3_io_busy),
+    .io_rawStall       (_accumLanes_7_3_io_rawStall),
+    .io_accept         (_accumLanes_7_3_io_accept),
+    .io_debugFaddValid (_accumLanes_7_3_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_3_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_4 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_4_io_in_ready),
-    .io_in_valid      (_coreLanes_7_4_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_4_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_4_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_4_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_4_io_outPing),
-    .io_outPong       (_accumLanes_7_4_io_outPong),
-    .io_busy          (_accumLanes_7_4_io_busy),
-    .io_rawStall      (_accumLanes_7_4_io_rawStall),
-    .io_accept        (_accumLanes_7_4_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_4_io_in_ready),
+    .io_in_valid       (_coreLanes_7_4_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_4_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_4_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_4_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_4_io_outPing),
+    .io_outPong        (_accumLanes_7_4_io_outPong),
+    .io_busy           (_accumLanes_7_4_io_busy),
+    .io_rawStall       (_accumLanes_7_4_io_rawStall),
+    .io_accept         (_accumLanes_7_4_io_accept),
+    .io_debugFaddValid (_accumLanes_7_4_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_4_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_5 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_5_io_in_ready),
-    .io_in_valid      (_coreLanes_7_5_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_5_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_5_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_5_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_5_io_outPing),
-    .io_outPong       (_accumLanes_7_5_io_outPong),
-    .io_busy          (_accumLanes_7_5_io_busy),
-    .io_rawStall      (_accumLanes_7_5_io_rawStall),
-    .io_accept        (_accumLanes_7_5_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_5_io_in_ready),
+    .io_in_valid       (_coreLanes_7_5_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_5_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_5_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_5_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_5_io_outPing),
+    .io_outPong        (_accumLanes_7_5_io_outPong),
+    .io_busy           (_accumLanes_7_5_io_busy),
+    .io_rawStall       (_accumLanes_7_5_io_rawStall),
+    .io_accept         (_accumLanes_7_5_io_accept),
+    .io_debugFaddValid (_accumLanes_7_5_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_5_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_6 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_6_io_in_ready),
-    .io_in_valid      (_coreLanes_7_6_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_6_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_6_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_6_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_6_io_outPing),
-    .io_outPong       (_accumLanes_7_6_io_outPong),
-    .io_busy          (_accumLanes_7_6_io_busy),
-    .io_rawStall      (_accumLanes_7_6_io_rawStall),
-    .io_accept        (_accumLanes_7_6_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_6_io_in_ready),
+    .io_in_valid       (_coreLanes_7_6_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_6_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_6_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_6_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_6_io_outPing),
+    .io_outPong        (_accumLanes_7_6_io_outPong),
+    .io_busy           (_accumLanes_7_6_io_busy),
+    .io_rawStall       (_accumLanes_7_6_io_rawStall),
+    .io_accept         (_accumLanes_7_6_io_accept),
+    .io_debugFaddValid (_accumLanes_7_6_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_6_io_debugFaddValue)
   );
   StripAccumLane accumLanes_7_7 (
-    .clock            (ap_clk),
-    .reset            (~ap_rst_n),
-    .io_initValid     (accumLanes_7_7_io_initValid),
-    .io_initAddr      (initGroup),
-    .io_in_ready      (_accumLanes_7_7_io_in_ready),
-    .io_in_valid      (_coreLanes_7_7_io_out_valid),
-    .io_in_bits_group (_coreLanes_7_7_io_out_bits_group),
-    .io_in_bits_pong  (_coreLanes_7_7_io_out_bits_pong),
-    .io_in_bits_value (_coreLanes_7_7_io_out_bits_value),
-    .io_outRead       (_accumLanes_7_7_io_outRead_T & (&outPair)),
-    .io_outAddr       (outGroup),
-    .io_outPing       (_accumLanes_7_7_io_outPing),
-    .io_outPong       (_accumLanes_7_7_io_outPong),
-    .io_busy          (_accumLanes_7_7_io_busy),
-    .io_rawStall      (_accumLanes_7_7_io_rawStall),
-    .io_accept        (_accumLanes_7_7_io_accept)
+    .clock             (ap_clk),
+    .reset             (~ap_rst_n),
+    .io_initValid      (accumLanes_7_7_io_initValid),
+    .io_initAddr       (initGroup),
+    .io_in_ready       (_accumLanes_7_7_io_in_ready),
+    .io_in_valid       (_coreLanes_7_7_io_out_valid),
+    .io_in_bits_group  (_coreLanes_7_7_io_out_bits_group),
+    .io_in_bits_pong   (_coreLanes_7_7_io_out_bits_pong),
+    .io_in_bits_value  (_coreLanes_7_7_io_out_bits_value),
+    .io_outRead        (_accumLanes_7_7_io_outRead_T & (&outPair)),
+    .io_outAddr        (outGroup),
+    .io_outPing        (_accumLanes_7_7_io_outPing),
+    .io_outPong        (_accumLanes_7_7_io_outPong),
+    .io_busy           (_accumLanes_7_7_io_busy),
+    .io_rawStall       (_accumLanes_7_7_io_rawStall),
+    .io_accept         (_accumLanes_7_7_io_accept),
+    .io_debugFaddValid (_accumLanes_7_7_io_debugFaddValid),
+    .io_debugFaddValue (_accumLanes_7_7_io_debugFaddValue)
   );
   assign ap_done = donePulse;
   assign ap_idle = _ap_idle_T & ~donePulse;
@@ -5244,12 +6652,19 @@ module CuperSpmvOnly_ChiselDataPath8(
   assign Debug_first_nonzero_tagged_pair = firstNonzeroTaggedPair;
   assign Debug_first_nonzero_tagged_ping = firstNonzeroTaggedPing;
   assign Debug_first_nonzero_tagged_pong = firstNonzeroTaggedPong;
+  assign Debug_core_nonzero_out = counterCoreNonzeroOut;
+  assign Debug_fadd_nonzero_out = counterFaddNonzeroOut;
+  assign Debug_partial_read_nonzero = counterPartialReadNonzero;
+  assign Debug_first_nonzero_core_out = firstNonzeroCoreOut;
+  assign Debug_first_nonzero_fadd_out = firstNonzeroFaddOut;
+  assign Debug_first_nonzero_partial_read = firstNonzeroPartialRead;
   assign PE_Param_in_s_read =
-    ~_ap_idle_T & (_GEN_9 | ~accumLanes_7_7_io_initValid & (_GEN_10 | ~_GEN_20 & _GEN_19))
+    ~_ap_idle_T
+    & (_GEN_10 | ~accumLanes_7_7_io_initValid & (_GEN_11 | ~_GEN_21 & _GEN_20))
     & PE_Param_in_s_empty_n;
   assign PE_Param_in_peek_read = 1'h0;
   assign Vector_X_Stream_in_s_read =
-    ~_GEN_14 & _GEN_11 & ~_GEN_12 & Vector_X_Stream_in_s_empty_n;
+    ~_GEN_15 & _GEN_12 & ~_GEN_13 & Vector_X_Stream_in_s_empty_n;
   assign Vector_X_Stream_in_peek_read = 1'h0;
   assign Matrix_A_Stream_0_s_read =
     _matrixRead_7_T & (|_anySourceCanRead_T) & _matrixRead_0_T_2;

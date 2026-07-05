@@ -143,15 +143,31 @@ Metrics[57] nonzero scalar Y writes
 Metrics[58] raw stall cycles
 Metrics[59] writer backpressure cycles
 Metrics[60..61] writer first nonzero tagged sample
+Status[56] core_nonzero_out
+Status[57] fadd_nonzero_out
+Status[58] partial_read_nonzero
+Status[59..61] first nonzero core/fadd/partial sample bits
+Metrics[62] packed {fadd_nonzero_out[31:0], core_nonzero_out[31:0]}
+Metrics[63] packed {partial_read_nonzero[31:0], 32'h0}
 ```
 
 上板 debug 判断口径：
 
 ```text
-valid/product 为 0        -> 先看 matrix slot decode、padding/reuse、X read 地址或 FP wrapper
-product 非零 tagged 为 0 -> 先看 StripAccumLane read/write 或 fadd latency 对齐
-tagged 非零 Y 为 0/错位 -> 先看 scalar writer handshake/address/data 或 host BO sync/索引
+valid/product 为 0              -> 先看 matrix slot decode、padding/reuse、X read 地址
+nonzero_products 非零但 core_nonzero_out 为 0
+                                -> 先看 fmul wrapper / latency / valid-data 对齐
+core 非零但 fadd_nonzero_out 为 0
+                                -> 先看 fadd wrapper 或 accumulator 输入/partial read
+fadd 非零但 partial_read_nonzero 为 0
+                                -> 先看 partial SRAM write/read/init 覆盖
+partial 非零但 tagged/Y 为 0/错位
+                                -> 先看 tagged latch、scalar writer handshake/address/data 或 host BO sync/索引
 ```
 
 Host 侧 `--check-y` 失败会打印首批 mismatch、最大 diff、上述 debug 摘要和首批非零
 Y，no-check 仍只校验 magic/count/done/error mask。
+
+注意：旧 `nonzero_products` 是 issue 阶段的输入侧计数，只说明本次送入 fmul 的
+`value` 和 `X` 非零；它不能证明 Vivado fmul IP 的输出非零。新版
+`core_nonzero_out` 才是在 fmul 输出被 accumulator 接收时计数。

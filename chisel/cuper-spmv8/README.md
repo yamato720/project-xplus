@@ -30,9 +30,11 @@ make run-cuper-spmv-chisel8-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/th
 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
 ```
 
-构建日志为 `logs/cuper_spmv_chisel8_hw_20260704_014807.log`。该 xclbin 已完成
-Vitis `impl Complete`，但 150 MHz DATA timing 未收敛，最终 DATA clock 为
-119 MHz；它用于 correctness 上板验证，不作为性能结论。
+当前同步版构建日志为 `logs/cuper_spmv_chisel8_hw_20260704_200820.log`，UUID 为
+`765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad`。该 xclbin 已完成 Vitis `impl Complete`，
+但 150 MHz DATA timing 严重未收敛，最终 DATA/KERNEL/HBM clock 为
+`85/500/345 MHz`；它已包含 fmul 7 拍对齐和 FP/partial debug counters，用于
+correctness 上板验证，不作为性能结论。
 
 第二条是原有固定 8-HBM 的 SpMV-only RTL 数据通路模块：
 
@@ -199,7 +201,9 @@ core.io.out <> accum.io.in
 
 ## StripCoreLane 做什么
 
-`StripCoreLane` 是最小乘法单元。它只实例化 `HlsFmul32`，固定 8 拍 latency。
+`StripCoreLane` 是最小乘法单元。它只实例化 `HlsFmul32`，当前按 7 拍 latency
+跟踪 tag/valid。底层 wrapper/module 名仍保留历史 `_8_` 后缀，但硬件结构是 1 拍
+输入寄存器 + Vivado `floating_point c_latency=6`。
 当后级 product stream 不 ready 时，它会通过 fmul 的 `ce` 暂停整条乘法流水，避免
 中间乘积丢失。
 
@@ -217,11 +221,31 @@ partial[group][ping_or_pong] += product.value
 实现上分成两段：
 
 1. 从 ping/pong SRAM 读旧 partial sum。
-2. `HlsFadd32` 计算旧 partial sum 加中间乘积，固定 13 拍 latency，再写回 SRAM。
+2. `HlsFadd32` 计算旧 partial sum 加中间乘积，固定 12 拍 latency，再写回 SRAM。
 
 为了避免同一个 `group + ping/pong` 在累加流水线里被重复读写，Accumulator 会检查
 读旧值阶段和加法流水中的地址。如果发现相关性冲突，就拉低 `in.ready`，让前面的
 Core 或 scoreboard 暂停发送该 product。
+
+## FP/partial Debug Counters
+
+当前 standalone `CuperSpmvChisel8` 的 `Status`/`Metrics` buffer 仍各为 64 项，不扩大
+ABI。新增的末尾槽位用于判断非零数据是否穿过 FP 和 partial SRAM 边界：
+
+```text
+Status[56] core_nonzero_out
+Status[57] fadd_nonzero_out
+Status[58] partial_read_nonzero
+Status[59] first nonzero core fmul output bits
+Status[60] first nonzero fadd output bits
+Status[61] first nonzero partial-read sample bits
+Metrics[62] {fadd_nonzero_out[31:0], core_nonzero_out[31:0]}
+Metrics[63] {partial_read_nonzero[31:0], 32'h0}
+```
+
+`nonzero_products` 是旧的 issue-side 计数，只说明 fmul 输入 `value` 和 `X` 非零；
+`core_nonzero_out` 才说明真实 fmul 输出非零并被 accumulator 接收。Host 的
+`[debug-fp]` 行会把这三段 counter 和首个 sample 按 float 打印出来。
 
 ## 顶层状态机
 

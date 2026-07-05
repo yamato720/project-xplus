@@ -13,7 +13,11 @@ file delete -force $project_dir
 file delete -force $ip_dir
 
 create_project -force package_cuper_spmv_chisel8 $project_dir -part $part_name
-set repo_root [file dirname [file dirname [file dirname $rtl_file]]]
+if {[llength $argv] >= 6} {
+  set repo_root [file normalize [lindex $argv 5]]
+} else {
+  set repo_root [file dirname [file dirname [file dirname $rtl_file]]]
+}
 set tapa_rtl_dir [file join $repo_root verilog tapa]
 set fmul_rtl [file join $tapa_rtl_dir CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v]
 set fmul_ip_tcl [file join $tapa_rtl_dir CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1_ip.tcl]

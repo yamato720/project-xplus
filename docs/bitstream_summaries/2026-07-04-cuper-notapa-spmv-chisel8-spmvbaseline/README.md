@@ -68,15 +68,19 @@ zeros/错误。因此 `477.6 ms` 只能说明控制流与吞吐边界，不是�
 ## 当前同步 demo
 
 在上述 correctness failed demo 之后，当前工作树继续做 correctness-first debug，
-并已重新 link/sync 新 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、AXI-Lite offsets、13 路
-`m_axi_*` 端口和 HBM mapping 不变。新增/修复内容：
+并已重新 link/sync 两次新 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、AXI-Lite offsets、13 路
+`m_axi_*` 端口和 HBM mapping 不变。当前同步版新增/修复内容：
 
 - Chisel accumulator 的 fadd wrapper latency 从 13 对齐到现有 RTL owner-lane
   accumulator 的 `FADD_PIPE_LATENCY=12` / `NUM_STAGE=12`。
+- Chisel core 的 fmul tag/valid 对齐从 8 拍改为 7 拍，对齐硬件 wrapper 的 1 拍
+  输入寄存器 + Vivado floating_point `c_latency=6`。
 - 保留 `Status[0..39]` 和 `Metrics[0..46]` 旧语义，追加 `Status[40..55]` 与
   `Metrics[47..61]` debug slots，用于区分 valid/product/tagged/Y writer 哪一段断。
+- 追加 `Status[56..61]` / `Metrics[62..63]` FP/partial 输出 counters，用于区分
+  fmul 输出、fadd 输出、partial SRAM 读出和 tagged 输出链路。
 - Host `--check-y` 失败时打印首批 mismatch、最大 diff 位置、debug datapath/tagged/Y
-  摘要；no-check 仍只依赖 magic、count、done mask 和 error mask。
+  摘要，并新增 `[debug-fp]` 行；no-check 仍只依赖 magic、count、done mask 和 error mask。
 - Makefile 新增 datapath packed smoke 与 AXI top smoke，覆盖 ptr/X/matrix loaders、
   datapath FIFO、tagged scalar writer 和 Status/Metrics 写回。
 
@@ -95,7 +99,47 @@ Vitis elapsed: 2h 23m 29s
 
 该 demo 仍不是 timing-clean：link 请求 DATA 150 MHz，最终 xclbin info 记录 DATA clock
 为 139 MHz。本地 host build、datapath smoke、AXI top smoke、Verilator lint、XO
-packaging 和完整 hw link 已通过；服务器侧 `CHECK_Y=1` correctness sweep 尚未执行。
+packaging 和完整 hw link 已通过；服务器侧 `CHECK_Y=1` correctness 仍失败。
+
+服务器侧反馈目录为 `logs/spmv_chisel8_correctness_debug_hw_20260704_192807/`；该目录
+当前未同步到本地仓库，本记录只登记用户提供的结论。反馈显示 ptr/X/matrix decode
+和 accumulator accept 链路是活的，但旧 `nonzero_products` 只证明 fmul 输入
+`value`/`X` 非零，并不证明 fmul 输出非零。因此下一版源码按硬件 wrapper 结构修正
+fmul tag/valid 对齐：`HlsFmul32.NUM_STAGE` 和 `StripCoreLane.fmulLatency` 从 8 改为
+7，保持 wrapper/module 名 `CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1`
+不变；fadd latency 保持 12。
+
+下一版源码还追加不扩大 buffer 的 FP/partial 可观测 counters：
+
+```text
+Status[56] core_nonzero_out
+Status[57] fadd_nonzero_out
+Status[58] partial_read_nonzero
+Status[59] first nonzero core fmul output bits
+Status[60] first nonzero fadd output bits
+Status[61] first nonzero partial-read sample bits
+Metrics[62] {fadd_nonzero_out[31:0], core_nonzero_out[31:0]}
+Metrics[63] {partial_read_nonzero[31:0], 32'h0}
+```
+
+这些源码改动保持 `CuperSpmvChisel8` kernel 名、AXI-Lite offsets、host argument
+顺序、13 路 `m_axi_*` 端口和 HBM mapping 不变。2026-07-05 已完成完整 hardware
+build 并覆盖同步同一个 demo 文件：
+
+```text
+log: logs/cuper_spmv_chisel8_hw_20260704_200820.log
+result: Vitis link Run completed, VPL impl Complete
+demo: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+UUID: 765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad
+SHA256: 550ed459faa550fa5f18947e7c2c5c0bf6624f0f78745540195d0c11b41626d3
+DATA/KERNEL/HBM clock: 85 / 500 / 345 MHz
+routed timing: WNS -5.008 ns, TNS -35127.766 ns, setup failing endpoints 41704, hold WHS 0.008 ns
+Vitis elapsed: 21h 59m 45s
+```
+
+该版本能生成 xclbin，但 150 MHz DATA timing 严重未收敛，Vitis xclbin info 记录
+DATA clock 为 85 MHz、HBM clock 为 345 MHz。它只作为 correctness-debug 候选，等待
+服务器侧 `CHECK_Y=1`，不晋级标准 bitstream，也不作为性能结果。
 
 ## 验收目标
 

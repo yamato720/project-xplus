@@ -11,7 +11,7 @@ xclbin Information
    Kernels:                CuperSpmvChisel8
    Signature:
    Content:                Bitstream
-   UUID (xclbin):          0f31be8c-e77e-4e25-d85a-1498693befbb
+   UUID (xclbin):          765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad
    UUID (IINTF):           b7ac1abe1e3e1cb686d5a81232452676
    Sections:               BITSTREAM, MEM_TOPOLOGY, IP_LAYOUT, CONNECTIVITY,
                            CLOCK_FREQ_TOPOLOGY, BUILD_METADATA,
@@ -39,7 +39,7 @@ Scalable Clocks
    Name:      hbm_aclk
    Index:     0
    Type:      SYSTEM
-   Frequency: 450 MHz
+   Frequency: 345 MHz
 
    Name:      KERNEL_CLK
    Index:     1
@@ -49,7 +49,7 @@ Scalable Clocks
    Name:      DATA_CLK
    Index:     2
    Type:      DATA
-   Frequency: 139 MHz
+   Frequency: 85 MHz
 
 System Clocks
 ------
@@ -57,7 +57,7 @@ System Clocks
    Type:           SCALABLE
    Default Freq:   300 MHz
    Requested Freq: 150 MHz
-   Achieved Freq:  139.9 MHz
+   Achieved Freq:  85.6 MHz
 
    Name:           ulp_ucs_aclk_kernel_01
    Type:           SCALABLE

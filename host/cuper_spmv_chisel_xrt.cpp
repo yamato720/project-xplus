@@ -373,6 +373,24 @@ void print_debug_summary(const std::vector<std::uint32_t>& status,
               << " writer_backpressure_cycles=" << metrics[59]
               << "\n";
 
+    if (status.size() >= 62 && metrics.size() >= 64) {
+        std::cout << "[debug-fp]"
+                  << " core_nonzero_out=" << status[56]
+                  << " fadd_nonzero_out=" << status[57]
+                  << " partial_read_nonzero=" << status[58]
+                  << " first_core_bits=0x" << std::hex << status[59]
+                  << " first_fadd_bits=0x" << status[60]
+                  << " first_partial_bits=0x" << status[61]
+                  << std::dec
+                  << " first_core=" << static_cast<double>(bits_to_float(status[59]))
+                  << " first_fadd=" << static_cast<double>(bits_to_float(status[60]))
+                  << " first_partial=" << static_cast<double>(bits_to_float(status[61]))
+                  << " packed_core_fadd=0x" << std::hex << metrics[62]
+                  << " packed_partial=0x" << metrics[63]
+                  << std::dec
+                  << "\n";
+    }
+
     std::cout << "[debug-first-tagged]"
               << " datapath_packet=" << status[48]
               << " datapath_pair=" << status[49]

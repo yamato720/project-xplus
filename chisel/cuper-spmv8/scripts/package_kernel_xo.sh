@@ -21,7 +21,7 @@ if [[ ! -f "$KERNEL_XML" ]]; then
 fi
 
 mkdir -p "$BUILD_DIR"
-"$VIVADO_BIN" -mode batch -source "$TCL_SCRIPT" -tclargs "$BUILD_DIR" "$RTL_FILE" "$XO_PATH" "$KERNEL_XML" "$VIVADO_PART"
+"$VIVADO_BIN" -mode batch -source "$TCL_SCRIPT" -tclargs "$BUILD_DIR" "$RTL_FILE" "$XO_PATH" "$KERNEL_XML" "$VIVADO_PART" "$ROOT_DIR"
 
 python3 - "$XO_PATH" "$KERNEL_XML" <<'PY'
 import sys

@@ -22,12 +22,15 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
   `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，
-  当前 UUID 为 `0f31be8c-e77e-4e25-d85a-1498693befbb`，DATA/KERNEL/HBM 为
-  `139/500/450 MHz`。该版增加 fadd latency 对齐、debug Status/Metrics、host
-  mismatch 输出、本地 Verilator/datapath/AXI smokes，并已完成完整 hw link；服务器侧
-  `CHECK_Y=1` correctness sweep 待跑。上一 UUID `c36bff4e-...` no-check 可跑到完整
-  `thermal2`，但 `CHECK_Y=1` 失败、`Y` mostly zeros/错误，用户提供的 `477.6 ms`
-  不作为有效 SpMV 性能成绩。
+  当前 UUID 为 `765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad`，DATA/KERNEL/HBM 为
+  `85/500/345 MHz`。该版增加 fadd latency 对齐、fmul 7 拍对齐、debug
+  Status/Metrics、FP/partial counters、host mismatch/`[debug-fp]` 输出、本地
+  Verilator/datapath/AXI smokes，并已完成完整 hw link；150 MHz timing 严重未收敛，
+  等待服务器侧 `CHECK_Y=1`。上一 UUID `0f31be8c-...` 的服务器侧反馈表明
+  ptr/X/matrix decode 和 accumulator accepts 活着，但旧 `nonzero_products` 不能证明
+  fmul 输出非零；更早 UUID `c36bff4e-...` no-check 可跑到完整 `thermal2`，但
+  `CHECK_Y=1` 失败、`Y` mostly zeros/错误，用户提供的 `477.6 ms` 不作为有效 SpMV
+  性能成绩。
 - `2026-07-03-cuper-notapa-spmv-chisel8-drainprobe/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 HBM drain-probe demo。该版保持 entry-probe 的
   ABI/HBM mapping 不变，完整读取 ptr table、X packets 和 8 路 Matrix_data beats，
@@ -53,15 +56,15 @@ YYYY-MM-DD-<主线>-<简短说明>/
   改动说明、demo bitstream 和测试结论都继续写入该目录。2026-05-29 one-shot
   demo 已从 `395bitstream/` 移入
   `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`。
-- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：历史 full-PCG
-  embedded-SpMV 目标目录。
-  目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
-  Cuper SpMV。2026-05-29 full-PCG demo 用于确认 `CuperPcg(...)` 路径仍可生成
-  routed bitstream，并已完成 demo-only 上板测试；该 demo 已从 `395bitstream/`
-  移入 `bitstream_archive/2026-05-29-tapa-pcg-spmv-demo-candidates/`，未替换标准版。
-  后续围绕 full-PCG 内嵌 SpMV / service/control 的源码改动说明、demo bitstream
-  和测试结论继续写入该目录，不再为每个小 demo 新建目录；正式 `source.diff`
-  只有在测试确认性能提升，或用户明确要求保留功能边界修复补丁后才更新。
+- `2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`：当前 full-PCG
+  controller/update 持续记录目录。
+  早期目标是把 `CuperPcg` 内嵌 SpMV 性能优化到接近 standalone/native TAPA
+  Cuper SpMV；2026-05-29 之后 single SpMV one-shot demo 已转为回归基线，当前
+  主目标是 full `CuperPcg(...)` 的 `iter_spmv_recv_dot`、`update_x`、
+  `update_rz_reduce`、`update_p`、service drain/stop 和 controller HBM 访问。
+  后续围绕 full-PCG controller/update 的源码改动说明、demo bitstream 和测试结论
+  继续写入该目录，不再为每个小 demo 新建目录；正式 `source.diff` 只有在测试确认
+  性能提升，或用户明确要求保留功能边界修复补丁后才更新。
 
 该目标目录内同时保留历史阶段：
 

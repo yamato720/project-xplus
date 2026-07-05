@@ -9,7 +9,9 @@ import chisel3.util._
 // 输出 StripProduct 给后级 accumulator。中间用 Decoupled 边界，方便后续插入
 // scoreboard 做乱序调度。
 class StripCoreLane(groupBits: Int) extends Module {
-  private val fmulLatency = 8
+  // The HLS fmul wrapper keeps the historical _8_ module name, but hardware is
+  // one input register plus Vivado floating_point c_latency=6.
+  private val fmulLatency = 7
 
   val io = IO(new Bundle {
     val inValid = Input(Bool())
@@ -24,6 +26,8 @@ class StripCoreLane(groupBits: Int) extends Module {
     val busy = Output(Bool())
     val rawStall = Output(Bool())
     val accept = Output(Bool())
+    val debugOutAccept = Output(Bool())
+    val debugOutValue = Output(UInt(32.W))
   })
 
   val mulValid = RegInit(VecInit(Seq.fill(fmulLatency)(false.B)))
@@ -35,6 +39,7 @@ class StripCoreLane(groupBits: Int) extends Module {
   fmul.io.reset := reset.asBool
 
   val outValid = mulValid(fmulLatency - 1)
+  val outFire = outValid && io.out.ready
   val canAdvance = !outValid || io.out.ready
 
   // fmul blackbox 有 ce 端口；当后级不接收当前输出时，整条乘法流水保持不动。
@@ -50,6 +55,8 @@ class StripCoreLane(groupBits: Int) extends Module {
   io.rawStall := io.inValid && !io.inReady
   io.accept := fire
   io.busy := mulValid.asUInt.orR
+  io.debugOutAccept := outFire
+  io.debugOutValue := fmul.io.dout
 
   fmul.io.din0 := Mux(fire, io.inValue, 0.U)
   fmul.io.din1 := Mux(fire, io.inX, 0.U)

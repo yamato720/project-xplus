@@ -6,6 +6,19 @@ import _root_.circt.stage.ChiselStage
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 
+object CuperSpmv8BuildConfig {
+  private def truthy(value: String): Boolean = {
+    val normalized = value.trim.toLowerCase
+    normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+  }
+
+  val slimDebug: Boolean =
+    sys.env.get("CUPER_SPMV_CHISEL8_SLIM_DEBUG").exists(truthy) ||
+      sys.props.get("spmv.chisel8.slimDebug").exists(truthy)
+
+  val enableDebug: Boolean = !slimDebug
+}
+
 object CuperSpmv8Emitter {
   // 生成给 Vivado/TAPA 打包使用的 Verilog。关闭随机初始化和调试信息，避免生成网表中
   // 出现 TAPA 流程不需要的随机化逻辑或大量局部调试符号。
@@ -36,7 +49,7 @@ object GenerateCuperSpmvOnlyChiselDataPath8 extends App {
   // 默认输出到子工程内 generated/，仓库脚本会传入 verilog/tapa 作为实际集成目录。
   val targetDir = args.headOption.getOrElse("generated")
   CuperSpmv8Emitter.emitVerilog(
-    gen = new CuperSpmvOnlyChiselDataPath8,
+    gen = new CuperSpmvOnlyChiselDataPath8(enableDebug = CuperSpmv8BuildConfig.enableDebug),
     targetDir = targetDir,
     fileName = "CuperSpmvOnly_ChiselDataPath8.v"
   )
@@ -45,7 +58,7 @@ object GenerateCuperSpmvOnlyChiselDataPath8 extends App {
 object GenerateCuperSpmvChisel8 extends App {
   val targetDir = args.headOption.getOrElse("generated")
   CuperSpmv8Emitter.emitVerilog(
-    gen = new CuperSpmvChisel8,
+    gen = new CuperSpmvChisel8(enableDebug = CuperSpmv8BuildConfig.enableDebug),
     targetDir = targetDir,
     fileName = "CuperSpmvChisel8.sv"
   )

@@ -12,7 +12,7 @@ import chisel3.util._
 //   Matrix_data_0..7 -> internal matrix streams
 //   tagged datapath output -> scalar Y_out writer
 // Status/Metrics remain mmap writeback buffers for host-side bring-up checks.
-class CuperSpmvChisel8 extends RawModule {
+class CuperSpmvChisel8(enableDebug: Boolean = true) extends RawModule {
   override def desiredName: String = "CuperSpmvChisel8"
 
   private val hbmChannels = 8
@@ -123,7 +123,7 @@ class CuperSpmvChisel8 extends RawModule {
     val columnNumWire = WireDefault(columnNum)
     val iterationNumWire = WireDefault(iterationNum)
 
-    val datapath = Module(new CuperSpmvOnlyChiselDataPath8)
+    val datapath = Module(new CuperSpmvOnlyChiselDataPath8(enableDebug = enableDebug))
     val datapathStart = RegInit(false.B)
     datapathStart := false.B
 
@@ -497,6 +497,12 @@ class CuperSpmvChisel8 extends RawModule {
       is(53.U) { statusValue := firstWriterTaggedPair }
       is(54.U) { statusValue := firstWriterTaggedPing }
       is(55.U) { statusValue := firstWriterTaggedPong }
+      is(56.U) { statusValue := datapath.Debug_core_nonzero_out(31, 0) }
+      is(57.U) { statusValue := datapath.Debug_fadd_nonzero_out(31, 0) }
+      is(58.U) { statusValue := datapath.Debug_partial_read_nonzero(31, 0) }
+      is(59.U) { statusValue := datapath.Debug_first_nonzero_core_out }
+      is(60.U) { statusValue := datapath.Debug_first_nonzero_fadd_out }
+      is(61.U) { statusValue := datapath.Debug_first_nonzero_partial_read }
     }
 
     val metricValue = Wire(UInt(64.W))
@@ -564,6 +570,8 @@ class CuperSpmvChisel8 extends RawModule {
       is(59.U) { metricValue := datapath.Debug_writer_backpressure_cycles }
       is(60.U) { metricValue := Cat(firstWriterTaggedPair, firstWriterTaggedPacket) }
       is(61.U) { metricValue := Cat(firstWriterTaggedPong, firstWriterTaggedPing) }
+      is(62.U) { metricValue := Cat(datapath.Debug_fadd_nonzero_out(31, 0), datapath.Debug_core_nonzero_out(31, 0)) }
+      is(63.U) { metricValue := Cat(datapath.Debug_partial_read_nonzero(31, 0), 0.U(32.W)) }
     }
 
     // Ptr stream loader: first four internal headers, then boundary-major

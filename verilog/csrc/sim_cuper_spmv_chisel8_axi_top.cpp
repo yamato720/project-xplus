@@ -714,16 +714,38 @@ int main(int argc, char** argv) {
     require(sim.status.mem[34] == 16, "scalar-write expected count mismatch");
     require(sim.status.mem[35] == 16, "scalar-write response count mismatch");
     require(sim.metrics.mem[0] == kMetricsMagic, "Metrics magic mismatch");
+#ifndef CUPER_SPMV_CHISEL8_SLIM_DEBUG
     require(sim.metrics.mem[47] >= 1, "debug valid slot count is zero");
     require(sim.metrics.mem[50] >= 1, "debug nonzero product count is zero");
     require(sim.metrics.mem[53] >= 1, "debug nonzero tagged count is zero");
+    require(sim.status.mem[56] >= 1, "debug core nonzero output count is zero");
+    require(sim.status.mem[57] >= 1, "debug fadd nonzero output count is zero");
+    require(sim.status.mem[58] >= 1, "debug partial nonzero read count is zero");
+    require((sim.metrics.mem[62] & 0xffffffffULL) == sim.status.mem[56],
+            "packed core nonzero output count mismatch");
+    require((sim.metrics.mem[62] >> 32) == sim.status.mem[57],
+            "packed fadd nonzero output count mismatch");
+    require((sim.metrics.mem[63] >> 32) == sim.status.mem[58],
+            "packed partial nonzero read count mismatch");
+#else
+    require(sim.metrics.mem[47] == 0, "slim debug valid slot count is not zero");
+    require(sim.status.mem[56] == 0, "slim debug core count is not zero");
+    require(sim.status.mem[57] == 0, "slim debug fadd count is not zero");
+    require(sim.status.mem[58] == 0, "slim debug partial count is not zero");
+#endif
     require(sim.status.mem[45] >= 1, "nonzero scalar write count is zero");
     require(sim.y.mem[0] == float_bits(2.0f), "Y[0] mismatch");
 
     std::cout << "CuperSpmvChisel8 AXI top smoke PASS"
               << " y0=" << bits_float(sim.y.mem[0])
+#ifdef CUPER_SPMV_CHISEL8_SLIM_DEBUG
+              << " slim_debug=1"
+#endif
               << " valid_slots=" << sim.metrics.mem[47]
               << " nonzero_products=" << sim.metrics.mem[50]
+              << " core_nonzero_out=" << sim.status.mem[56]
+              << " fadd_nonzero_out=" << sim.status.mem[57]
+              << " partial_read_nonzero=" << sim.status.mem[58]
               << " nonzero_y_writes=" << sim.status.mem[45]
               << "\n";
     return 0;

@@ -56,6 +56,31 @@
   - 覆盖 tiny matrix 从 AXI loaders 到 scalar `Y_out` 写回；
   - 验证新增 debug counters 非零。
 
+## 2026-07-04 fmul latency / FP 输出观测更新
+
+- 记录服务器侧反馈：`logs/spmv_chisel8_correctness_debug_hw_20260704_192807/`
+  未同步到本地，但用户提供的结论表明 ptr/X/matrix decode 和 accumulator accepts
+  都是活的；旧 `nonzero_products` 只证明 fmul 输入非零，不证明 fmul 输出非零。
+- 修正 fmul valid/data 对齐：
+  - `StripCoreLane.fmulLatency` 从 8 改为 7；
+  - `HlsFmul32.NUM_STAGE` 从 8 改为 7；
+  - 保持 wrapper/module 名
+    `CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1` 不变；
+  - 原因是硬件 wrapper 是 1 拍输入寄存器 + Vivado `floating_point c_latency=6`，
+    当前 Verilator path 之前用 `NUM_STAGE=8` 会自遮蔽这一拍偏差。
+- fadd latency 保持 12，不改 `HlsFadd32` / `StripAccumLane` 的 12 拍对齐。
+- 不扩大 `Status`/`Metrics` buffer，使用末尾保留槽位追加诊断：
+  - `Status[56]`：`core_nonzero_out`，在真实 fmul 输出被 accumulator 接收且非零时计数；
+  - `Status[57]`：`fadd_nonzero_out`，在 fadd 有效输出写回 partial SRAM 前非零时计数；
+  - `Status[58]`：`partial_read_nonzero`，在最终 partial SRAM 读出、进入 tagged 输出前非零时计数；
+  - `Status[59..61]`：三段首个非零 sample bits；
+  - `Metrics[62]`：`{fadd_nonzero_out[31:0], core_nonzero_out[31:0]}`；
+  - `Metrics[63]`：`{partial_read_nonzero[31:0], 32'h0}`。
+- Host 新增 `[debug-fp]` 行，打印三段 counters 和首个 sample 的 float 值；no-check
+  校验仍只看 magic/count/done/error mask，不把这些 debug counters 作为通过条件。
+- `CuperSpmvChisel8` AXI top smoke 已更新 tiny 非零 case 的期望，要求
+  `core_nonzero_out`、`fadd_nonzero_out` 和 `partial_read_nonzero` 都非零。
+
 ## Host
 
 - `host/cuper_spmv_chisel_xrt.cpp` 模式名改为
@@ -88,8 +113,19 @@
 - DATA/KERNEL/HBM clock：`139 / 500 / 450 MHz`。
 - Routed timing 仍不是 150 MHz clean：WNS `-0.478 ns`，TNS `-173.688 ns`，
   setup failing endpoints `1448`，hold WHS `0.001 ns`。
-- 服务器侧 `CHECK_Y=1` correctness sweep 尚未执行；旧 `477.6 ms` 与 `Y` 错误结论只
-  对应旧 UUID `c36bff4e-...`，不能套用到当前 `0f31be8c-...` demo。
+- 服务器侧 `CHECK_Y=1` 后续显示该版 correctness 仍失败；旧 `477.6 ms` 与 `Y` 错误结论只
+  对应旧 UUID `c36bff4e-...`，不能套用到后续 `0f31be8c-...` 或 `765e33c9-...` demo。
+- fmul latency / FP-counter 版已完成完整 Vitis hw link，并已再次覆盖同步到同一个
+  demo 文件：
+  `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`。
+- Build log：`logs/cuper_spmv_chisel8_hw_20260704_200820.log`。
+- UUID：`765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad`。
+- SHA256：`550ed459faa550fa5f18947e7c2c5c0bf6624f0f78745540195d0c11b41626d3`。
+- DATA/KERNEL/HBM clock：`85 / 500 / 345 MHz`。
+- Routed timing 严重不是 150 MHz clean：WNS `-5.008 ns`，TNS `-35127.766 ns`，
+  setup failing endpoints `41704`，hold WHS `0.008 ns`。
+- 该版本只作为 correctness-debug 候选，等待服务器侧 `CHECK_Y=1`；由于频率大幅
+  降到 85 MHz，不作为性能结果，也不晋级标准 bitstream。
 
 ## 未做内容
 

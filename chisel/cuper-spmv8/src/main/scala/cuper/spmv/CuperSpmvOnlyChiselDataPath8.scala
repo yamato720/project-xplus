@@ -5,7 +5,9 @@ import chisel3.util._
 
 // 固定 8-HBM 的 Chisel SpMV datapath，用来替换 CuperSpmvServiceOnly 中原 HLS/RTL
 // 数据通路。外部端口名保持 HLS stream/ap_ctrl_hs 风格，便于被现有 TAPA kernel 例化。
-class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
+class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
+    extends RawModule
+    with CuperSpmvStreamPorts {
   override def desiredName: String = "CuperSpmvOnly_ChiselDataPath8"
 
   // 8 个 Matrix_A_Stream 输入。每个 512-bit beat 内有 8 个 64-bit slot，因此 owner 维度
@@ -45,6 +47,12 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
   val Debug_first_nonzero_tagged_pair = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_pair")
   val Debug_first_nonzero_tagged_ping = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_ping")
   val Debug_first_nonzero_tagged_pong = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_tagged_pong")
+  val Debug_core_nonzero_out = IO(Output(UInt(64.W))).suggestName("Debug_core_nonzero_out")
+  val Debug_fadd_nonzero_out = IO(Output(UInt(64.W))).suggestName("Debug_fadd_nonzero_out")
+  val Debug_partial_read_nonzero = IO(Output(UInt(64.W))).suggestName("Debug_partial_read_nonzero")
+  val Debug_first_nonzero_core_out = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_core_out")
+  val Debug_first_nonzero_fadd_out = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_fadd_out")
+  val Debug_first_nonzero_partial_read = IO(Output(UInt(32.W))).suggestName("Debug_first_nonzero_partial_read")
 
   // PE_Param_in 流格式沿用 strip-padding 路径：前 4 个 header 丢弃，然后每个 batch
   // 读取 8 个 start 和 8 个 end，得到各 HBM channel 本 batch 的 matrix beat 范围。
@@ -169,34 +177,51 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       Module(new StripAccumLane(groupBits, ownerGroups))
     }
 
-    // 这些计数器当前不作为端口输出，dontTouch 便于综合后在调试网表/波形中观察。
-    val counterXPackets = RegInit(0.U(64.W))
-    val counterMatrixBeats = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(64.W))))
-    val counterValidSlots = RegInit(0.U(64.W))
-    val counterPaddingSlots = RegInit(0.U(64.W))
-    val counterNonzeroXReads = RegInit(0.U(64.W))
-    val counterNonzeroProducts = RegInit(0.U(64.W))
-    val counterAccumAccepts = RegInit(0.U(64.W))
-    val counterRawStall = RegInit(0.U(64.W))
-    val counterOutputWrites = RegInit(0.U(64.W))
-    val counterNonzeroOutputWrites = RegInit(0.U(64.W))
-    val counterWriterBackpressure = RegInit(0.U(64.W))
-    val firstNonzeroTaggedSeen = RegInit(false.B)
-    val firstNonzeroTaggedPacket = RegInit(0.U(32.W))
-    val firstNonzeroTaggedPair = RegInit(0.U(32.W))
-    val firstNonzeroTaggedPing = RegInit(0.U(32.W))
-    val firstNonzeroTaggedPong = RegInit(0.U(32.W))
-    dontTouch(counterXPackets)
-    dontTouch(counterMatrixBeats)
-    dontTouch(counterValidSlots)
-    dontTouch(counterPaddingSlots)
-    dontTouch(counterNonzeroXReads)
-    dontTouch(counterNonzeroProducts)
-    dontTouch(counterAccumAccepts)
-    dontTouch(counterRawStall)
-    dontTouch(counterOutputWrites)
-    dontTouch(counterNonzeroOutputWrites)
-    dontTouch(counterWriterBackpressure)
+    // Full-debug 模式才生成这些计数器和 dontTouch。瘦版保留外部 ABI，但让这些
+    // Debug_* 输出为常量 0，避免跨 lane 调试 fanout 进入实现。
+    val counterXPackets = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterMatrixBeats =
+      if (enableDebug) RegInit(VecInit(Seq.fill(hbmChannels)(0.U(64.W))))
+      else VecInit(Seq.fill(hbmChannels)(0.U(64.W)))
+    val counterValidSlots = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterPaddingSlots = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterNonzeroXReads = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterNonzeroProducts = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterAccumAccepts = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterRawStall = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterOutputWrites = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterNonzeroOutputWrites = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterWriterBackpressure = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterCoreNonzeroOut = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterFaddNonzeroOut = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val counterPartialReadNonzero = if (enableDebug) RegInit(0.U(64.W)) else 0.U(64.W)
+    val firstNonzeroTaggedSeen = if (enableDebug) RegInit(false.B) else false.B
+    val firstNonzeroTaggedPacket = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroTaggedPair = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroTaggedPing = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroTaggedPong = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroCoreOutSeen = if (enableDebug) RegInit(false.B) else false.B
+    val firstNonzeroCoreOut = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroFaddOutSeen = if (enableDebug) RegInit(false.B) else false.B
+    val firstNonzeroFaddOut = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    val firstNonzeroPartialReadSeen = if (enableDebug) RegInit(false.B) else false.B
+    val firstNonzeroPartialRead = if (enableDebug) RegInit(0.U(32.W)) else 0.U(32.W)
+    if (enableDebug) {
+      dontTouch(counterXPackets)
+      dontTouch(counterMatrixBeats)
+      dontTouch(counterValidSlots)
+      dontTouch(counterPaddingSlots)
+      dontTouch(counterNonzeroXReads)
+      dontTouch(counterNonzeroProducts)
+      dontTouch(counterAccumAccepts)
+      dontTouch(counterRawStall)
+      dontTouch(counterOutputWrites)
+      dontTouch(counterNonzeroOutputWrites)
+      dontTouch(counterWriterBackpressure)
+      dontTouch(counterCoreNonzeroOut)
+      dontTouch(counterFaddNonzeroOut)
+      dontTouch(counterPartialReadNonzero)
+    }
 
     Debug_valid_slots := counterValidSlots
     Debug_padding_slots := counterPaddingSlots
@@ -211,6 +236,12 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     Debug_first_nonzero_tagged_pair := firstNonzeroTaggedPair
     Debug_first_nonzero_tagged_ping := firstNonzeroTaggedPing
     Debug_first_nonzero_tagged_pong := firstNonzeroTaggedPong
+    Debug_core_nonzero_out := counterCoreNonzeroOut
+    Debug_fadd_nonzero_out := counterFaddNonzeroOut
+    Debug_partial_read_nonzero := counterPartialReadNonzero
+    Debug_first_nonzero_core_out := firstNonzeroCoreOut
+    Debug_first_nonzero_fadd_out := firstNonzeroFaddOut
+    Debug_first_nonzero_partial_read := firstNonzeroPartialRead
 
     // 行/列数换算：
     // - Vector X 每包 16 个 float32
@@ -258,10 +289,13 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
     val yFullN = VecInit(tagged.map(_.fullN))
 
     // 每个 lane 先给默认空输入；后面的 slot 解码逻辑只覆盖本周期实际发射的 lane。
-    val laneRawStall = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
-    val laneAccept = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
-    val laneAccumAccept = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
+    val laneRawStall = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))) else None
+    val laneAccumAccept = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))) else None
     val laneBusy = Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))
+    val laneCoreOutAccept = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))) else None
+    val laneCoreOutValue = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, UInt(32.W))))) else None
+    val laneFaddValid = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, Bool())))) else None
+    val laneFaddValue = if (enableDebug) Some(Wire(Vec(hbmChannels, Vec(hbmChannels, UInt(32.W))))) else None
     for (source <- 0 until hbmChannels) {
       for (owner <- 0 until hbmChannels) {
         val core = coreLanes(source)(owner)
@@ -281,9 +315,14 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
         accum.io.outRead := state === outputRead && outPair === source.U
         accum.io.outAddr := outGroup
 
-        laneRawStall(source)(owner) := core.io.rawStall || accum.io.rawStall
-        laneAccept(source)(owner) := core.io.accept
-        laneAccumAccept(source)(owner) := accum.io.accept
+        if (enableDebug) {
+          laneRawStall.get(source)(owner) := core.io.rawStall || accum.io.rawStall
+          laneAccumAccept.get(source)(owner) := accum.io.accept
+          laneCoreOutAccept.get(source)(owner) := core.io.debugOutAccept
+          laneCoreOutValue.get(source)(owner) := core.io.debugOutValue
+          laneFaddValid.get(source)(owner) := accum.io.debugFaddValid
+          laneFaddValue.get(source)(owner) := accum.io.debugFaddValue
+        }
         laneBusy(source)(owner) := core.io.busy || accum.io.busy
       }
     }
@@ -325,17 +364,9 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
       }
     }
 
-    // 汇总状态用于 batch 完成、累加器 drain、输出背压和调试计数。
+    // 汇总状态用于 batch 完成和累加器 drain；调试计数只在 full-debug 模式生成。
     val anyRemaining = remaining.map(_ =/= 0.U).reduce(_ || _)
     val anyLaneBusy = laneBusy.asUInt.orR
-    val anyRawStall = laneRawStall.asUInt.orR
-    val totalAccumAccepts = PopCount(laneAccumAccept.asUInt)
-    val totalOutputWrites = PopCount(taggedWrite.asUInt)
-    val nonzeroOutputWrites = PopCount((0 until hbmChannels).map { owner =>
-      taggedWrite(owner) && (outPing(owner).orR || outPong(owner).orR)
-    })
-    val anyOutputBlocked =
-      outValid.zip(yFullN).map { case (valid, ready) => valid && !ready }.reduce(_ || _)
 
     val selectedPing = Wire(Vec(hbmChannels, UInt(32.W)))
     val selectedPong = Wire(Vec(hbmChannels, UInt(32.W)))
@@ -351,21 +382,97 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
 
     donePulse := false.B
 
-    // 性能/健康计数：有效 slot、padding slot、RAW 停顿、写出数量和 writer 背压。
-    when(anyRawStall) {
-      counterRawStall := counterRawStall + 1.U
-    }
-    when(totalOutputWrites =/= 0.U) {
-      counterOutputWrites := counterOutputWrites + totalOutputWrites
-    }
-    when(nonzeroOutputWrites =/= 0.U) {
-      counterNonzeroOutputWrites := counterNonzeroOutputWrites + nonzeroOutputWrites
-    }
-    when(totalAccumAccepts =/= 0.U) {
-      counterAccumAccepts := counterAccumAccepts + totalAccumAccepts
-    }
-    when(state === outputEmit && anyOutputBlocked) {
-      counterWriterBackpressure := counterWriterBackpressure + 1.U
+    if (enableDebug) {
+      val anyRawStall = laneRawStall.get.asUInt.orR
+      val totalAccumAccepts = PopCount(laneAccumAccept.get.asUInt)
+      val totalOutputWrites = PopCount(taggedWrite.asUInt)
+      val nonzeroOutputWrites = PopCount((0 until hbmChannels).map { owner =>
+        taggedWrite(owner) && (outPing(owner).orR || outPong(owner).orR)
+      })
+      val anyOutputBlocked =
+        outValid.zip(yFullN).map { case (valid, ready) => valid && !ready }.reduce(_ || _)
+
+      val laneCount = hbmChannels * hbmChannels
+      val coreOutValues = (0 until hbmChannels).flatMap { source =>
+        (0 until hbmChannels).map { owner => laneCoreOutValue.get(source)(owner) }
+      }
+      val coreNonzeroFlags = (0 until hbmChannels).flatMap { source =>
+        (0 until hbmChannels).map { owner =>
+          laneCoreOutAccept.get(source)(owner) && laneCoreOutValue.get(source)(owner).orR
+        }
+      }
+      val coreNonzeroBits = VecInit(coreNonzeroFlags).asUInt
+      val coreFirstNonzeroOh = PriorityEncoderOH(coreNonzeroBits)
+      val firstCoreNonzeroValue = Mux1H((0 until laneCount).map { i =>
+        coreFirstNonzeroOh(i) -> coreOutValues(i)
+      })
+      val totalCoreNonzeroOuts = PopCount(coreNonzeroBits)
+
+      val faddOutValues = (0 until hbmChannels).flatMap { source =>
+        (0 until hbmChannels).map { owner => laneFaddValue.get(source)(owner) }
+      }
+      val faddNonzeroFlags = (0 until hbmChannels).flatMap { source =>
+        (0 until hbmChannels).map { owner =>
+          laneFaddValid.get(source)(owner) && laneFaddValue.get(source)(owner).orR
+        }
+      }
+      val faddNonzeroBits = VecInit(faddNonzeroFlags).asUInt
+      val faddFirstNonzeroOh = PriorityEncoderOH(faddNonzeroBits)
+      val firstFaddNonzeroValue = Mux1H((0 until laneCount).map { i =>
+        faddFirstNonzeroOh(i) -> faddOutValues(i)
+      })
+      val totalFaddNonzeroOuts = PopCount(faddNonzeroBits)
+
+      val partialReadValues = (0 until hbmChannels).map { owner =>
+        Mux(selectedPing(owner).orR, selectedPing(owner), selectedPong(owner))
+      }
+      val partialReadNonzeroFlags = (0 until hbmChannels).map { owner =>
+        outValid(owner) && (selectedPing(owner).orR || selectedPong(owner).orR)
+      }
+      val partialReadNonzeroBits = VecInit(partialReadNonzeroFlags).asUInt
+      val partialReadFirstNonzeroOh = PriorityEncoderOH(partialReadNonzeroBits)
+      val firstPartialReadNonzeroValue = Mux1H((0 until hbmChannels).map { i =>
+        partialReadFirstNonzeroOh(i) -> partialReadValues(i)
+      })
+      val totalPartialReadNonzero = PopCount(partialReadNonzeroBits)
+
+      // 性能/健康计数：有效 slot、真实 FP 非零输出、partial 读、RAW 停顿、写出数量和 writer 背压。
+      when(anyRawStall) {
+        counterRawStall := counterRawStall + 1.U
+      }
+      when(totalCoreNonzeroOuts =/= 0.U) {
+        counterCoreNonzeroOut := counterCoreNonzeroOut + totalCoreNonzeroOuts
+        when(!firstNonzeroCoreOutSeen) {
+          firstNonzeroCoreOutSeen := true.B
+          firstNonzeroCoreOut := firstCoreNonzeroValue
+        }
+      }
+      when(totalFaddNonzeroOuts =/= 0.U) {
+        counterFaddNonzeroOut := counterFaddNonzeroOut + totalFaddNonzeroOuts
+        when(!firstNonzeroFaddOutSeen) {
+          firstNonzeroFaddOutSeen := true.B
+          firstNonzeroFaddOut := firstFaddNonzeroValue
+        }
+      }
+      when(state === outputWait && totalPartialReadNonzero =/= 0.U) {
+        counterPartialReadNonzero := counterPartialReadNonzero + totalPartialReadNonzero
+        when(!firstNonzeroPartialReadSeen) {
+          firstNonzeroPartialReadSeen := true.B
+          firstNonzeroPartialRead := firstPartialReadNonzeroValue
+        }
+      }
+      when(totalOutputWrites =/= 0.U) {
+        counterOutputWrites := counterOutputWrites + totalOutputWrites
+      }
+      when(nonzeroOutputWrites =/= 0.U) {
+        counterNonzeroOutputWrites := counterNonzeroOutputWrites + nonzeroOutputWrites
+      }
+      when(totalAccumAccepts =/= 0.U) {
+        counterAccumAccepts := counterAccumAccepts + totalAccumAccepts
+      }
+      when(state === outputEmit && anyOutputBlocked) {
+        counterWriterBackpressure := counterWriterBackpressure + 1.U
+      }
     }
 
     switch(state) {
@@ -378,22 +485,33 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
           numOwnerGroups := ownerGroupCount(packetCount(Row_num))
           totalVectorPackets := packetCount(Column_num)
           headerCount := 0.U
-          counterXPackets := 0.U
-          counterMatrixBeats := VecInit(Seq.fill(hbmChannels)(0.U(64.W)))
-          counterValidSlots := 0.U
-          counterPaddingSlots := 0.U
-          counterNonzeroXReads := 0.U
-          counterNonzeroProducts := 0.U
-          counterAccumAccepts := 0.U
-          counterRawStall := 0.U
-          counterOutputWrites := 0.U
-          counterNonzeroOutputWrites := 0.U
-          counterWriterBackpressure := 0.U
-          firstNonzeroTaggedSeen := false.B
-          firstNonzeroTaggedPacket := 0.U
-          firstNonzeroTaggedPair := 0.U
-          firstNonzeroTaggedPing := 0.U
-          firstNonzeroTaggedPong := 0.U
+          if (enableDebug) {
+            counterXPackets := 0.U
+            counterMatrixBeats := VecInit(Seq.fill(hbmChannels)(0.U(64.W)))
+            counterValidSlots := 0.U
+            counterPaddingSlots := 0.U
+            counterNonzeroXReads := 0.U
+            counterNonzeroProducts := 0.U
+            counterAccumAccepts := 0.U
+            counterRawStall := 0.U
+            counterOutputWrites := 0.U
+            counterNonzeroOutputWrites := 0.U
+            counterWriterBackpressure := 0.U
+            counterCoreNonzeroOut := 0.U
+            counterFaddNonzeroOut := 0.U
+            counterPartialReadNonzero := 0.U
+            firstNonzeroTaggedSeen := false.B
+            firstNonzeroTaggedPacket := 0.U
+            firstNonzeroTaggedPair := 0.U
+            firstNonzeroTaggedPing := 0.U
+            firstNonzeroTaggedPong := 0.U
+            firstNonzeroCoreOutSeen := false.B
+            firstNonzeroCoreOut := 0.U
+            firstNonzeroFaddOutSeen := false.B
+            firstNonzeroFaddOut := 0.U
+            firstNonzeroPartialReadSeen := false.B
+            firstNonzeroPartialRead := 0.U
+          }
           state := readHeader
         }
       }
@@ -458,7 +576,9 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
         })
         when(xWriteLane === 15.U) {
           xPacketIdx := xPacketIdx + 1.U
-          counterXPackets := counterXPackets + 1.U
+          if (enableDebug) {
+            counterXPackets := counterXPackets + 1.U
+          }
           state := loadX
         }.otherwise {
           xWriteLane := xWriteLane + 1.U
@@ -518,10 +638,14 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
           xReadAddr := issueSlotCol(xAddrBits - 1, 0)
           state := issueSlotWait
         }.otherwise {
-          counterPaddingSlots := counterPaddingSlots + 1.U
+          if (enableDebug) {
+            counterPaddingSlots := counterPaddingSlots + 1.U
+          }
           when(issueOwner === 7.U) {
             remaining(issueSource) := remaining(issueSource) - 1.U
-            counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            if (enableDebug) {
+              counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            }
             state := consumeBatch
           }.otherwise {
             issueOwner := issueOwner + 1.U
@@ -536,16 +660,20 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
 
       is(issueSlotSend) {
         when(activeCoreReady) {
-          counterValidSlots := counterValidSlots + 1.U
-          when(issueX.orR) {
-            counterNonzeroXReads := counterNonzeroXReads + 1.U
-          }
-          when(issueX.orR && issueValue.orR) {
-            counterNonzeroProducts := counterNonzeroProducts + 1.U
+          if (enableDebug) {
+            counterValidSlots := counterValidSlots + 1.U
+            when(issueX.orR) {
+              counterNonzeroXReads := counterNonzeroXReads + 1.U
+            }
+            when(issueX.orR && issueValue.orR) {
+              counterNonzeroProducts := counterNonzeroProducts + 1.U
+            }
           }
           when(issueOwner === 7.U) {
             remaining(issueSource) := remaining(issueSource) - 1.U
-            counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            if (enableDebug) {
+              counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
+            }
             state := consumeBatch
           }.otherwise {
             issueOwner := issueOwner + 1.U
@@ -589,12 +717,14 @@ class CuperSpmvOnlyChiselDataPath8 extends RawModule with CuperSpmvStreamPorts {
           taggedDin(owner) := payload
           taggedWrite(owner) := outValid(owner) && yFullN(owner)
           when(outValid(owner) && yFullN(owner)) {
-            when((outPing(owner).orR || outPong(owner).orR) && !firstNonzeroTaggedSeen) {
-              firstNonzeroTaggedSeen := true.B
-              firstNonzeroTaggedPacket := outPacket(owner)
-              firstNonzeroTaggedPair := outPair
-              firstNonzeroTaggedPing := outPing(owner)
-              firstNonzeroTaggedPong := outPong(owner)
+            if (enableDebug) {
+              when((outPing(owner).orR || outPong(owner).orR) && !firstNonzeroTaggedSeen) {
+                firstNonzeroTaggedSeen := true.B
+                firstNonzeroTaggedPacket := outPacket(owner)
+                firstNonzeroTaggedPair := outPair
+                firstNonzeroTaggedPing := outPing(owner)
+                firstNonzeroTaggedPong := outPong(owner)
+              }
             }
             outValid(owner) := false.B
           }

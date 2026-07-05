@@ -31,6 +31,8 @@ class StripAccumLane(groupBits: Int, depth: Int) extends Module {
     val busy = Output(Bool())
     val rawStall = Output(Bool())
     val accept = Output(Bool())
+    val debugFaddValid = Output(Bool())
+    val debugFaddValue = Output(UInt(32.W))
   })
 
   // ping/pong 与原 SpMV tagged 输出格式对应：一个 tagged packet 携带同 owner 的两行。
@@ -99,6 +101,8 @@ class StripAccumLane(groupBits: Int, depth: Int) extends Module {
   val addOutValid = addValid(faddLatency - 1)
   val addOutGroup = addGroup(faddLatency - 1)
   val addOutPong = addPong(faddLatency - 1)
+  io.debugFaddValid := addOutValid
+  io.debugFaddValue := fadd.io.dout
 
   // initValid 优先用于整轮清零；正常路径在 fadd 结束后写回新的 partial sum。
   val pingWriteEn = io.initValid || (addOutValid && !addOutPong)

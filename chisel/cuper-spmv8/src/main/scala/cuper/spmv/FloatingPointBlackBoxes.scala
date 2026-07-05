@@ -2,11 +2,12 @@ package cuper.spmv
 
 import chisel3._
 
-// 复用 TAPA/HLS 生成的单精度浮点乘法 IP，保持 latency、模块名和现有 Verilog/Tcl
-// artifact 一致，方便由 TAPA 打包流程继续接入同一套 Vivado IP。
+// 复用 TAPA/HLS 生成的单精度浮点乘法 IP。模块名仍沿用现有 _8_ artifact；
+// 当前 wrapper 是 1 拍输入寄存器 + Vivado floating_point c_latency=6，所以
+// Chisel 侧 tag/valid 对齐按 7 拍处理。
 class HlsFmul32 extends BlackBox(Map(
   "ID" -> 1,
-  "NUM_STAGE" -> 8,
+  "NUM_STAGE" -> 7,
   "din0_WIDTH" -> 32,
   "din1_WIDTH" -> 32,
   "dout_WIDTH" -> 32

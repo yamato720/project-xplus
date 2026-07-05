@@ -191,6 +191,8 @@ CUPER_SPMV_CHISEL8_VERILATOR_DIR := $(CUPER_SPMV_CHISEL8_BUILD_DIR)/verilator
 CUPER_SPMV_CHISEL8_DATAPATH_SMOKE := $(CUPER_SPMV_CHISEL8_VERILATOR_DIR)/cuper_spmv_chisel8_datapath_smoke
 CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE := $(CUPER_SPMV_CHISEL8_VERILATOR_DIR)/cuper_spmv_chisel8_axi_top_smoke
 CUPER_SPMV_CHISEL8_KERNEL_FREQUENCY ?= 150
+CUPER_SPMV_CHISEL8_VERILATOR_DEFS ?=
+CUPER_SPMV_CHISEL8_VERILATOR_CFLAGS ?=
 CUPER_SPMV_CHISEL8_CHISEL_SRCS := \
 	$(wildcard $(ROOT_DIR)/chisel/cuper-spmv8/src/main/scala/cuper/spmv/*.scala) \
 	$(ROOT_DIR)/chisel/cuper-spmv8/build.sbt \
@@ -534,12 +536,12 @@ $(CUPER_SPMV_CHISEL8_DATAPATH_RTL): $(CUPER_SPMV_CHISEL8_CHISEL_SRCS) $(ROOT_DIR
 $(CUPER_SPMV_CHISEL8_DATAPATH_SMOKE): $(CUPER_SPMV_CHISEL8_DATAPATH_RTL) $(ROOT_DIR)/verilog/csrc/sim_tapa_chisel_datapath.cpp $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v
 	mkdir -p "$(@D)"
 	rm -rf "$(@D)/datapath_obj"
-	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/datapath_obj" --top-module CuperSpmvOnly_ChiselDataPath8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_DATAPATH_RTL) $(ROOT_DIR)/verilog/csrc/sim_tapa_chisel_datapath.cpp -o "$@"
+	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 $(CUPER_SPMV_CHISEL8_VERILATOR_DEFS) $(CUPER_SPMV_CHISEL8_VERILATOR_CFLAGS) -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/datapath_obj" --top-module CuperSpmvOnly_ChiselDataPath8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_DATAPATH_RTL) $(ROOT_DIR)/verilog/csrc/sim_tapa_chisel_datapath.cpp -o "$@"
 
 $(CUPER_SPMV_CHISEL8_AXI_TOP_SMOKE): $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/verilog/csrc/sim_cuper_spmv_chisel8_axi_top.cpp $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v
 	mkdir -p "$(@D)"
 	rm -rf "$(@D)/axi_top_obj"
-	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/axi_top_obj" --top-module CuperSpmvChisel8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/verilog/csrc/sim_cuper_spmv_chisel8_axi_top.cpp -o "$@"
+	verilator -cc --exe --build --timing -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -DCUPER_VERILATOR_DPI_FP=1 $(CUPER_SPMV_CHISEL8_VERILATOR_DEFS) $(CUPER_SPMV_CHISEL8_VERILATOR_CFLAGS) -I$(ROOT_DIR)/verilog/tapa --Mdir "$(@D)/axi_top_obj" --top-module CuperSpmvChisel8 $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v $(ROOT_DIR)/verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/verilog/csrc/sim_cuper_spmv_chisel8_axi_top.cpp -o "$@"
 
 $(CUPER_SPMV_CHISEL8_XO): $(CUPER_SPMV_CHISEL8_RTL) $(ROOT_DIR)/chisel/cuper-spmv8/packaging/CuperSpmvChisel8.kernel.xml $(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.sh $(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.tcl | $(TARGET_BUILD_DIR) vivado-env
 	$(VITIS_ENV_CMD) VIVADO="$(VIVADO)" BUILD_DIR="$(TARGET_BUILD_DIR)" RTL_FILE="$(CUPER_SPMV_CHISEL8_RTL)" XO_PATH="$@" "$(ROOT_DIR)/chisel/cuper-spmv8/scripts/package_kernel_xo.sh"
