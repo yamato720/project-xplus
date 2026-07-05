@@ -22,11 +22,13 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
   `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，
-  当前 UUID 为 `765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad`，DATA/KERNEL/HBM 为
-  `85/500/345 MHz`。该版增加 fadd latency 对齐、fmul 7 拍对齐、debug
-  Status/Metrics、FP/partial counters、host mismatch/`[debug-fp]` 输出、本地
-  Verilator/datapath/AXI smokes，并已完成完整 hw link；150 MHz timing 严重未收敛，
-  等待服务器侧 `CHECK_Y=1`。上一 UUID `0f31be8c-...` 的服务器侧反馈表明
+  当前 UUID 为 `495e02a6-2d7b-8c84-fa0d-e7bfedc10f87`，DATA/KERNEL/HBM 为
+  `120/500/450 MHz`。当前同步版保留 fadd 12 拍和 fmul 7 拍对齐修复，并用
+  `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout；`Status[40..61]` /
+  `Metrics[47..63]` ABI 保留但 debug counters 预期为 0。完整 hw link 已完成，150
+  MHz timing 仍未收敛，等待服务器侧 `CHECK_Y=1`。上一 UUID `765e33c9-...` 是
+  full-debug FP/partial counter 版，因 debug fanout 频率降到 `85/500/345 MHz`；
+  再上一 UUID `0f31be8c-...` 的服务器侧反馈表明
   ptr/X/matrix decode 和 accumulator accepts 活着，但旧 `nonzero_products` 不能证明
   fmul 输出非零；更早 UUID `c36bff4e-...` no-check 可跑到完整 `thermal2`，但
   `CHECK_Y=1` 失败、`Y` mostly zeros/错误，用户提供的 `477.6 ms` 不作为有效 SpMV

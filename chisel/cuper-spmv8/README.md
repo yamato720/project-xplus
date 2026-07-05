@@ -30,11 +30,13 @@ make run-cuper-spmv-chisel8-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/th
 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
 ```
 
-当前同步版构建日志为 `logs/cuper_spmv_chisel8_hw_20260704_200820.log`，UUID 为
-`765e33c9-f3e4-5a25-55ca-ff9bc3a1ddad`。该 xclbin 已完成 Vitis `impl Complete`，
-但 150 MHz DATA timing 严重未收敛，最终 DATA/KERNEL/HBM clock 为
-`85/500/345 MHz`；它已包含 fmul 7 拍对齐和 FP/partial debug counters，用于
-correctness 上板验证，不作为性能结论。
+当前同步版构建日志为 `logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log`，
+UUID 为 `495e02a6-2d7b-8c84-fa0d-e7bfedc10f87`。该 xclbin 已完成 Vitis
+`impl Complete`，但 150 MHz DATA timing 仍未收敛，最终 DATA/KERNEL/HBM clock 为
+`120/500/450 MHz`；它保留 fmul 7 拍和 fadd 12 拍对齐修复，并用
+`CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout。`Status[40..61]` /
+`Metrics[47..63]` ABI 保留但 debug counters 预期为 0；该 demo 用于 correctness
+上板验证，不作为性能结论。
 
 第二条是原有固定 8-HBM 的 SpMV-only RTL 数据通路模块：
 
@@ -246,6 +248,9 @@ Metrics[63] {partial_read_nonzero[31:0], 32'h0}
 `nonzero_products` 是旧的 issue-side 计数，只说明 fmul 输入 `value` 和 `X` 非零；
 `core_nonzero_out` 才说明真实 fmul 输出非零并被 accumulator 接收。Host 的
 `[debug-fp]` 行会把这三段 counter 和首个 sample 按 float 打印出来。
+
+当前同步的 slim/no-debug xclbin 关闭这些 debug counters 的 fanout，因此对应槽位
+预期为 0；需要观察 FP/partial 断点时应重新生成 full-debug 版。
 
 ## 顶层状态机
 

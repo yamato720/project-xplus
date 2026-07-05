@@ -151,6 +151,11 @@ Metrics[62] packed {fadd_nonzero_out[31:0], core_nonzero_out[31:0]}
 Metrics[63] packed {partial_read_nonzero[31:0], 32'h0}
 ```
 
+当前同步到 `395bitstream/` 的 slim/no-debug xclbin 使用
+`CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 生成，保留上述槽位 ABI，但关闭重 debug fanout，
+因此这些 debug counters 预期为 0。需要按下面断点口径定位时，应使用 full-debug
+构建；slim/no-debug 版的 no-check 只采信 magic、count、done mask 和 error mask。
+
 上板 debug 判断口径：
 
 ```text

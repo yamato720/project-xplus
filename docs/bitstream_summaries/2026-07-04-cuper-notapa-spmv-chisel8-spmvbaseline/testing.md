@@ -185,9 +185,9 @@ CHECK_Y=1: 失败，Y mostly zeros/错误
 `CHECK_Y=1` 仍失败。用户提供的反馈目录为
 `logs/spmv_chisel8_correctness_debug_hw_20260704_192807/`，该目录当前未同步到本地仓库。
 反馈结论是 ptr/X/matrix decode 和 accumulator accepts 都是活的；但旧
-`nonzero_products` 只证明 fmul 输入非零，不证明 fmul 输出非零。因此当前同步版已
+`nonzero_products` 只证明 fmul 输入非零，不证明 fmul 输出非零。因此 full-debug 同步版
 修正 fmul tag/valid 对齐并追加 FP/partial 输出 counters。旧 `477.6 ms` 和更早
-`Y` 错误结论不能套用到当前 UUID `765e33c9-...`。
+`Y` 错误结论不能套用到当前 UUID `495e02a6-...` slim/no-debug demo。
 
 ## 2026-07-04 fmul latency / FP counter 本地验证
 
@@ -295,6 +295,74 @@ TNS failing endpoints 41704
 WHS 0.008 ns
 ```
 
+## 2026-07-05 slim/no-debug 本地验证与 hw link
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 make cuper-spmv-chisel8-datapath-smoke
+```
+
+结果：通过。该 smoke 复用 datapath packed cases，确认 slim mode 不改变功能路径。
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 make cuper-spmv-chisel8-axi-top-smoke
+```
+
+结果：通过。
+
+关键输出：
+
+```text
+CuperSpmvChisel8 AXI top smoke PASS y0=2 slim_debug=1 valid_slots=0 nonzero_products=0 core_nonzero_out=0 fadd_nonzero_out=0 partial_read_nonzero=0 nonzero_y_writes=1
+```
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 verilator --lint-only --timing -Wno-fatal -Wno-WIDTH \
+  -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -Iverilog/tapa \
+  --top-module CuperSpmvChisel8 \
+  verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v \
+  verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v \
+  verilog/chisel/CuperSpmvChisel8.sv
+```
+
+结果：通过。唯一诊断仍是生成端口名 `interrupt` 触发 Verilator `SYMRSVDWORD`
+warning。
+
+```bash
+make cuper-spmv-chisel8-hw-tmux
+```
+
+slim/no-debug full hw link 结果：通过，已覆盖同步同一个 demo 文件：
+
+```text
+log: logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log
+build dir: cuper-spmv-chisel8-slimdebug-build/
+xclbin: cuper-spmv-chisel8-slimdebug-build/hw/CuperSpmvChisel8.xclbin
+synced demo: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+UUID: 495e02a6-2d7b-8c84-fa0d-e7bfedc10f87
+SHA256: adb1c8630a4edde50560baf60826d86988b5e25e73d1c093da05ea4cc8653946
+DATA/KERNEL/HBM clock: 120 / 500 / 450 MHz
+Vitis elapsed: 2h 46m 0s
+```
+
+关键日志：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+Run completed.
+The compiler selected the following frequencies ... hbm_aclk = 450, KERNEL = 500, DATA = 120
+```
+
+Timing 状态：仍不是 timing-clean。150 MHz DATA 约束未收敛，Vitis 生成了 120 MHz
+DATA xclbin：
+
+```text
+Timing constraints are not met.
+WNS -1.644 ns
+TNS -6319.366 ns
+TNS failing endpoints 15852
+WHS 0.009 ns
+```
+
 ```bash
 make cuper-spmv-chisel8-hw-tmux
 ```
@@ -322,10 +390,10 @@ generation、Verilator lint、XO packaging 和完整 hw link。
 - 没有 `sw_emu`：`CuperSpmvChisel8` 是 RTL kernel path，当前 Makefile 没有 sw_emu
   model；本轮用 Chisel generation、datapath packed smoke、AXI top smoke、
   Verilator lint、host build 和 XO packaging 作为前置验证。
-- 当前 fmul/FP-counter correctness-debug demo 未上板：本机没有 U55C/XRT device；需要服务器侧 demo-only
+- 当前 slim/no-debug correctness demo 未上板：本机没有 U55C/XRT device；需要服务器侧 demo-only
   `CHECK_Y=1` correctness sweep。
 
 ## source.diff
 
-未生成/更新正式 `source.diff`。原因：当前 correctness-debug demo 尚未完成
+未生成/更新正式 `source.diff`。原因：当前 slim/no-debug demo 尚未完成
 demo-only `CHECK_Y=1` 上板验证。

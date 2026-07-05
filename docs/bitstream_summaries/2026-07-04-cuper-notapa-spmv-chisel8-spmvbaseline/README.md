@@ -9,8 +9,8 @@
 kernel: CuperSpmvChisel8
 source: chisel/cuper-spmv8/src/main/scala/cuper/spmv/CuperSpmvChisel8.scala
 generated RTL: verilog/chisel/CuperSpmvChisel8.sv
-build dir: cuper-spmv-chisel8-build/
-current hw log: logs/cuper_spmv_chisel8_correctness_debug_hw_20260704_143204.log
+build dir: cuper-spmv-chisel8-slimdebug-build/
+current hw log: logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log
 demo xclbin: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
 ```
 
@@ -68,7 +68,7 @@ zeros/错误。因此 `477.6 ms` 只能说明控制流与吞吐边界，不是�
 ## 当前同步 demo
 
 在上述 correctness failed demo 之后，当前工作树继续做 correctness-first debug，
-并已重新 link/sync 两次新 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、AXI-Lite offsets、13 路
+并已重新 link/sync 三次新 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、AXI-Lite offsets、13 路
 `m_axi_*` 端口和 HBM mapping 不变。当前同步版新增/修复内容：
 
 - Chisel accumulator 的 fadd wrapper latency 从 13 对齐到现有 RTL owner-lane
@@ -123,8 +123,8 @@ Metrics[63] {partial_read_nonzero[31:0], 32'h0}
 ```
 
 这些源码改动保持 `CuperSpmvChisel8` kernel 名、AXI-Lite offsets、host argument
-顺序、13 路 `m_axi_*` 端口和 HBM mapping 不变。2026-07-05 已完成完整 hardware
-build 并覆盖同步同一个 demo 文件：
+顺序、13 路 `m_axi_*` 端口和 HBM mapping 不变。2026-07-05 full-debug 版已完成完整
+hardware build 并曾覆盖同步同一个 demo 文件：
 
 ```text
 log: logs/cuper_spmv_chisel8_hw_20260704_200820.log
@@ -137,9 +137,28 @@ routed timing: WNS -5.008 ns, TNS -35127.766 ns, setup failing endpoints 41704, 
 Vitis elapsed: 21h 59m 45s
 ```
 
-该版本能生成 xclbin，但 150 MHz DATA timing 严重未收敛，Vitis xclbin info 记录
-DATA clock 为 85 MHz、HBM clock 为 345 MHz。它只作为 correctness-debug 候选，等待
-服务器侧 `CHECK_Y=1`，不晋级标准 bitstream，也不作为性能结果。
+该 full-debug 版本能生成 xclbin，但 150 MHz DATA timing 严重未收敛，Vitis xclbin
+info 记录 DATA clock 为 85 MHz、HBM clock 为 345 MHz。随后按用户要求用宏隔离重
+debug fanout，生成 slim/no-debug 同步版。slim 版仍保留 fmul 7 拍和 fadd 12 拍修复、
+不改变 ABI/HBM mapping，但 `Status[40..61]` / `Metrics[47..63]` 的重 debug counters
+槽位预期为 0。
+
+当前同步到 demo 槽的 slim/no-debug 版信息：
+
+```text
+log: logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log
+result: Vitis link Run completed, VPL impl Complete
+demo: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+UUID: 495e02a6-2d7b-8c84-fa0d-e7bfedc10f87
+SHA256: adb1c8630a4edde50560baf60826d86988b5e25e73d1c093da05ea4cc8653946
+DATA/KERNEL/HBM clock: 120 / 500 / 450 MHz
+routed timing: WNS -1.644 ns, TNS -6319.366 ns, setup failing endpoints 15852, hold WHS 0.009 ns
+Vitis elapsed: 2h 46m 0s
+```
+
+该版本已同步，150 MHz DATA timing 仍未收敛但比 full-debug 85 MHz 版明显改善。它只
+作为 correctness 候选，等待服务器侧 `CHECK_Y=1`，不晋级标准 bitstream，也不作为性能
+结果。
 
 ## 验收目标
 

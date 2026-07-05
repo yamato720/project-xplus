@@ -81,6 +81,20 @@
 - `CuperSpmvChisel8` AXI top smoke 已更新 tiny 非零 case 的期望，要求
   `core_nonzero_out`、`fadd_nonzero_out` 和 `partial_read_nonzero` 都非零。
 
+## 2026-07-05 slim/no-debug 同步更新
+
+- 新增/使用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 生成路径，把重 debug fanout 从同步
+  xclbin 中隔离出去，降低时序和布线压力。
+- 保持 `CuperSpmvChisel8` kernel 名、AXI-Lite register map、host argument 顺序、
+  13 路 `m_axi_*` 端口和 U55C HBM mapping 不变。
+- 保持 fmul 7 拍 valid/data 对齐和 fadd 12 拍对齐修复；只关闭重 debug counters 的
+  组合/寄存 fanout。
+- `Status[40..61]` / `Metrics[47..63]` 槽位 ABI 仍保留，但 slim/no-debug xclbin 中
+  debug counters 预期为 0；no-check 判定仍只依赖 magic/count/done/error mask。
+- 本地 AXI top smoke 在 slim 模式下验证 tiny case 仍写出 `Y_out[0]=2`，同时
+  `valid_slots/nonzero_products/core_nonzero_out/fadd_nonzero_out/partial_read_nonzero`
+  保持 0。
+
 ## Host
 
 - `host/cuper_spmv_chisel_xrt.cpp` 模式名改为
@@ -126,10 +140,20 @@
   setup failing endpoints `41704`，hold WHS `0.008 ns`。
 - 该版本只作为 correctness-debug 候选，等待服务器侧 `CHECK_Y=1`；由于频率大幅
   降到 85 MHz，不作为性能结果，也不晋级标准 bitstream。
+- slim/no-debug 版已完成完整 Vitis hw link，并已覆盖同步到同一个 demo 文件：
+  `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`。
+- Build log：`logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log`。
+- UUID：`495e02a6-2d7b-8c84-fa0d-e7bfedc10f87`。
+- SHA256：`adb1c8630a4edde50560baf60826d86988b5e25e73d1c093da05ea4cc8653946`。
+- DATA/KERNEL/HBM clock：`120 / 500 / 450 MHz`。
+- Routed timing 仍不是 150 MHz clean：WNS `-1.644 ns`，TNS `-6319.366 ns`，
+  setup failing endpoints `15852`，hold WHS `0.009 ns`。
+- 该版本只作为 slim/no-debug correctness 候选，等待服务器侧 `CHECK_Y=1`；不作为
+  性能结果，也不晋级标准 bitstream。
 
 ## 未做内容
 
 - 未插入 scoreboard。
 - 未修改 host ABI 或 HBM mapping。
-- 未更新正式 `source.diff`：当前 correctness-debug demo 尚未完成 demo-only 上板
+- 未更新正式 `source.diff`：当前 slim/no-debug demo 尚未完成 demo-only 上板
   `CHECK_Y=1`。
