@@ -187,7 +187,7 @@ CHECK_Y=1: 失败，Y mostly zeros/错误
 反馈结论是 ptr/X/matrix decode 和 accumulator accepts 都是活的；但旧
 `nonzero_products` 只证明 fmul 输入非零，不证明 fmul 输出非零。因此 full-debug 同步版
 修正 fmul tag/valid 对齐并追加 FP/partial 输出 counters。旧 `477.6 ms` 和更早
-`Y` 错误结论不能套用到当前 UUID `495e02a6-...` slim/no-debug demo。
+`Y` 错误结论不能套用到后续已同步的 slim/no-debug 或 owner-step8 demo。
 
 ## 2026-07-04 fmul latency / FP counter 本地验证
 
@@ -363,6 +363,175 @@ TNS failing endpoints 15852
 WHS 0.009 ns
 ```
 
+服务器侧随后反馈 slim/no-debug 同步版 `CHECK_Y=1` correctness 已通过所有 listed
+`thermal2*` 数据集，但性能仍严重落后：
+
+| 数据集 | slim/no-debug Chisel8 `CHECK_Y=1` | Chisel8 FPGA ms | strip8 FPGA ms | 备注 |
+| --- | --- | ---: | ---: | --- |
+| `thermal2_n16` | PASS | 未提供 | 0.079358 | 用户反馈 correctness 通过 |
+| `thermal2_n1024` | PASS | 未提供 | 0.083637 | 用户反馈 correctness 通过 |
+| `thermal2_n4096` | PASS | 未提供 | 0.087664 | 用户反馈 correctness 通过 |
+| `thermal2_n16384` | PASS | 未提供 | 0.124493 | 用户反馈 correctness 通过 |
+| `thermal2_n65536` | PASS | 未提供 | 0.222817 | 用户反馈 correctness 通过 |
+| `thermal2_n131072` | PASS | 未提供 | 0.365984 | 用户反馈 correctness 通过 |
+| `thermal2_n262144` | PASS | 未提供 | 0.622525 | 用户反馈 correctness 通过 |
+| `thermal2` | PASS | 459.425 | 2.71420 | 当前性能恢复目标 |
+
+上述 board truth 说明 `495e02a6-...` 已完成 correctness boundary，但 full `thermal2`
+距离 strip8 仍约 169 倍，因此进入 owner-step8 phase-1。
+
+## 2026-07-05 owner-step8 phase-1 本地验证与 hw link
+
+```bash
+make cuper-spmv-chisel8-xrt-host
+```
+
+结果：通过，host 已是 up-to-date。
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 make \
+  cuper-spmv-chisel8-generate \
+  cuper-spmv-chisel8-datapath-generate
+```
+
+结果：通过，重新生成：
+
+```text
+verilog/chisel/CuperSpmvChisel8.sv
+verilog/tapa/CuperSpmvOnly_ChiselDataPath8.v
+```
+
+生成物体量：
+
+```text
+verilog/tapa/CuperSpmvOnly_ChiselDataPath8.v: 4768 lines, 211969 bytes
+verilog/chisel/CuperSpmvChisel8.sv: 8064 lines, 341915 bytes
+```
+
+该体量保持在 KB 级，未回到旧 pre-lowmem 约 131 万行 / 43MB 的 Verilog 爆内存边界。
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 make cuper-spmv-chisel8-datapath-smoke
+```
+
+结果：通过。
+
+关键输出：
+
+```text
+PASS basic-two-beat: 64 tagged outputs in 1221 cycles
+PASS raw-reuse-padding: 64 tagged outputs in 1195 cycles
+PASS multi-group-empty-source: 136 tagged outputs in 1254 cycles
+PASS all-padding: 16 tagged outputs in 1160 cycles
+PASS cross-8192-column-batch: 64 tagged outputs in 8831 cycles
+PASS matrix-heavy-owner-step: 2048 tagged outputs in 5457 cycles
+PASS owner-step-raw-hazard: 32 tagged outputs in 1249 cycles
+CuperSpmvOnly_ChiselDataPath8 smoke PASS: 2424 tagged outputs across 7 cases
+```
+
+`matrix-heavy-owner-step` 用 128 beat/source、低输出量验证 owner-step issue 确实比旧
+serial issue 快；5457 cycles 低于旧 read/wait/send serial issue 下界。`owner-step-raw-hazard`
+覆盖同 source/owner lane 重复 row/group 的 RAW hazard。
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 make cuper-spmv-chisel8-axi-top-smoke
+```
+
+结果：通过。
+
+关键输出：
+
+```text
+CuperSpmvChisel8 AXI top smoke PASS y0=2 slim_debug=1 valid_slots=0 nonzero_products=0 core_nonzero_out=0 fadd_nonzero_out=0 partial_read_nonzero=0 nonzero_y_writes=1
+```
+
+```bash
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 verilator --lint-only --timing -Wno-fatal -Wno-WIDTH \
+  -Wno-DECLFILENAME -Wno-SHORTREAL -DVERILATOR=1 -Iverilog/tapa \
+  --top-module CuperSpmvChisel8 \
+  verilog/tapa/CuperSpmvOnly_CoreStrip_fmul_32ns_32ns_32_8_max_dsp_1.v \
+  verilog/tapa/CuperSpmvOnly_RtlOwnerBankAccumulatorOoo_fadd_32ns_32ns_32_13_full_dsp_1.v \
+  verilog/chisel/CuperSpmvChisel8.sv
+```
+
+结果：通过。唯一诊断仍是生成端口名 `interrupt` 触发 Verilator `SYMRSVDWORD`
+warning。
+
+```bash
+CUPER_SPMV_CHISEL8_BUILD_DIR=$PWD/cuper-spmv-chisel8-ownerstep8-build \
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 \
+make build-cuper-spmv-chisel8-xo
+```
+
+结果：通过，生成：
+
+```text
+cuper-spmv-chisel8-ownerstep8-build/hw/CuperSpmvChisel8.xo
+```
+
+```bash
+CUPER_SPMV_CHISEL8_BUILD_DIR=$PWD/cuper-spmv-chisel8-ownerstep8-build \
+CUPER_SPMV_CHISEL8_SLIM_DEBUG=1 \
+make -q cuper-spmv-chisel8-ownerstep8-build/hw/CuperSpmvChisel8.xo TARGET=hw \
+  BUILD_DIR=$PWD/cuper-spmv-chisel8-ownerstep8-build
+```
+
+结果：返回 `0`，XO target up-to-date。
+
+硬件 link 已完成：
+
+```text
+tmux: project-xplus-cuper-spmv-chisel8-ownerstep8-hw
+log: logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log
+build dir: cuper-spmv-chisel8-ownerstep8-build/
+xclbin target: cuper-spmv-chisel8-ownerstep8-build/hw/CuperSpmvChisel8.xclbin
+```
+
+Vitis link 结果：
+
+```text
+Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-1307] Run completed.
+INFO: [v++ 60-791] Total elapsed time: 2h 10m 17s
+```
+
+产物信息：
+
+```text
+xclbin: cuper-spmv-chisel8-ownerstep8-build/hw/CuperSpmvChisel8.xclbin
+size: 66025859 bytes
+UUID: 09ac7fd6-26a1-7d3b-ac94-c6ea4cdbb8ea
+SHA256: 0cd940e760afe59f2969a3b9de541d6d819a73b8b0173461d6b651443c576745
+INFO SHA256: c393270710938f9571e691e3a57ff1513477fb91cb43384b7d73b1a55f369a80
+DATA/KERNEL/HBM clock: 138 / 500 / 450 MHz
+```
+
+Timing report：
+
+```text
+cuper-spmv-chisel8-ownerstep8-build/hw/reports/link/imp/impl_1_hw_bb_locked_timing_summary_routed.rpt
+setup WNS -0.539 ns, TNS -718.710 ns, failing endpoints 4761
+hold WHS 0.009 ns, THS 0.000 ns
+```
+
+该 xclbin 已覆盖同步到同一个 demo 槽：
+
+```text
+395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin.info
+```
+
+同步后校验：
+
+```text
+0cd940e760afe59f2969a3b9de541d6d819a73b8b0173461d6b651443c576745  395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+c393270710938f9571e691e3a57ff1513477fb91cb43384b7d73b1a55f369a80  395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin.info
+```
+
+内存风险结论：本轮生成 RTL 为 `4768` 行 / `211969` bytes datapath 和 `8064` 行 /
+`341915` bytes top，Vitis link 完整结束，日志没有 `Out of memory` 或 `Killed`；
+没有回到旧 pre-lowmem 约 131 万行 / 43MB Verilog 爆内存边界。
+
 ```bash
 make cuper-spmv-chisel8-hw-tmux
 ```
@@ -390,10 +559,10 @@ generation、Verilator lint、XO packaging 和完整 hw link。
 - 没有 `sw_emu`：`CuperSpmvChisel8` 是 RTL kernel path，当前 Makefile 没有 sw_emu
   model；本轮用 Chisel generation、datapath packed smoke、AXI top smoke、
   Verilator lint、host build 和 XO packaging 作为前置验证。
-- 当前 slim/no-debug correctness demo 未上板：本机没有 U55C/XRT device；需要服务器侧 demo-only
-  `CHECK_Y=1` correctness sweep。
+- owner-step8 phase-1 xclbin 已完成并同步；本机没有 U55C/XRT device，仍需要服务器侧
+  demo-only `CHECK_Y=1` 与性能 sweep。
 
 ## source.diff
 
-未生成/更新正式 `source.diff`。原因：当前 slim/no-debug demo 尚未完成
-demo-only `CHECK_Y=1` 上板验证。
+未生成/更新正式 `source.diff`。原因：owner-step8 phase-1 尚未完成 demo-only 上板
+correctness 与性能验证。

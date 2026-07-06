@@ -38,6 +38,8 @@ struct SimCase {
   int rows = 128;
   int columns = kDefaultColumns;
   int iteration_num = 1;
+  uint64_t cycle_upper_bound = 0;
+  std::string cycle_bound_label;
   std::vector<std::array<std::vector<Wide513>, kChannels>> batches;
 };
 
@@ -543,6 +545,17 @@ bool run_case(const SimCase& sim_case, CaseResult& result) {
     std::cerr << sim_case.name << ": timed out before ap_done\n";
     return false;
   }
+  if (sim_case.cycle_upper_bound != 0 &&
+      result.cycle_count >= sim_case.cycle_upper_bound) {
+    std::cerr << sim_case.name << ": cycle bound failed: got "
+              << result.cycle_count << ", bound "
+              << sim_case.cycle_upper_bound;
+    if (!sim_case.cycle_bound_label.empty()) {
+      std::cerr << " (" << sim_case.cycle_bound_label << ")";
+    }
+    std::cerr << "\n";
+    return false;
+  }
   if (tagged_count != expected_tagged) {
     std::cerr << sim_case.name << ": expected " << expected_tagged
               << " tagged outputs, got " << tagged_count << "\n";
@@ -671,6 +684,60 @@ SimCase make_cross_batch_case() {
   return sim_case;
 }
 
+SimCase make_matrix_heavy_owner_step_case() {
+  SimCase sim_case;
+  sim_case.name = "matrix-heavy-owner-step";
+  sim_case.rows = 4096;
+  sim_case.columns = kDefaultColumns;
+  sim_case.batches.resize(1);
+
+  constexpr int kBeatsPerSource = 128;
+  constexpr int kGroups = 32;
+  for (int beat_idx = 0; beat_idx < kBeatsPerSource; ++beat_idx) {
+    const int group = beat_idx % kGroups;
+    const int scalar_lane = (beat_idx / kGroups) & 1;
+    for (int source = 0; source < kChannels; ++source) {
+      auto beat = padded_slots();
+      for (int owner = 0; owner < kChannels; ++owner) {
+        const int packet = group * kChannels + owner;
+        const int col = (source * 97 + owner * 13 + beat_idx * 5) %
+                        sim_case.columns;
+        set_slot(beat, owner, packet, scalar_lane, col, 1.0f);
+      }
+      sim_case.batches[0][static_cast<size_t>(source)].push_back(
+          pack_matrix_beat(beat));
+    }
+  }
+
+  const uint64_t valid_slots =
+      static_cast<uint64_t>(kBeatsPerSource) * kChannels * kChannels;
+  sim_case.cycle_upper_bound = valid_slots * 3;
+  sim_case.cycle_bound_label =
+      "below old serial issue read/wait/send lower bound";
+  return sim_case;
+}
+
+SimCase make_owner_step_raw_hazard_case() {
+  SimCase sim_case;
+  sim_case.name = "owner-step-raw-hazard";
+  sim_case.rows = 64;
+  sim_case.batches.resize(1);
+
+  constexpr int kRepeatedBeats = 6;
+  constexpr int kOwner = 3;
+  for (int beat_idx = 0; beat_idx < kRepeatedBeats; ++beat_idx) {
+    for (int source = 0; source < kChannels; ++source) {
+      auto beat = padded_slots();
+      const int col = source * 16 + beat_idx;
+      set_slot(beat, kOwner, kOwner, 0, col, static_cast<float>(beat_idx + 1));
+      sim_case.batches[0][static_cast<size_t>(source)].push_back(
+          pack_matrix_beat(beat));
+    }
+  }
+
+  return sim_case;
+}
+
 }  // namespace
 
 extern "C" int cuper_verilator_fmul32(int a, int b) {
@@ -689,12 +756,14 @@ int main(int argc, char** argv) {
   VerilatedContext context;
   context.commandArgs(argc, argv);
 
-  const std::array<SimCase, 5> cases = {
+  const std::array<SimCase, 7> cases = {
       make_basic_case(),
       make_raw_reuse_case(),
       make_multi_group_case(),
       make_all_padding_case(),
       make_cross_batch_case(),
+      make_matrix_heavy_owner_step_case(),
+      make_owner_step_raw_hazard_case(),
   };
 
   int total_tagged = 0;

@@ -11,7 +11,8 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
   override def desiredName: String = "CuperSpmvOnly_ChiselDataPath8"
 
   // 8 个 Matrix_A_Stream 输入。每个 512-bit beat 内有 8 个 64-bit slot，因此 owner 维度
-  // 也固定为 8。xMem 缓存当前 batch 的 X 向量窗口。
+  // 也固定为 8。xMemCopies 为每个 source 复制一份当前 batch 的 X 向量窗口，让 owner
+  // step 可以同周期为最多 8 个 source 各读一个 X。
   private val hbmChannels = 8
   private val xWords = 8192
   private val xAddrBits = log2Ceil(xWords)
@@ -140,14 +141,15 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
     val start = Reg(Vec(hbmChannels, UInt(32.W)))
     val end = Reg(Vec(hbmChannels, UInt(32.W)))
     val remaining = Reg(Vec(hbmChannels, UInt(32.W)))
-    val issueSource = RegInit(0.U(3.W))
     val issueOwner = RegInit(0.U(3.W))
-    val issueWord = Reg(UInt(512.W))
-    val issuePrevCol = RegInit("h3fff".U(14.W))
-    val issuePrevVal = RegInit(0.U(32.W))
-    val issueRow = Reg(UInt(18.W))
-    val issueValue = Reg(UInt(32.W))
-    val issueX = Reg(UInt(32.W))
+    val pendingValid = RegInit(VecInit(Seq.fill(hbmChannels)(false.B)))
+    val pendingWord = Reg(Vec(hbmChannels, UInt(512.W)))
+    val issuePrevCol = RegInit(VecInit(Seq.fill(hbmChannels)("h3fff".U(14.W))))
+    val issuePrevVal = RegInit(VecInit(Seq.fill(hbmChannels)(0.U(32.W))))
+    val issueLaneValid = RegInit(VecInit(Seq.fill(hbmChannels)(false.B)))
+    val issueRow = Reg(Vec(hbmChannels, UInt(18.W)))
+    val issueValue = Reg(Vec(hbmChannels, UInt(32.W)))
+    val issueX = Reg(Vec(hbmChannels, UInt(32.W)))
 
     // 输出扫描坐标：outPair 选择 source-HBM，outGroup/owner 合成最终 output packet id。
     val outGroup = RegInit(0.U(groupBits.W))
@@ -157,15 +159,22 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
     val outValid = RegInit(VecInit(Seq.fill(hbmChannels)(false.B)))
     val outPacket = Reg(Vec(hbmChannels, UInt(32.W)))
 
-    val xMem = SyncReadMem(xWords, UInt(32.W))
-    val xReadEn = WireDefault(false.B)
-    val xReadAddr = WireDefault(0.U(xAddrBits.W))
-    val xReadData = xMem.read(xReadAddr, xReadEn)
+    val xMemCopies = Seq.fill(hbmChannels)(SyncReadMem(xWords, UInt(32.W)))
+    val xReadEn = Wire(Vec(hbmChannels, Bool()))
+    val xReadAddr = Wire(Vec(hbmChannels, UInt(xAddrBits.W)))
+    val xReadData = Wire(Vec(hbmChannels, UInt(32.W)))
+    xReadEn := VecInit(Seq.fill(hbmChannels)(false.B))
+    xReadAddr := VecInit(Seq.fill(hbmChannels)(0.U(xAddrBits.W)))
+    for (source <- 0 until hbmChannels) {
+      xReadData(source) := xMemCopies(source).read(xReadAddr(source), xReadEn(source))
+    }
     val xWriteEn = WireDefault(false.B)
     val xWriteAddr = WireDefault(0.U(xAddrBits.W))
     val xWriteData = WireDefault(0.U(32.W))
     when(xWriteEn) {
-      xMem.write(xWriteAddr, xWriteData)
+      for (source <- 0 until hbmChannels) {
+        xMemCopies(source).write(xWriteAddr, xWriteData)
+      }
     }
     // 8x8 Core/Accumulator lane 矩阵：source 维度来自 Matrix_A_Stream_i，
     // owner 维度来自 beat 内 slot。Core 和 Accumulator 之间的 Decoupled product
@@ -327,45 +336,64 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
       }
     }
 
-    val issueSlot = selectSlot(issueWord, issueOwner)
-    val issueSlotRow = issueSlot(49, 32)
-    val issueSlotCol = issueSlot(63, 50)
-    val issueSlotRawVal = issueSlot(31, 0)
-    val issueSlotReuse = (issuePrevCol & issueSlotCol) === "h3fff".U
-    val issueSlotValue = Mux(issueSlotReuse, issuePrevVal, issueSlotRawVal)
-    val issueSlotValid = !issueSlotRow(17)
-
-    val sourceCanRead = VecInit((0 until hbmChannels).map { source =>
-      remaining(source) =/= 0.U && matrixValid(source)
-    })
-    val anySourceCanRead = sourceCanRead.asUInt.orR
-    val selectedSource = PriorityEncoder(sourceCanRead)
-    val selectedMatrixWord = Mux1H((0 until hbmChannels).map { source =>
-      (selectedSource === source.U) -> matrixDout(source)(511, 0)
-    })
+    val issueSlot = Wire(Vec(hbmChannels, UInt(64.W)))
+    val issueSlotRow = Wire(Vec(hbmChannels, UInt(18.W)))
+    val issueSlotCol = Wire(Vec(hbmChannels, UInt(14.W)))
+    val issueSlotRawVal = Wire(Vec(hbmChannels, UInt(32.W)))
+    val issueSlotValue = Wire(Vec(hbmChannels, UInt(32.W)))
+    val issueSlotValid = Wire(Vec(hbmChannels, Bool()))
+    val issueSlotPadding = Wire(Vec(hbmChannels, Bool()))
     for (source <- 0 until hbmChannels) {
-      matrixRead(source) := state === consumeBatch && anySourceCanRead && selectedSource === source.U
+      issueSlot(source) := selectSlot(pendingWord(source), issueOwner)
+      issueSlotRow(source) := issueSlot(source)(49, 32)
+      issueSlotCol(source) := issueSlot(source)(63, 50)
+      issueSlotRawVal(source) := issueSlot(source)(31, 0)
+      val reuse = (issuePrevCol(source) & issueSlotCol(source)) === "h3fff".U
+      issueSlotValue(source) := Mux(reuse, issuePrevVal(source), issueSlotRawVal(source))
+      issueSlotValid(source) := pendingValid(source) && !issueSlotRow(source)(17)
+      issueSlotPadding(source) := pendingValid(source) && issueSlotRow(source)(17)
     }
 
-    val activeCoreReady = Mux1H((0 until hbmChannels).flatMap { source =>
-      (0 until hbmChannels).map { owner =>
-        (issueSource === source.U && issueOwner === owner.U) -> coreLanes(source)(owner).io.inReady
-      }
+    val fetchFire = Wire(Vec(hbmChannels, Bool()))
+    val pendingAfterFetch = Wire(Vec(hbmChannels, Bool()))
+    val remainingAfterFetch = Wire(Vec(hbmChannels, UInt(32.W)))
+    for (source <- 0 until hbmChannels) {
+      fetchFire(source) :=
+        state === consumeBatch && !pendingValid(source) && remaining(source) =/= 0.U && matrixValid(source)
+      matrixRead(source) := fetchFire(source)
+      pendingAfterFetch(source) := pendingValid(source) || fetchFire(source)
+      remainingAfterFetch(source) := remaining(source) - fetchFire(source).asUInt
+    }
+    val anyPendingAfterFetch = pendingAfterFetch.asUInt.orR
+    val anyNeedFetchAfter = (0 until hbmChannels).map { source =>
+      !pendingAfterFetch(source) && remainingAfterFetch(source) =/= 0.U
+    }.reduce(_ || _)
+    val canStartIssueStep = anyPendingAfterFetch && !anyNeedFetchAfter
+
+    val activeCoreReady = VecInit((0 until hbmChannels).map { source =>
+      val ownerReady = Mux1H((0 until hbmChannels).map { owner =>
+        (issueOwner === owner.U) -> coreLanes(source)(owner).io.inReady
+      })
+      !issueLaneValid(source) || ownerReady
     })
+    val allActiveCoreReady = activeCoreReady.asUInt.andR
     for (source <- 0 until hbmChannels) {
       for (owner <- 0 until hbmChannels) {
-        when(state === issueSlotSend && issueSource === source.U && issueOwner === owner.U) {
-          coreLanes(source)(owner).io.inValid := true.B
-          coreLanes(source)(owner).io.inGroup := issueRow(14, 1)
-          coreLanes(source)(owner).io.inPong := issueRow(0)
-          coreLanes(source)(owner).io.inValue := issueValue
-          coreLanes(source)(owner).io.inX := issueX
+        when(
+          state === issueSlotSend && issueLaneValid(source) && issueOwner === owner.U
+        ) {
+          coreLanes(source)(owner).io.inValid := allActiveCoreReady
+          coreLanes(source)(owner).io.inGroup := issueRow(source)(14, 1)
+          coreLanes(source)(owner).io.inPong := issueRow(source)(0)
+          coreLanes(source)(owner).io.inValue := issueValue(source)
+          coreLanes(source)(owner).io.inX := issueX(source)
         }
       }
     }
 
     // 汇总状态用于 batch 完成和累加器 drain；调试计数只在 full-debug 模式生成。
     val anyRemaining = remaining.map(_ =/= 0.U).reduce(_ || _)
+    val anyPending = pendingValid.asUInt.orR
     val anyLaneBusy = laneBusy.asUInt.orR
 
     val selectedPing = Wire(Vec(hbmChannels, UInt(32.W)))
@@ -381,6 +409,19 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
     }
 
     donePulse := false.B
+
+    def advanceIssueOwnerOrFinish(): Unit = {
+      when(issueOwner === 7.U) {
+        for (source <- 0 until hbmChannels) {
+          pendingValid(source) := false.B
+          issueLaneValid(source) := false.B
+        }
+        state := consumeBatch
+      }.otherwise {
+        issueOwner := issueOwner + 1.U
+        state := issueSlotRead
+      }
+    }
 
     if (enableDebug) {
       val anyRawStall = laneRawStall.get.asUInt.orR
@@ -556,7 +597,7 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
 
       is(loadX) {
         // 只加载当前 batch 需要的 X packet 窗口。为避免 16 写/64 读的超大
-        // 多端口寄存器阵列，每个 float_v16 packet 分 16 拍写入单端口 SRAM。
+        // 多端口寄存器阵列，每个 float_v16 packet 分 16 拍写入 8 份单读/单写 SRAM。
         when(xPacketIdx >= xPacketLimit) {
           boundaryCount := 0.U
           state := readEnd
@@ -600,9 +641,20 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
       }
 
       is(consumeBatch) {
-        // 每次只取一路 Matrix beat，然后按 8 个 owner slot 串行读 X/送 Core。
-        // 这保留 8-HBM ABI，但避免对 X SRAM 建 64 个组合读端口。
-        when(!anyRemaining) {
+        // 每个 source 最多预取一个 pending beat；随后按相同 owner slot 同步发射
+        // 最多 8 个 source lane。这样避免 64 读端口，同时恢复 8-HBM source 维并行。
+        for (source <- 0 until hbmChannels) {
+          when(fetchFire(source)) {
+            pendingValid(source) := true.B
+            pendingWord(source) := matrixDout(source)(511, 0)
+            remaining(source) := remaining(source) - 1.U
+            if (enableDebug) {
+              counterMatrixBeats(source) := counterMatrixBeats(source) + 1.U
+            }
+          }
+        }
+
+        when(!anyPending && !anyRemaining) {
           when(batchIdx + 1.U >= Batch_num) {
             state := drainAccum
           }.otherwise {
@@ -618,67 +670,70 @@ class CuperSpmvOnlyChiselDataPath8(enableDebug: Boolean = true)
             xPacketIdx := 0.U
             state := loadX
           }
-        }.elsewhen(anySourceCanRead) {
-          issueSource := selectedSource
+        }.elsewhen(canStartIssueStep) {
           issueOwner := 0.U
-          issueWord := selectedMatrixWord
-          issuePrevCol := "h3fff".U
-          issuePrevVal := 0.U
+          for (source <- 0 until hbmChannels) {
+            issuePrevCol(source) := "h3fff".U
+            issuePrevVal(source) := 0.U
+            issueLaneValid(source) := false.B
+          }
           state := issueSlotRead
         }
       }
 
       is(issueSlotRead) {
-        issuePrevCol := issueSlotCol
-        issuePrevVal := issueSlotValue
-        when(issueSlotValid) {
-          issueRow := issueSlotRow
-          issueValue := issueSlotValue
-          xReadEn := true.B
-          xReadAddr := issueSlotCol(xAddrBits - 1, 0)
+        for (source <- 0 until hbmChannels) {
+          when(pendingValid(source)) {
+            issuePrevCol(source) := issueSlotCol(source)
+            issuePrevVal(source) := issueSlotValue(source)
+          }
+          issueLaneValid(source) := issueSlotValid(source)
+          issueRow(source) := issueSlotRow(source)
+          issueValue(source) := issueSlotValue(source)
+          xReadEn(source) := issueSlotValid(source)
+          xReadAddr(source) := issueSlotCol(source)(xAddrBits - 1, 0)
+        }
+        if (enableDebug) {
+          val paddingSlots = PopCount(issueSlotPadding.asUInt)
+          when(paddingSlots =/= 0.U) {
+            counterPaddingSlots := counterPaddingSlots + paddingSlots
+          }
+        }
+        when(issueSlotValid.asUInt.orR) {
           state := issueSlotWait
         }.otherwise {
-          if (enableDebug) {
-            counterPaddingSlots := counterPaddingSlots + 1.U
-          }
-          when(issueOwner === 7.U) {
-            remaining(issueSource) := remaining(issueSource) - 1.U
-            if (enableDebug) {
-              counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
-            }
-            state := consumeBatch
-          }.otherwise {
-            issueOwner := issueOwner + 1.U
-          }
+          advanceIssueOwnerOrFinish()
         }
       }
 
       is(issueSlotWait) {
-        issueX := xReadData
+        for (source <- 0 until hbmChannels) {
+          issueX(source) := xReadData(source)
+        }
         state := issueSlotSend
       }
 
       is(issueSlotSend) {
-        when(activeCoreReady) {
+        when(allActiveCoreReady) {
           if (enableDebug) {
-            counterValidSlots := counterValidSlots + 1.U
-            when(issueX.orR) {
-              counterNonzeroXReads := counterNonzeroXReads + 1.U
+            val validSlots = PopCount(issueLaneValid.asUInt)
+            val nonzeroXReads = PopCount((0 until hbmChannels).map { source =>
+              issueLaneValid(source) && issueX(source).orR
+            })
+            val nonzeroProducts = PopCount((0 until hbmChannels).map { source =>
+              issueLaneValid(source) && issueX(source).orR && issueValue(source).orR
+            })
+            when(validSlots =/= 0.U) {
+              counterValidSlots := counterValidSlots + validSlots
             }
-            when(issueX.orR && issueValue.orR) {
-              counterNonzeroProducts := counterNonzeroProducts + 1.U
+            when(nonzeroXReads =/= 0.U) {
+              counterNonzeroXReads := counterNonzeroXReads + nonzeroXReads
+            }
+            when(nonzeroProducts =/= 0.U) {
+              counterNonzeroProducts := counterNonzeroProducts + nonzeroProducts
             }
           }
-          when(issueOwner === 7.U) {
-            remaining(issueSource) := remaining(issueSource) - 1.U
-            if (enableDebug) {
-              counterMatrixBeats(issueSource) := counterMatrixBeats(issueSource) + 1.U
-            }
-            state := consumeBatch
-          }.otherwise {
-            issueOwner := issueOwner + 1.U
-            state := issueSlotRead
-          }
+          advanceIssueOwnerOrFinish()
         }
       }
 

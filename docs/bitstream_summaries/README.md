@@ -22,12 +22,16 @@ YYYY-MM-DD-<主线>-<简短说明>/
 - `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
   `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，
-  当前 UUID 为 `495e02a6-2d7b-8c84-fa0d-e7bfedc10f87`，DATA/KERNEL/HBM 为
-  `120/500/450 MHz`。当前同步版保留 fadd 12 拍和 fmul 7 拍对齐修复，并用
-  `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout；`Status[40..61]` /
-  `Metrics[47..63]` ABI 保留但 debug counters 预期为 0。完整 hw link 已完成，150
-  MHz timing 仍未收敛，等待服务器侧 `CHECK_Y=1`。上一 UUID `765e33c9-...` 是
-  full-debug FP/partial counter 版，因 debug fanout 频率降到 `85/500/345 MHz`；
+  当前 UUID 为 `09ac7fd6-26a1-7d3b-ac94-c6ea4cdbb8ea`，DATA/KERNEL/HBM 为
+  `138/500/450 MHz`。当前同步版是在已通过 correctness 的 slim/no-debug 基线上做
+  owner-step8 phase-1：保持 ABI/HBM mapping/AXI-Lite offsets/13 路 `m_axi_*` 端口和
+  scalar `Y_out` writer 不变，用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout，
+  并把 datapath issue 改为同 owner slot 跨最多 8 source 发射。完整 hw link 已完成，
+  150 MHz timing 仍未收敛；服务器侧 `CHECK_Y=1` 和性能 sweep 待跑，不晋级标准
+  bitstream。上一 UUID `495e02a6-...` 已通过 listed `thermal2*` correctness，但完整
+  `thermal2` 为 `459.425 ms`，远慢于 strip8 `2.71420 ms`；再上一 UUID
+  `765e33c9-...` 是 full-debug FP/partial counter 版，因 debug fanout 频率降到
+  `85/500/345 MHz`；
   再上一 UUID `0f31be8c-...` 的服务器侧反馈表明
   ptr/X/matrix decode 和 accumulator accepts 活着，但旧 `nonzero_products` 不能证明
   fmul 输出非零；更早 UUID `c36bff4e-...` no-check 可跑到完整 `thermal2`，但

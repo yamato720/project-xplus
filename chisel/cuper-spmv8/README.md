@@ -30,13 +30,17 @@ make run-cuper-spmv-chisel8-xrt TARGET=hw DATASET=data/suitesparse/Schmid/csr/th
 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
 ```
 
-当前同步版构建日志为 `logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log`，
-UUID 为 `495e02a6-2d7b-8c84-fa0d-e7bfedc10f87`。该 xclbin 已完成 Vitis
-`impl Complete`，但 150 MHz DATA timing 仍未收敛，最终 DATA/KERNEL/HBM clock 为
-`120/500/450 MHz`；它保留 fmul 7 拍和 fadd 12 拍对齐修复，并用
-`CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout。`Status[40..61]` /
-`Metrics[47..63]` ABI 保留但 debug counters 预期为 0；该 demo 用于 correctness
-上板验证，不作为性能结论。
+当前同步版构建日志为
+`logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log`，UUID 为
+`09ac7fd6-26a1-7d3b-ac94-c6ea4cdbb8ea`。该 xclbin 已完成 Vitis `impl Complete`，
+但 150 MHz DATA timing 仍未收敛，最终 DATA/KERNEL/HBM clock 为
+`138/500/450 MHz`；它仍用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout，
+并在不改 ABI/HBM mapping/scalar `Y_out` writer 的前提下把 matrix issue 改为
+owner-step8：每 source 预取一个 pending beat，同一个 owner slot 跨最多 8 source
+发射。上一版 `495e02a6-...` 已在服务器侧 `CHECK_Y=1` 通过 `thermal2_n16` 到完整
+`thermal2` 全部 listed datasets，但完整 `thermal2` 为 `459.425 ms`，远慢于 strip8
+的 `2.71420 ms`。当前 owner-step8 demo 已同步，服务器侧 correctness/性能 sweep
+待跑，因此仍只是 demo，不作为标准 bitstream。
 
 第二条是原有固定 8-HBM 的 SpMV-only RTL 数据通路模块：
 
@@ -129,11 +133,12 @@ PE_Param_in
 
 Vector_X_Stream_in
   -> 当前 batch 的 X 向量窗口
-  -> xMem（low-memory 版为单读/单写 SyncReadMem）
+  -> xMemCopies（8 份单读/单写 SyncReadMem，每个 source 一份）
 
 Matrix_A_Stream_0..7
   -> 每路 matrix beat 拆成 8 个 slot
-  -> 每次选择一路 source beat，并按 owner slot 串行读 X
+  -> consumeBatch 为每个 source 预取 1 个 pending beat
+  -> 按 owner step 同周期处理最多 8 个 source lane
   -> 对应 StripCoreLane 做 value * X[col]
   -> Decoupled StripProduct stream
   -> 后续可插 scoreboard / 乱序调度
@@ -152,8 +157,10 @@ Vector_Y_Tagged_Stream_0..7
 
 所以顶层会实例化 `8 x 8` 个 `StripCoreLane` 和 `8 x 8` 个 `StripAccumLane`。
 每个 lane 只处理一个 `source -> owner` 组合。为降低 Vivado 综合内存压力，当前
-baseline 不再同周期发射 64 个 slot；它每次读取一路 matrix beat，再按 8 个 owner
-slot 串行读 X/送 Core。当前 Core 和 Accumulator 之间先直连；后续如果要做乱序，
+ownerstep8 候选不回到 64 读端口 `Reg(Vec)`，而是复制 8 份 X SRAM：每个 source
+使用 1 个读端口，同一个 owner slot 可跨最多 8 个 source 同周期发射。若任意 active
+source 的对应 Core lane 因 RAW 或 backpressure 不 ready，本 owner step 整体停住，
+保持 fmul/fadd RAW 顺序正确。当前 Core 和 Accumulator 之间先直连；后续如果要做乱序，
 可以在 `StripProduct` stream 上插入 scoreboard。
 
 ## Matrix Slot 格式
@@ -273,18 +280,19 @@ loadX
   从 Vector_X_Stream_in 读取当前 batch 的 X 向量窗口。
 
 loadXWrite
-  把一个 float_v16 packet 分 16 拍写入单读/单写 xMem，避免综合成 16 写/64 读的
-  多端口寄存器阵列。
+  把一个 float_v16 packet 分 16 拍写入 8 份单读/单写 xMemCopies，避免综合成
+  16 写/64 读的多端口寄存器阵列。
 
 readEnd
   读取当前 batch 的 8 个 per-HBM end offset，并计算 remaining beat 数。
 
 consumeBatch
-  选择一路有数据且 remaining 非零的 Matrix_A_Stream，读取一个 beat。
+  为每个 source 预取一个 pending Matrix beat；所有仍有 remaining 的 source 都有
+  pending beat 后，进入 owner-step issue。
 
 issueSlotRead / issueSlotWait / issueSlotSend
-  对当前 beat 的 8 个 owner slot 串行处理：解码 slot、读 xMem、等待同步读返回，
-  再发送到对应 Core lane。
+  对同一个 owner slot，跨 pending source 并行解码、读各自 X SRAM、等待同步读返回，
+  并在所有 active source Core lane ready 后一起发送。
 
 drainAccum
   等待所有 Core fmul 和 Accumulator read/fadd 流水线写回完成。

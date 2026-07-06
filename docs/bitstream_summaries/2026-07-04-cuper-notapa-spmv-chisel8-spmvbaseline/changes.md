@@ -95,6 +95,35 @@
   `valid_slots/nonzero_products/core_nonzero_out/fadd_nonzero_out/partial_read_nonzero`
   保持 0。
 
+## 2026-07-05 owner-step8 phase-1 更新
+
+- 记录 slim/no-debug 同步版的服务器侧 board truth：`CHECK_Y=1` 已通过所有 listed
+  `thermal2*` 数据集，但完整 `thermal2` 为 `459.425 ms`，远慢于 strip8 的
+  `2.71420 ms`。因此下一步目标从 correctness 转为 ABI-preserving 性能恢复。
+- 保持 `CuperSpmvChisel8` kernel 名、AXI-Lite register map、host argument 顺序、
+  13 路 `m_axi_*` 端口、U55C HBM mapping、debug slots ABI 和 scalar `Y_out` writer
+  不变。
+- `CuperSpmvOnly_ChiselDataPath8` 的 matrix issue 从 serial source/owner 改为
+  owner-step8：
+  - 每个 source 最多预取 1 个 pending matrix beat；
+  - 同一个 owner slot 跨最多 8 个 pending source 同周期 issue；
+  - 每个 source 使用 1 个 X read port；
+  - active source 的对应 Core lane 必须全部 ready 才推进该 owner step，避免同
+    group/ping-pong 的 fmul/fadd RAW 顺序被打乱。
+- 为避免重新生成旧版 64-read-port RTL，X cache 改为 8 份单读/单写
+  `SyncReadMem`。`loadXWrite` 仍每个 `float_v16` packet 分 16 拍写入，但把同一个
+  X word 同步写入所有 8 份副本。
+- 保留 `StripCoreLane` 和 `StripAccumLane`，不引入旧 scoreboard 分支，也不改变 fmul
+  7 拍和 fadd 12 拍对齐。
+- Datapath smoke 新增两类覆盖：
+  - `matrix-heavy-owner-step`：128 beat/source、低输出量，要求总周期低于旧 serial
+    issue 的 read/wait/send 下界；
+  - `owner-step-raw-hazard`：同 source/owner lane 重复写同一 row/group，验证 owner
+    step stall 仍保持 fadd correctness。
+- Makefile 的 Chisel8 Verilator 规则现在会在
+  `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 时同时传递 RTL `-D` 和 C++ harness
+  `-CFLAGS -D...`，避免 slim RTL 被 full-debug harness 误判 debug counters。
+
 ## Host
 
 - `host/cuper_spmv_chisel_xrt.cpp` 模式名改为
@@ -148,12 +177,29 @@
 - DATA/KERNEL/HBM clock：`120 / 500 / 450 MHz`。
 - Routed timing 仍不是 150 MHz clean：WNS `-1.644 ns`，TNS `-6319.366 ns`，
   setup failing endpoints `15852`，hold WHS `0.009 ns`。
-- 该版本只作为 slim/no-debug correctness 候选，等待服务器侧 `CHECK_Y=1`；不作为
-  性能结果，也不晋级标准 bitstream。
+- 服务器侧 `CHECK_Y=1` 已通过所有 listed `thermal2*` 数据集；完整 `thermal2`
+  为 `459.425 ms`，相比 strip8 `2.71420 ms` 明显慢，因此该版本作为 correctness
+  基线，不作为性能候选，也不晋级标准 bitstream。
+- owner-step8 phase-1 候选已通过本地前置验证、完成完整 Vitis hw link，并覆盖同步到
+  同一个 demo 槽：
+  `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`。
+- Build log：`logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log`。
+- UUID：`09ac7fd6-26a1-7d3b-ac94-c6ea4cdbb8ea`。
+- SHA256：`0cd940e760afe59f2969a3b9de541d6d819a73b8b0173461d6b651443c576745`。
+- INFO SHA256：`c393270710938f9571e691e3a57ff1513477fb91cb43384b7d73b1a55f369a80`。
+- DATA/KERNEL/HBM clock：`138 / 500 / 450 MHz`。
+- Routed timing 仍不是 150 MHz clean：WNS `-0.539 ns`，TNS `-718.710 ns`，
+  setup failing endpoints `4761`，hold WHS `0.009 ns`。
+- Vitis elapsed：`2h 10m 17s`。
+- 当前生成 RTL 保持小体量：
+  `verilog/tapa/CuperSpmvOnly_ChiselDataPath8.v` 为 `4768` 行 / `211969` bytes，
+  `verilog/chisel/CuperSpmvChisel8.sv` 为 `8064` 行 / `341915` bytes；没有回到旧
+  64-read-port / 131 万行 Verilog 爆内存边界。
+- 服务器侧 `CHECK_Y=1` 与性能 sweep 待跑；该版本暂不晋级标准 bitstream。
 
 ## 未做内容
 
 - 未插入 scoreboard。
 - 未修改 host ABI 或 HBM mapping。
-- 未更新正式 `source.diff`：当前 slim/no-debug demo 尚未完成 demo-only 上板
-  `CHECK_Y=1`。
+- 未更新正式 `source.diff`：owner-step8 phase-1 尚未完成 demo-only 上板 correctness
+  与性能验证。

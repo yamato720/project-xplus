@@ -46,20 +46,21 @@ X loader            -> Vector_X FIFO
 Matrix loaders      -> Matrix_A FIFO[0..7]
 ```
 
-`CuperSpmvOnly_ChiselDataPath8` 当前是 low-memory serial issue 版。它仍实例化 8x8
+当前同步 demo 的 `CuperSpmvOnly_ChiselDataPath8` 使用 owner-step8 phase-1。它仍实例化 8x8
 `StripCoreLane` / `StripAccumLane`，但不再把 `xMem` 做成 16 写/64 读的
-`Reg(Vec(8192))`：
+`Reg(Vec(8192))`，也不再使用旧 low-memory serial issue 的单 source/单 owner 路径：
 
 ```text
-Vector_X_Stream_in packet -> loadX/loadXWrite -> 单读/单写 SyncReadMem xMem
-Matrix_A_Stream_i beat    -> consumeBatch     -> 选择一路 source
-selected beat slot        -> issueSlotRead    -> 解码 row/col/value
-                           -> issueSlotWait    -> 等待 xMem 同步读
-                           -> issueSlotSend    -> 发送到对应 source/owner Core lane
+Vector_X_Stream_in packet -> loadX/loadXWrite -> 8 份单读/单写 SyncReadMem xMemCopies
+Matrix_A_Stream_i beat    -> consumeBatch     -> 每 source 预取一个 pending beat
+same owner slot           -> issueSlotRead    -> 跨 active source 解码 row/col/value
+                           -> issueSlotWait    -> 每 source 等待各自 xMem 同步读
+                           -> issueSlotSend    -> 所有 active source ready 后一起送 Core
 ```
 
 这个改动只影响 datapath 内部发射粒度和综合内存压力，不改变 host ABI、HBM mapping、
-ptr boundary 语义或 tagged Y 输出格式。
+ptr boundary 语义或 tagged Y 输出格式。若任一 active source 的对应 Core lane 因
+RAW/backpressure 不 ready，整个 owner step 停住，保持 fmul/fadd RAW 顺序正确。
 
 PE 参数流格式：
 
@@ -153,8 +154,10 @@ Metrics[63] packed {partial_read_nonzero[31:0], 32'h0}
 
 当前同步到 `395bitstream/` 的 slim/no-debug xclbin 使用
 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 生成，保留上述槽位 ABI，但关闭重 debug fanout，
-因此这些 debug counters 预期为 0。需要按下面断点口径定位时，应使用 full-debug
-构建；slim/no-debug 版的 no-check 只采信 magic、count、done mask 和 error mask。
+因此这些 debug counters 预期为 0。服务器侧反馈显示该 slim/no-debug xclbin 已经
+`CHECK_Y=1` 通过 listed `thermal2*`，但完整 `thermal2` 为 `459.425 ms`，远慢于
+strip8 的 `2.71420 ms`。需要按下面断点口径定位时，应使用 full-debug 构建；
+slim/no-debug 版的 no-check 只采信 magic、count、done mask 和 error mask。
 
 上板 debug 判断口径：
 

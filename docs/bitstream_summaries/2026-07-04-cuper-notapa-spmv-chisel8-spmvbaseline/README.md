@@ -9,8 +9,8 @@
 kernel: CuperSpmvChisel8
 source: chisel/cuper-spmv8/src/main/scala/cuper/spmv/CuperSpmvChisel8.scala
 generated RTL: verilog/chisel/CuperSpmvChisel8.sv
-build dir: cuper-spmv-chisel8-slimdebug-build/
-current hw log: logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log
+build dir: cuper-spmv-chisel8-ownerstep8-build/
+current hw log: logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log
 demo xclbin: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
 ```
 
@@ -67,9 +67,9 @@ zeros/错误。因此 `477.6 ms` 只能说明控制流与吞吐边界，不是�
 
 ## 当前同步 demo
 
-在上述 correctness failed demo 之后，当前工作树继续做 correctness-first debug，
-并已重新 link/sync 三次新 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、AXI-Lite offsets、13 路
-`m_axi_*` 端口和 HBM mapping 不变。当前同步版新增/修复内容：
+在上述 correctness failed demo 之后，工作树继续做 correctness-first debug，
+并重新 link/sync 三次中间 demo。它仍保持 `CuperSpmvChisel8` kernel 名、host ABI、
+AXI-Lite offsets、13 路 `m_axi_*` 端口和 HBM mapping 不变。中间同步版新增/修复内容：
 
 - Chisel accumulator 的 fadd wrapper latency 从 13 对齐到现有 RTL owner-lane
   accumulator 的 `FADD_PIPE_LATENCY=12` / `NUM_STAGE=12`。
@@ -143,7 +143,7 @@ debug fanout，生成 slim/no-debug 同步版。slim 版仍保留 fmul 7 拍和 
 不改变 ABI/HBM mapping，但 `Status[40..61]` / `Metrics[47..63]` 的重 debug counters
 槽位预期为 0。
 
-当前同步到 demo 槽的 slim/no-debug 版信息：
+上一版同步到 demo 槽的 slim/no-debug correctness 版信息：
 
 ```text
 log: logs/cuper_spmv_chisel8_slimdebug_hw_20260705_165202.log
@@ -156,13 +156,56 @@ routed timing: WNS -1.644 ns, TNS -6319.366 ns, setup failing endpoints 15852, h
 Vitis elapsed: 2h 46m 0s
 ```
 
-该版本已同步，150 MHz DATA timing 仍未收敛但比 full-debug 85 MHz 版明显改善。它只
-作为 correctness 候选，等待服务器侧 `CHECK_Y=1`，不晋级标准 bitstream，也不作为性能
-结果。
+该版本曾同步，150 MHz DATA timing 仍未收敛但比 full-debug 85 MHz 版明显改善。服务器侧
+反馈显示它已经在 `CHECK_Y=1` 下通过 `thermal2_n16`、`n1024`、`n4096`、
+`n16384`、`n65536`、`n131072`、`n262144` 和完整 `thermal2`。但完整
+`thermal2` 为 `459.425 ms`，远慢于 TAPA strip8 的 `2.71420 ms`，因此它只作为
+correctness 基线，不晋级标准 bitstream，也不作为性能候选。
+
+## 当前同步 owner-step8 phase-1 demo
+
+当前同步 demo 在 slim/no-debug correctness 基线之上进入第一阶段性能恢复：
+
+```text
+build dir: cuper-spmv-chisel8-ownerstep8-build/
+tmux: project-xplus-cuper-spmv-chisel8-ownerstep8-hw
+log: logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log
+demo: 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
+UUID: 09ac7fd6-26a1-7d3b-ac94-c6ea4cdbb8ea
+SHA256: 0cd940e760afe59f2969a3b9de541d6d819a73b8b0173461d6b651443c576745
+INFO SHA256: c393270710938f9571e691e3a57ff1513477fb91cb43384b7d73b1a55f369a80
+DATA/KERNEL/HBM clock: 138 / 500 / 450 MHz
+routed timing: WNS -0.539 ns, TNS -718.710 ns, setup failing endpoints 4761, hold WHS 0.009 ns
+Vitis elapsed: 2h 10m 17s
+```
+
+核心变化是只改 `CuperSpmvOnly_ChiselDataPath8` 内部 issue 路径，不改
+`CuperSpmvChisel8` kernel 名、host argument 顺序、13 路 `m_axi_*` 端口、AXI-Lite
+offset、HBM mapping、debug slots ABI 或 scalar `Y_out` writer。旧 serial issue 每次
+读取一路 source beat，再串行处理 8 个 owner slot；owner-step8 改为每个 source 预取
+一个 pending beat，然后同一个 owner slot 跨最多 8 个 source 同周期读 X/发射。
+
+为避免回到旧 64-read-port RTL 爆炸，X cache 不是 `Reg(Vec)` 多端口阵列，而是 8 份
+单读/单写 `SyncReadMem`，`loadXWrite` 把同一个 X word 写入所有副本。若某个 active
+source 的对应 Core lane 因 RAW/backpressure 不 ready，本 owner step 整体停住，继续
+保持 fmul/fadd RAW 顺序正确。
+
+本地生成物体量保持在 KB 级，不是旧版约 131 万行 / 43MB 的高风险 Verilog：
+
+```text
+verilog/tapa/CuperSpmvOnly_ChiselDataPath8.v: 4768 lines, 211969 bytes
+verilog/chisel/CuperSpmvChisel8.sv: 8064 lines, 341915 bytes
+```
+
+owner-step8 hardware link 已完成，Vitis log 显示 `Run completed` / VPL
+`impl Complete`，并已覆盖同步到同一个 `395bitstream/` demo 槽。该 xclbin 仍不是
+150 MHz timing-clean，但生成物体量保持小，未回到旧 64-read-port RTL 爆内存边界。
+服务器侧 `CHECK_Y=1` 和性能 sweep 待跑，因此当前 demo 不晋级标准 bitstream，也
+不更新正式 `source.diff`。
 
 ## 验收目标
 
-当前已同步、待上板 correctness 的 demo 文件：
+当前已同步、待上板验证的 demo 文件：
 
 ```text
 395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin
