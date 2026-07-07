@@ -2,49 +2,114 @@
 
 ## 当前状态
 
-记录时间：2026-05-27，更新：2026-05-31
+记录时间：2026-05-27，更新：2026-07-07
 
-当前 full-PCG demo 已完成 `hw` bitstream 构建和 demo-only init-only / 1iter
-上板测试；它仍作为 demo 保留在 `395bitstream/`，未替换当前标准版：
+当前 full-PCG demo 已完成软件级验证和 `hw` bitstream 构建；它仍作为 demo 保留在
+`395bitstream/`，未替换当前标准版，尚未完成 demo-only init-only / 1iter 上板测试：
 
 ```bash
-395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin
-395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin.info
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin.info
 ```
 
 当前 demo 信息：
 
 | 项目 | 数值 |
 | --- | --- |
-| UUID | `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668` |
-| SHA256 | `a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72` |
-| DATA clock | 172 MHz |
+| UUID | `1de9a25a-0257-8c9d-e39d-a470554d0f20` |
+| SHA256 | `4b2ab1b8b10b27917947b044511da73812ddf688145719146780d21ad60baf25` |
+| `.xclbin.info` SHA256 | `fb4f0c8c09eb43c0738f420bc0c35a1c4f4a1f63b308ea6577b458b2ffbcb9a1` |
+| DATA clock | 228 MHz |
 | KERNEL clock | 500 MHz |
-| HBM clock | 405 MHz |
-| 构建目录 | `cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/` |
-| 构建日志 | `logs/cuper_tapa_pcg_packed_timing_hw_20260531_163554.log` |
-| 构建耗时 | 3h 4m 41s |
+| HBM clock | 422 MHz |
+| 构建目录 | `cuper-tapa-pcg-fpga-u55c-20260525-build/` |
+| 构建日志 | `logs/cuper_tapa_pcg_hw_20260707_131157.log` |
+| 构建耗时 | 5h 5m 33s |
+| routed timing | WNS `-1.043 ns`，TNS `-24489.869 ns`，setup failing endpoints `69563` |
 
 关键构建输出：
 
 ```text
 Run vpl: FINISHED. Run Status: impl Complete!
-Created .../cuper-tapa-pcg-fpga-u55c-20260531-packed-timing-build/hw/CuperPcg.xclbin
-Total elapsed time: 3h 4m 41s
+Created .../cuper-tapa-pcg-fpga-u55c-20260525-build/hw/CuperPcg.xclbin
+Total elapsed time: 5h 5m 33s
 build finished with exit code: 0
 ```
 
-当前 2026-05-31 packed timing 实验 demo 已完成 demo-only 上板测试。旧 II=1
+当前 2026-07-07 vector phase worker 实验 demo 尚未完成 demo-only 上板测试。
+旧 2026-05-31 packed timing UUID `f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`、旧 II=1
 controller UUID `0170fa86-6e62-cfc9-aa66-2d330dd72cf2`、2026-05-29 旧 UUID
 `086a3345-ddf0-ffdd-b260-16ca5fa5223a` 和归档 controller-split UUID
 `1d536c39-f561-340b-7efc-ac2c8440543d` 的测试数据都只作为历史记录保留，不能套用到
-当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260531-demo.xclbin`。
+当前 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin`。
 
 归档 controller-split demo 还补跑过一组完整 PCG full-run，日志在
 `logs/codex_controller_split_fullrun_20260531_142400/`。该组不传
 `MAX_ITERS=1`，并传 `KERNEL_TIMEOUT_SEC=0` 禁用 host 默认 60 秒轮询超时。
 `thermal2_n16` 到 `thermal2_n262144` 已确认多轮收敛；完整 `thermal2`
-按用户要求停止，记录为未完成。当前 packed timing demo 尚未补跑 full-run。
+按用户要求停止，记录为未完成。当前 2026-07-07 demo 尚未补跑 full-run。
+
+## 2026-07-05 Callipepla 式 update 拆分源码验证
+
+本轮只改 full `CuperPcg(...)` controller/update 路径，不改
+`CuperPcgSpmv(...)` single-SpMV demo、`Cuper(...)` standalone SpMV、顶层 ABI 或
+connectivity。新的 stage 口径为：
+
+- `iter_spmv_recv_dot`：继续接收 `A*p`、写 `AP_spmv` 并融合计算 `p^T AP`；
+- `update_x`：只读 `X/P`，写 `X = X + alpha * P`；
+- `update_rz_reduce`：读 `R/AP_spmv/M_inv`，写 `R/Z` 并累计 `rz_new/rr_new`；
+- `pcg_vector_total = init_zp + update_x + update_rz_reduce + update_p`。
+
+计划验证命令：
+
+```bash
+make cuper-tapa-pcg-fpga-host
+make cuper-tapa-pcg-host
+make build-cuper-tapa-pcg TARGET=sw_emu
+```
+
+已运行结果：
+
+| 命令 | 结果 |
+| --- | --- |
+| `make cuper-tapa-pcg-fpga-host` | 通过，仅有既有 HLS/TAPA/Cuper helper warning |
+| `make cuper-tapa-pcg-host` | 通过，仅有既有 HLS/TAPA/Cuper helper warning |
+| `make build-cuper-tapa-pcg TARGET=sw_emu` | TAPA HLS、XO 生成和 XO patch 通过；Vitis link 失败 |
+| `make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3` | 通过 |
+
+`sw_emu` 失败原因：
+
+```text
+generated the v++ xo file at .../sw_emu/CuperPcg.xo
+patched .../sw_emu/CuperPcg.xo: initialized 64 FSM state regs, top defaults added 1, workdir_patched=True
+ERROR: [v++ 60-1576] Input Object file validation failed:
+The kernel 'CuperPcg' ... is not valid for the specified target 'sw_emu'.
+The valid target: hw_emu, hw
+```
+
+替代 local smoke 关键输出：
+
+```text
+[done] iter=1 residual_abs=9.699123342347e+00 status=max_iter
+[check] max_abs_diff=1.845319074767e-07 max_rel_diff=3.783121170261e-05 diff_tol=1.000000000000e-03
+[stage-work-packets] ... update_x=192 update_rz_reduce=288 update_p_pack=224 ...
+[stage-ms] ... update_x=3.300000000000e-06 update_rz_reduce=6.600000000000e-06 update_p=3.300000000000e-06 ...
+[pcg-control-ms] ... pcg_vector_total=1.980000000000e-05 init_zp=6.600000000000e-06 update_x=3.300000000000e-06 update_rz_reduce=6.600000000000e-06 update_p=3.300000000000e-06 ...
+```
+
+HLS report sanity check：
+
+```text
+cuper-tapa-pcg-fpga-u55c-20260525-build/sw_emu/tapa_CuperPcg/report/Pcg_Controller/csynth.rpt
+update_x                 present; update_x_compute_lanes II=1
+update_rz_reduce         present; update_rz_lanes II=5
+update_p                 present; update_p_compute_lanes II=1
+```
+
+本轮没有启动新的 `cuper-tapa-pcg` 硬件 tmux 构建：当前机器已有 Chisel SpMV
+Vitis/Vivado 硬件构建在 implementation/routing 后续阶段运行，继续启动 full-PCG
+硬件构建会抢占资源；本轮先停在源码、host 编译、TAPA HLS/XO 生成和 local smoke
+验证边界。正式 `source.diff` 不更新。
 
 controller-split 归档路径：
 
@@ -62,6 +127,92 @@ bitstream_archive/2026-05-31-tapa-pcg-controller-split-demo/
 
 该历史 demo 文件已被 2026-05-29 demo 替换；旧 receive-path demo 和 2026-05-27
 packed feed/AP demo 的测试结论只作为历史记录保留，不再对应当前这个 `.xclbin` 文件。
+
+## 2026-07-07 PCG 向量阶段 worker 拆分验证
+
+本轮只改 full `CuperPcg(...)` 内部 task graph：新增常驻
+`Pcg_Vector_Phases` worker，controller 通过 `PcgVectorCommand` /
+`PcgVectorResult` 调度 `init_spmv`、`init_zp`、`iter_dot`、`update_x`、
+`update_rz_reduce` 和 `update_p`。顶层 ABI、connectivity、Cuper SpMV 格式、
+`Cuper(...)` 和 `CuperPcgSpmv(...)` 不变。
+
+软件级验证命令：
+
+```bash
+make cuper-tapa-pcg-fpga-host
+make cuper-tapa-pcg-host
+make build-cuper-tapa-pcg TARGET=sw_emu
+make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3
+make run-cuper-pcg-tapa-fpga DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 DIFF_TOL=1e-3
+```
+
+已运行结果：
+
+| 命令 | 结果 |
+| --- | --- |
+| `make cuper-tapa-pcg-fpga-host` | 通过 |
+| `make cuper-tapa-pcg-host` | 通过 |
+| `make build-cuper-tapa-pcg TARGET=sw_emu` | TAPA analyze/HLS、XO 生成和 XO patch 通过；Vitis link 失败 |
+| `make run-cuper-pcg-tapa-fpga DATASET=data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3` | 通过，`max_abs_diff=1.845319074767e-07` |
+| `make run-cuper-pcg-tapa-fpga DATASET=data/suitesparse/Schmid/csr/thermal2_n16 MAX_ITERS=1 DIFF_TOL=1e-3` | 通过，`status=converged`，`max_abs_diff=1.086781531434e-08` |
+
+`sw_emu` link 失败原因仍是 XO target 声明限制：
+
+```text
+ERROR: [v++ 60-1576] Input Object file validation failed:
+The kernel 'CuperPcg' ... is not valid for the specified target 'sw_emu'.
+The valid target: hw_emu, hw
+```
+
+硬件构建：
+
+```bash
+make cuper-tapa-pcg-hw-tmux
+```
+
+构建结果：成功，tmux session 保留为 `project-xplus-cuper-tapa-pcg-hw`。
+
+关键输出：
+
+```text
+patched .../hw/CuperPcg.xo: initialized 65 FSM state regs, top defaults added 1, workdir_patched=True
+Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-586] Created .../cuper-tapa-pcg-fpga-u55c-20260525-build/hw/CuperPcg.xclbin
+INFO: [v++ 60-791] Total elapsed time: 5h 5m 33s
+build finished with exit code: 0
+```
+
+同步到 `395bitstream/` 的 demo 信息：
+
+| 项目 | 数值 |
+| --- | --- |
+| demo xclbin | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin` |
+| demo info | `395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin.info` |
+| UUID | `1de9a25a-0257-8c9d-e39d-a470554d0f20` |
+| SHA256 | `4b2ab1b8b10b27917947b044511da73812ddf688145719146780d21ad60baf25` |
+| `.xclbin.info` SHA256 | `fb4f0c8c09eb43c0738f420bc0c35a1c4f4a1f63b308ea6577b458b2ffbcb9a1` |
+| DATA clock | 228 MHz |
+| KERNEL clock | 500 MHz |
+| HBM clock | 422 MHz |
+
+Routed timing：
+
+| 项 | 数值 |
+| --- | ---: |
+| WNS | -1.043 ns |
+| TNS | -24489.869 ns |
+| setup failing endpoints | 69563 |
+| hold WHS | 0.002 ns |
+| hold failing endpoints | 0 |
+| `clk_kernel_00_unbuffered_net` WNS | -1.043 ns |
+| `hbm_aclk` WNS | -0.145 ns |
+
+本轮结论：
+
+- 新 demo 已完成软件 smoke 和 `hw` 构建，可同步给服务器侧上板。
+- 由于 routed timing 未收敛，板上测试需要先按 demo-only smoke 观察功能和稳定性。
+- 当前尚未运行 init-only / 1iter 上板 sweep，不写 HTML 性能结论，也不更新正式
+  `source.diff`。
 
 ## 2026-05-31 packed timing 实验构建
 

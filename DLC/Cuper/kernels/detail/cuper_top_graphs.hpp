@@ -221,8 +221,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
               // AP_spmv/X_spmv/P_spmv 是 full-PCG 版为了贴近 standalone
               // Cuper SpMV 新增的 packed float_v16 缓冲：
               //   X_spmv: host 预打包 x0，初始化 A*x0 时读取
-              //   P_spmv: controller 维护 p 的 packed 副本，每轮 A*p 时读取
-              //   AP_spmv: controller 缓存 A*p 的 packed 输出，供 dot/update 复用
+              //   P_spmv: vector worker 维护 p 的 packed 副本，每轮 A*p 时读取
+              //   AP_spmv: vector worker 缓存 A*p 的 packed 输出，供 dot/update 复用
               tapa::mmap<float_v16> AP_spmv,                            // packed FP32 的 A*p 缓冲，供 dot/update 阶段复用 SpMV 输出
               tapa::mmap<float_v16> X_spmv,                             // packed FP32 的 x0 副本，初始化 A*x0 时喂给 Cuper vector loader
               tapa::mmap<float_v16> P_spmv,                             // packed FP32 的 p 副本，每轮 A*p 时喂给 Cuper vector loader
@@ -240,7 +240,12 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     //
     //   Pcg_Controller
     //       -> 发送 SpMV 命令到 ptr/vector/matrix loader
+    //       -> 发送向量阶段命令到 Pcg_Vector_Phases
+    //       <- 接收 rz/rr/p_ap 等标量结果
+    //
+    //   Pcg_Vector_Phases
     //       <- 从 Pcg_Spmv_Stream 接收 A*x0 或 A*p
+    //       -> 访问 B/M_inv/X/R/Z/P/AP_spmv/P_spmv HBM，执行向量更新
     //
     //   Pcg_Vector_Loader
     //       -> 从 X_spmv/P_spmv packed HBM 读 float_v16 向量输入
@@ -284,9 +289,9 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     //             -> Vector_Y_Stream_Aftck[0..7]
     //             -> Mult_Sort_Tree
     //             -> Pcg_Spmv_Stream
-    //             -> Pcg_Controller
+    //             -> Pcg_Vector_Phases
     //
-    //      controller 最终看到的是一包包 float_v16 的 A*x0 或 A*p。
+    //      向量 worker 最终看到的是一包包 float_v16 的 A*x0 或 A*p。
     //
     // 这样 host 只 launch 一次 CuperPcg；PCG 每轮迭代都在这个 TAPA
     // task graph 内部完成，不再走 host 侧循环调用 Cuper。
@@ -326,14 +331,18 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     // 合并后的两行 y 值。
     tapa::streams<float_v2, HBM_CHANNEL_NUM, 256>           Vector_Y_Stream("Vector_Y_Stream");
     // checker 后的 8 路输出流：过滤 padding 后交给 Mult_Sort_Tree，
-    // 最终重新拼成 float_v16 送回 Pcg_Controller。
+    // 最终重新拼成 float_v16 送回 Pcg_Vector_Phases。
     // FIFO_DEPTH 来自 Cuper.h，当前实际深度为 2；和 Cuper/CuperPcgSpmv 相同。
     tapa::streams<float_v2, 8, FIFO_DEPTH>                  Vector_Y_Stream_Aftck("Vector_Y_Stream_aftck");
-    // 直接把 Cuper 的 float_v16 SpMV 结果接回 controller。
+    // 直接把 Cuper 的 float_v16 SpMV 结果接回向量阶段 worker。
     // 之前额外的 packetizer task 只包装一个未使用的 last 位；板上调试时
     // 该中间层会增加流控不确定性，所以这里保留 128 深度 FIFO 后直接消费。
-    // 这里也不再把 y 写回 HBM；CuperPcg 内部直接拿 A*x0/A*p 更新 PCG 状态。
+    // 这里也不再把 y 写回 HBM；向量 worker 直接拿 A*x0/A*p 更新 PCG 状态。
     tapa::stream<float_v16, 128>                            Pcg_Spmv_Stream("Pcg_Spmv_Stream");
+    // controller 与向量 worker 之间的阶段命令/结果流。controller 不再直接
+    // 访问 B/M_inv/X/R/Z/P/AP_spmv/P_spmv HBM。
+    tapa::stream<PcgVectorCommand, 4>                        Vector_Command_Stream("Vector_Command_Stream");
+    tapa::stream<PcgVectorResult, 4>                         Vector_Result_Stream("Vector_Result_Stream");
     // checker/sort/vector-destroy 都是常驻服务，需要单独 stop 流退出。
     // 这些 stream 深度很小，只承载停止令牌，不承载矩阵/向量数据。
     tapa::streams<INDEX_TYPE, 8, 2>                          Checker_Stop_Stream("Checker_Stop_Stream");
@@ -343,25 +352,6 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
     // 是 timer -> controller 的最终 cycle 数组。
     tapa::stream<PcgStageEvent, 16>                          Stage_Event_Stream("Stage_Event_Stream");
     tapa::stream<ap_uint<64>, 16>                             Stage_Ticks_Stream("Stage_Ticks_Stream");
-    // PCG 向量 worker 控制流：controller 下发阶段命令，worker 完成后
-    // 返回 done 或 rz/rr 标量结果。update_z/update_p 已拆成 HBM read、
-    // compute、HBM write 三段，中间走 FIFO；floorplan 时优先让每条 update
-    // 链内部靠近，避免宽 FIFO 跨 SLR。
-    tapa::stream<PcgVectorCommand, 2>                         UpdateZ_Command_Stream("UpdateZ_Command_Stream");
-    tapa::stream<PcgVectorCommand, 2>                         UpdateZ_Compute_Command_Stream("UpdateZ_Compute_Command_Stream");
-    tapa::stream<PcgVectorCommand, 2>                         UpdateZ_Write_Command_Stream("UpdateZ_Write_Command_Stream");
-    // 这些 packet 都是 512/1024-bit 级宽流；深 FIFO 会显著增加局部布线和
-    // SLR crossing 压力。读/算/写三段都是顺序流式消费，保留 8 深度弹性即可。
-    tapa::stream<PcgUpdateZReadPacket, 8>                      UpdateZ_Read_Stream("UpdateZ_Read_Stream");
-    tapa::stream<PcgUpdateZWritePacket, 8>                     UpdateZ_Write_Stream("UpdateZ_Write_Stream");
-    tapa::stream<PcgUpdateZResult, 2>                          UpdateZ_Compute_Result_Stream("UpdateZ_Compute_Result_Stream");
-    tapa::stream<PcgUpdateZResult, 2>                         UpdateZ_Result_Stream("UpdateZ_Result_Stream");
-    tapa::stream<PcgVectorCommand, 2>                         UpdateP_Command_Stream("UpdateP_Command_Stream");
-    tapa::stream<PcgVectorCommand, 2>                         UpdateP_Compute_Command_Stream("UpdateP_Compute_Command_Stream");
-    tapa::stream<PcgVectorCommand, 2>                         UpdateP_Write_Command_Stream("UpdateP_Write_Command_Stream");
-    tapa::stream<PcgUpdatePReadPacket, 8>                      UpdateP_Read_Stream("UpdateP_Read_Stream");
-    tapa::stream<PcgUpdatePWritePacket, 8>                     UpdateP_Write_Stream("UpdateP_Write_Stream");
-    tapa::stream<INDEX_TYPE, 2>                                UpdateP_Done_Stream("UpdateP_Done_Stream");
 
     tapa::task()
         // Controller 完成后广播 stop；所有 Pcg_* 服务任务收到 stop 后
@@ -374,11 +364,17 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
                 Vector_Destroy_Stop_Stream,
                 Stage_Event_Stream,
                 Stage_Ticks_Stream,
+                Vector_Command_Stream,
+                Vector_Result_Stream,
+                Metrics,
+                Status,
+                Row_num,
+                Max_iters,
+                Tau)
+        .invoke(Pcg_Vector_Phases,
+                Vector_Command_Stream,
+                Vector_Result_Stream,
                 Pcg_Spmv_Stream,
-                UpdateZ_Command_Stream,
-                UpdateZ_Result_Stream,
-                UpdateP_Command_Stream,
-                UpdateP_Done_Stream,
                 B,
                 M_inv,
                 X,
@@ -387,50 +383,8 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
                 P,
                 AP_spmv,
                 P_spmv,
-                Metrics,
-                Status,
-                Row_num,
-                Max_iters,
-                Tau)
+                Row_num)
         .invoke(Pcg_Stage_Timer, Stage_Event_Stream, Stage_Ticks_Stream)
-        // [PCG vector service] update_z/update_p 分为 HBM read、compute、HBM write。
-        // Read/Write task 保留 HBM mmap 端口，Compute task 只接 FIFO；SLR 约束
-        // 需要保持链路局部性，不能把宽 FIFO 硬拉过 SLR 边界。
-        .invoke(Pcg_UpdateZ_Read_Service,
-                UpdateZ_Command_Stream,
-                UpdateZ_Compute_Command_Stream,
-                UpdateZ_Write_Command_Stream,
-                UpdateZ_Read_Stream,
-                R,
-                M_inv)
-        .invoke(Pcg_UpdateZ_Compute_Service,
-                UpdateZ_Compute_Command_Stream,
-                UpdateZ_Read_Stream,
-                UpdateZ_Write_Stream,
-                UpdateZ_Compute_Result_Stream)
-        .invoke(Pcg_UpdateZ_Write_Service,
-                UpdateZ_Write_Command_Stream,
-                UpdateZ_Write_Stream,
-                UpdateZ_Compute_Result_Stream,
-                UpdateZ_Result_Stream,
-                Z)
-        .invoke(Pcg_UpdateP_Read_Service,
-                UpdateP_Command_Stream,
-                UpdateP_Compute_Command_Stream,
-                UpdateP_Write_Command_Stream,
-                UpdateP_Read_Stream,
-                Z,
-                P)
-        .invoke(Pcg_UpdateP_Compute_Service,
-                UpdateP_Compute_Command_Stream,
-                UpdateP_Read_Stream,
-                UpdateP_Write_Stream)
-        .invoke(Pcg_UpdateP_Write_Service,
-                UpdateP_Write_Command_Stream,
-                UpdateP_Write_Stream,
-                UpdateP_Done_Stream,
-                P,
-                P_spmv)
         // [init+PCG 共用 SpMV service] Cuper SpMV 的参数/向量/矩阵输入端。
         // Command_Stream[0] 给 ptr loader，Command_Stream[1] 给 vector loader；
         // Matrix_Command_Stream 分发到 16 个矩阵 HBM channel。
@@ -486,7 +440,7 @@ void CuperPcg(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,                // Cuper
         .invoke(Pcg_Destroy_int, PE_Param[HBM_CHANNEL_NUM])
         .invoke(Pcg_Destroy_float_v16, Vector_X_Stream[HBM_CHANNEL_NUM], Vector_Destroy_Stop_Stream)
         // [init+PCG 共用 SpMV service] Cuper 输出端：累加各 PE 部分和，
-        // 过滤 padding，排序/拼包后直接回到 PCG controller。controller
+        // 过滤 padding，排序/拼包后直接回到向量 worker。worker
         // 再根据当前阶段把它解释成 A*x0 或 A*p；这里不写 Y_out HBM。
         .invoke<tapa::join, HBM_CHANNEL_NUM>(Pcg_Accumulator, Vector_Y_Param, Matrix_Mult_Vector_Stream, Vector_Y_Stream)
         .invoke<tapa::join, 8>(Pcg_Vector_Checker, Row_num, Vector_Y_Stream, Vector_Y_Stream_Aftck, Checker_Stop_Stream)

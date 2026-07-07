@@ -1,6 +1,6 @@
 # 代码阅读指南
 
-本文只对应本目录记录的 `cuper-tapa-pcg` packed feed/AP demo。它不是全仓库通用
+本文只对应本目录记录的 `cuper-tapa-pcg` controller/vector demo。它不是全仓库通用
 设计文档；阅读这版代码时，以这里的文件顺序和数据流为准。
 
 如果要按“两次 PCG 迭代”追踪 `X/R/Z/P`、`X_spmv/P_spmv/AP_spmv` 和
@@ -11,17 +11,20 @@ TAPA stream 如何传递，先看同目录的 `two_iteration_dataflow.md`。
 这一版要解决的问题是：`CuperPcg` 虽然用了 TAPA Cuper 的 16 路 SpMV task graph，
 但旧路径在 controller 附近把 SpMV 输入/输出重新串行化了。
 
-本版做了两件事：
+本目录连续记录了几轮 full-PCG 优化，当前代码要同时记住五个边界：
 
 1. `X/P` 输入侧新增 packed `X_spmv/P_spmv`，让 `Pcg_Vector_Loader` 直接读
    `float_v16`，不再让 controller 从 `double X/P` 逐元素打包。
 2. `AP` 输出侧新增 packed `AP_spmv`，让 controller 直接缓存 Cuper 输出的一包
    `float_v16`，后续 dot/update 再按包读取。
 3. controller-split demo 又把 `p^T AP` 合入 `iter_spmv_stream` 接收路径，
-   并把 `update_xr` / `update_p` 各自拆成 compute/store 两段。
+   并把当前 `update_x` / `update_rz_reduce` 语义从旧 `update_xr` 路径中拆开。
 4. 当前 packed timing demo 把 `B/M_inv/X/R/Z/P` 主状态改成 packed `double_v8`
    mmap，`Metrics[5..15]` 改为 packed memory packet work，真实分段时间看
    `[stage-cycles]` / `[stage-ms]`。
+5. 当前 2026-07-07 版新增 `Pcg_Vector_Phases` 常驻 worker，把大段 HBM 向量访问
+   从 `Pcg_Controller` 拆出去；controller 只发 SpMV/vector command，计算
+   alpha/beta，做收敛判断和 Metrics/Status 写回。
 
 所以读代码时不要把 `X` 和 `X_spmv`、`P` 和 `P_spmv`、旧 `AP` 和 `AP_spmv`
 混成同一个东西：
@@ -44,7 +47,8 @@ SpMV 实现和一套 PCG 后处理：
 | 满血 Cuper SpMV | `detail/cuper_spmv_tasks.hpp` | `Cuper(...)` 标准基准，当前最快的 standalone TAPA Cuper SpMV |
 | Cuper-compatible demo SpMV | `CuperPcgSpmv(...)` + `detail/cuper_spmv_tasks.hpp` | 保留历史 kernel 名的 single SpMV demo，用于回归/边界检查 |
 | PCG 服务化 SpMV | `detail/pcg_spmv_service.hpp` | 为 `CuperPcg(...)` 重复触发、stop token 和 stage 计时调整过的共用 SpMV service |
-| PCG controller/update | `detail/pcg_controller.hpp` | 当前 full-PCG 性能主战场，包含 init 专用和 PCG 迭代专用向量阶段 |
+| PCG controller | `detail/pcg_controller.hpp` | 当前 full-PCG 标量调度器，发 SpMV/vector command，计算 alpha/beta 和收敛状态 |
+| PCG vector worker | `detail/pcg_vector_phases.hpp` | 当前 full-PCG 向量阶段 worker，持有 HBM mmap 并消费 `Pcg_Spmv_Stream` |
 
 single SpMV demo 的结论看 `spmv_avg`、timeout 边界和 diff；full-PCG 结论必须看
 `CuperPcg(...)` 实际路径里的 `pcg-spmv-ms`、`pcg-control-ms`、
@@ -57,20 +61,20 @@ full `CuperPcg(...)` 的阶段可以按“init 专用 / PCG 迭代专用 / init+
 
 | 阶段 | 源码标签 | 归属 | 说明 |
 | --- | --- | --- | --- |
-| `init_spmv` | `init_spmv_stream` | 共用 SpMV service 的 init 调用 + init 专用 R 生成 | 通过 `vector_source=X` 读 `X_spmv`，算 `A*x0`，controller 生成 `R=B-A*x0` |
-| `init_zp` | `init_zp_reduce` | init 专用 | 读 `R/M_inv`，初始化 `Z/P`，累计初始 `rz/rr`，并生成第一轮 `P_spmv` |
-| `iter_spmv` | `iter_spmv_stream` | 共用 SpMV service 的 PCG 调用 + 迭代专用 AP 接收 | 通过 `vector_source=P` 读 `P_spmv`，算 `A*p`，controller 把 packed AP 暂存到 `AP_spmv`，当前 demo 同时计算 `p^T AP` |
-| `dot_p_ap` / `p^T AP` | `iter_dot_p_ap_lanes` | PCG 迭代专用子循环，嵌在 `iter_spmv_stream` 内 | 读 FP64 `P` 和当前 AP packet，转 double 后算 `p^T AP`；当前不再有独立 stage timer |
-| `update_xr` | `update_xr` | PCG 迭代专用 | 更新 FP64 `X/R`，读 `AP_spmv` 时做 FP32->FP64 转换 |
-| `update_z` | `update_z_reduce` | PCG 迭代专用 | 根据新 `R` 更新 `Z`，累计新的 `rz/rr` |
-| `update_p` | `update_p` | PCG 迭代专用 | 更新 FP64 `P`，同时写下一轮 SpMV 需要的 packed FP32 `P_spmv` |
+| `init_spmv` | `kPcgVectorPhaseInitSpmv` | 共用 SpMV service 的 init 调用 + init 专用 R 生成 | 通过 `vector_source=X` 读 `X_spmv`，算 `A*x0`，`Pcg_Vector_Phases` 消费 stream 并生成 `R=B-A*x0` |
+| `init_zp` | `kPcgVectorPhaseInitZp` | init 专用 | worker 读 `R/M_inv`，初始化 `Z/P`，累计初始 `rz/rr`，并生成第一轮 `P_spmv` |
+| `iter_spmv` | `kPcgVectorPhaseIterDot` | 共用 SpMV service 的 PCG 调用 + 迭代专用 AP 接收 | 通过 `vector_source=P` 读 `P_spmv`，算 `A*p`，worker 把 packed AP 暂存到 `AP_spmv` 并计算 `p^T AP` |
+| `dot_p_ap` / `p^T AP` | `iter_dot_p_ap_lanes` | PCG 迭代专用子循环，嵌在 worker 的 iter-dot phase 内 | 读 FP64 `P` 和当前 AP packet，转 double 后算 `p^T AP`；当前不再有独立 stage timer |
+| `update_x` | `kPcgVectorPhaseUpdateX` | PCG 迭代专用 | worker 只更新 FP64 `X`，读 `X/P` 并写 `X` |
+| `update_rz_reduce` | `kPcgVectorPhaseUpdateRzReduce` | PCG 迭代专用 | worker 读 `R/AP_spmv/M_inv`，写 `R/Z`，累计新的 `rz/rr` |
+| `update_p` | `kPcgVectorPhaseUpdateP` | PCG 迭代专用 | worker 更新 FP64 `P`，同时写下一轮 SpMV 需要的 packed FP32 `P_spmv` |
 
 `Pcg_SpElement_list_ptr_Loader`、`Pcg_Vector_Loader`、`Pcg_Matrix_Loader[0..15]`、
 `Pcg_Core[0..15]`、`Pcg_Accumulator[0..15]`、`Pcg_Vector_Checker[0..7]` 和
 `Pcg_Mult_Sort_Tree` 是 init 和迭代共用的 SpMV service。若优化这些共享模块，
 理论上会同时影响 `init_spmv` 和 `iter_spmv`；若只改
-`iter_spmv_recv_dot/update_xr/update_z/update_p` 这类 controller 阶段，主要影响
-1iter/多 iter 增量，不会等比例加速 init-only。
+`iter_spmv_recv_dot/update_x/update_rz_reduce/update_p` 这类 vector worker 阶段，
+主要影响 1iter/多 iter 增量，不会等比例加速 init-only。
 
 ## 推荐阅读顺序
 
@@ -111,7 +115,7 @@ host/cuper_tapa_pcg_fpga_main.cpp
 27     Status
 ```
 
-其中 `B/M_inv/X/R/Z/P` 的 mmap 元素类型在当前 packed timing demo 中是
+其中 `B/M_inv/X/R/Z/P` 的 mmap 元素类型在当前代码中仍是
 `double_v8`，host 负责在读写前后做 pack/unpack。旧文档或旧 `source.diff` 中的
 `double*` 表述只对应早期 packed feed/AP 版本。
 
@@ -131,6 +135,7 @@ DLC/Cuper/kernels/detail/cuper_top_graphs.hpp
 ```text
 Pcg_Controller
   -> Command_Stream / Matrix_Command_Stream
+  -> Vector_Command_Stream
 
 Pcg_SpElement_list_ptr_Loader
 Pcg_Vector_Loader
@@ -140,6 +145,10 @@ Pcg_Accumulator[0..15]
 Pcg_Vector_Checker[0..7]
 Pcg_Mult_Sort_Tree
   -> Pcg_Spmv_Stream
+  -> Pcg_Vector_Phases
+
+Pcg_Vector_Phases
+  -> Vector_Result_Stream
   -> Pcg_Controller
 ```
 
@@ -162,6 +171,8 @@ iter_spmv -> vector_source = P -> 读 P_spmv
 因此优化 `Pcg_Matrix_Loader/Core/Accumulator/Checker/Sort_Tree` 这类模块时，
 应同时观察 `init_spmv` 和 `iter_spmv`；优化 `Pcg_Controller` 的 dot/update
 阶段时，主要看 `1iter - init-only` 的迭代增量。
+当前 2026-07-07 以后，dot/update 的 HBM 循环实际在 `Pcg_Vector_Phases`，controller
+只负责 command/result 边界和标量计算。
 
 ### 3. 命令和状态枚举
 
@@ -183,6 +194,17 @@ DLC/Cuper/kernels/detail/pcg_common.hpp
 kPcgVectorSourceX -> Pcg_Vector_Loader 读 X_spmv
 kPcgVectorSourceP -> Pcg_Vector_Loader 读 P_spmv
 ```
+
+向量 worker 的 command/result 不在 `pcg_common.hpp`，而在
+`detail/pcg_vector_phases.hpp`：
+
+```text
+PcgVectorCommand: phase, stop, alpha, beta
+PcgVectorResult:  phase, rz, rr, p_ap
+```
+
+controller 对每个非 stop vector command 都等待一条 result，因此 stage timer 的
+begin/end 边界包住的是 command/result 之间的 worker 完成时间。
 
 ### 4. SpMV 服务任务
 
@@ -208,7 +230,41 @@ DLC/Cuper/kernels/detail/pcg_spmv_service.hpp
 注意 Cuper 内部 `row` 是重排后的 18-bit 编码，不是原始全局行号。不要直接拿它
 判断 `65535` 行边界。
 
-### 5. PCG controller
+### 5. PCG vector worker
+
+再看：
+
+```text
+DLC/Cuper/kernels/detail/pcg_vector_phases.hpp
+```
+
+这是当前大段向量 HBM 访问的所在地。它持有 `B/M_inv/X/R/Z/P/AP_spmv/P_spmv`
+mmap，也直接消费 `Pcg_Spmv_Stream`。按 `command.phase` 分支读：
+
+1. `kPcgVectorPhaseInitSpmv`：
+   - 消费 `A*x0` stream；
+   - 读 `B`，写 `R=B-A*x0`。
+2. `kPcgVectorPhaseInitZp`：
+   - 读 `R/M_inv`；
+   - 写 `Z/P/P_spmv`；
+   - 返回 `rz/rr`。
+3. `kPcgVectorPhaseIterDot`：
+   - 消费 `A*p` stream；
+   - 写 `AP_spmv`，读 `P`；
+   - 返回 `p_ap=p^T AP`。
+4. `kPcgVectorPhaseUpdateX`：
+   - 读 `X/P`，写 `X`。
+5. `kPcgVectorPhaseUpdateRzReduce`：
+   - 读 `R/AP_spmv/M_inv`；
+   - 写 `R/Z`，返回 `rz_new/rr_new`。
+6. `kPcgVectorPhaseUpdateP`：
+   - 读 `Z/P`；
+   - 写 `P/P_spmv`。
+
+stop command 会让 worker 有限退出。不要把这些 HBM 循环再放回 controller，否则
+本轮拆分的目的就失效了。
+
+### 6. PCG controller
 
 最后看：
 
@@ -216,37 +272,32 @@ DLC/Cuper/kernels/detail/pcg_spmv_service.hpp
 DLC/Cuper/kernels/detail/pcg_controller.hpp
 ```
 
-这是 full-PCG 的主循环。按阶段读最清楚：
+这是 full-PCG 的标量调度主循环。按阶段读最清楚：
 
 1. `pcg_send_spmv_command(..., kPcgVectorSourceX)`：
    - 共用 SpMV service 的 init 调用；
-   - 命令 vector loader 读 `X_spmv`，命令 16 个 matrix loader 读矩阵。
-2. `init_spmv_stream`：
-   - 共用 SpMV service 返回 `A*x0`；
-   - init 专用地写初始残差 `R = B - A*x0`。
-3. `init_zp_reduce`：
-   - init 专用；
-   - 读 `R/M_inv`，写 `Z/P`，同步写第一轮 `P_spmv`，累计初始 `rz/rr`。
+   - 命令 vector loader 读 `X_spmv`，命令 16 个 matrix loader 读矩阵；
+   - 立刻发 `kPcgVectorPhaseInitSpmv`，等待 worker result。
+2. `kPcgVectorPhaseInitZp`：
+   - 发 vector command；
+   - 读取 worker result 得到初始 `rz/rr`。
 4. `pcg_send_spmv_command(..., kPcgVectorSourceP)`：
    - 共用 SpMV service 的迭代调用；
-   - 命令 vector loader 读 `P_spmv`。
-5. `iter_spmv_stream`：
-   - PCG 迭代专用接收 `A*p`；
-   - 直接写 packed `AP_spmv`；
-   - 当前 packed timing demo 在接收 AP 时同步读 packed `P` 并计算
-     `p_ap = p^T A p`，不再另开独立 `dot_p_ap` stage。
-7. `update_xr`：
-   - PCG 迭代专用；
-   - 读 `X/P/R/AP_spmv`，先在 `update_xr_compute_lanes` 里计算新 `X/R`，
-     再在 `update_xr_store_lanes` 里写回。
-8. `update_z_reduce`：
-   - PCG 迭代专用；
-   - 读 `R/M_inv`，更新 `Z`，累计新的 `rz/rr`。
-9. `update_p`：
-   - PCG 迭代专用；
-   - 先在 `update_p_compute_lanes` 里计算 `P = Z + beta * P`，再在
-     `update_p_store_lanes` 里写回 `P`，最后同步更新下一轮 SpMV 需要的 packed
-     `P_spmv`。
+   - 命令 vector loader 读 `P_spmv`；
+   - 发 `kPcgVectorPhaseIterDot`，读取 worker result 得到 `p_ap`。
+5. 标量计算：
+   - 检查 `p_ap/rz`；
+   - 计算 `alpha=rz/p_ap`。
+6. `kPcgVectorPhaseUpdateX`：
+   - 发 vector command，等待 result。
+7. `kPcgVectorPhaseUpdateRzReduce`：
+   - 发 vector command；
+   - 读取 worker result 得到 `rz_new/rr_new`。
+8. 标量计算：
+   - 检查 `rz_new/rr_new`；
+   - 计算 `beta=rz_new/rz`。
+9. `kPcgVectorPhaseUpdateP`：
+   - 发 vector command，等待 result。
 10. stop 广播和 metrics 写回：
    - 收尾控制，不属于算法阶段；
    - 这部分和 service drain 会反映到 `unaccounted_controller` 或 `controller 外`。
@@ -265,11 +316,11 @@ DLC/Cuper/kernels/detail/pcg_controller.hpp
 - `pcg-spmv-ms`：full-PCG 内嵌 SpMV 的 `spmv_total/spmv_avg`；
 - `pcg-control-ms`：`pcg_vector_total`、`unaccounted_controller`、
   `kernel_minus_controller`；
-- `stage-ms`：`init_spmv`、`init_zp`、`iter_spmv_recv_dot`、`update_xr`、
-  `update_z`、`update_p`；
+- `stage-ms`：`init_spmv`、`init_zp`、`iter_spmv_recv_dot`、`update_x`、
+  `update_rz_reduce`、`update_p`；
 - `[timing-ms] kernel_reported`：host/XRT 看到的完整 kernel 时间。
 
-当前 packed timing demo 的 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
+当前 stage 口径有一个变化：`kPcgStageDotPAp` 不再单独
 发 begin/end event，host 也不再把 `dot_p_ap` 作为独立 `stage-ms` 字段打印；
 `p^T AP` 的真实工作被并入 `iter_spmv_stream`。更新 HTML 或比较历史数据时，
 应把这一项标成 `iter recv + dot` 或显式写出新旧口径差异，不能直接把 raw
@@ -301,7 +352,7 @@ nnz = 8,580,313
 | `controller_total` | 920.2593 | FPGA 内 controller 计到的主体时间 |
 | `controller 外` | 23.8639 | `kernel_reported - controller_total`，主要是边界/drain/同步余量 |
 | `init_spmv + iter_spmv_recv_dot` | 189.3382 | init SpMV 加迭代 AP 接收和 fused dot |
-| `pcg_vector_total` | 730.9200 | `init_zp + update_xr + update_z + update_p` |
+| `pcg_vector_total` | 730.9200 | `init_zp + update_x + update_rz_reduce + update_p` |
 | `SpMV/recv/dot 占 controller` | 20.6% | 当前不是 controller 内最大项 |
 | `pcg_vector_total 占 controller` | 79.4% | 当前 controller 内主瓶颈 |
 | `unaccounted ctrl` | 约 0.001 | 已命名 stage 之外的 controller 内部余量很小 |
@@ -313,8 +364,8 @@ nnz = 8,580,313
 | `init_spmv` | 89.7385 | 共用 SpMV service 的 init 调用 |
 | `init_zp` | 197.2362 | init 专用，含 FP64 `rz/rr` reduction |
 | `iter_spmv_recv_dot` | 99.5997 | PCG 迭代专用，含 `A*p` 接收、`AP_spmv` 写入和 `p^T AP` |
-| `update_xr` | 211.3258 | PCG 迭代专用 |
-| `update_z` | 169.0716 | PCG 迭代专用，含 FP64 `rz/rr` reduction |
+| `update_xr` | 211.3258 | 2026-05-31 旧口径，PCG 迭代专用 |
+| `update_z` | 169.0716 | 2026-05-31 旧口径，含 FP64 `rz/rr` reduction |
 | `update_p` | 153.2865 | PCG 迭代专用，同步维护 `P_spmv` |
 
 这组数据给出的优化方向：
@@ -325,7 +376,7 @@ nnz = 8,580,313
 2. `init_spmv + iter_spmv_recv_dot` 占 controller 约 20.6%。这里的
    `iter_spmv_recv_dot` 已包含 `p^T AP`，不能按纯 SpMV 本体解读；当前更合理的
    判断是瓶颈仍主要在 SpMV 之外。
-3. 优先继续看 `update_xr`、`init_zp/update_z` reduction 和 `update_p`，其次看
+3. 优先继续看 `update_x`、`init_zp/update_rz_reduce` reduction 和 `update_p`，其次看
    `iter_spmv_recv_dot` 内 fused dot 的 FP64 recurrence。
 4. `controller 外` 约 `23.86 ms`，比向量阶段小得多；优化应先落到 controller
    里的 HBM 读写、FP32/FP64 转换、副本同步、stage 串行和归约结构。
@@ -338,7 +389,7 @@ nnz = 8,580,313
   对应 HLS 约从 II=5 改到 `init_zp` II=4、`update_z` II=2；
 - 同样方法试到 `p^T AP` 时，`iter_spmv_stream` 会变成 II=11，整体接收 AP
   更慢，所以不要照搬；
-- `update_xr/update_p` 当前 lane 子循环仍可到 II=1，真正问题在外层 packet
+- `update_x/update_p` 当前 lane 子循环仍可到 II=1，真正问题在外层 packet
   stage 串行和 HBM 往返，不是单纯给 lane 再加 unroll。
 
 ## Host 侧怎么读
@@ -370,7 +421,7 @@ LEGACY_ABI=1
 - `pcg-spmv-ms spmv_avg` 是否接近 single SpMV 回归基线；
 - `controller_total` 是否下降；
 - `pcg_vector_total` 是否下降；
-- `iter_spmv_recv_dot`、`init_zp/update_z`、`update_xr/update_p` 是否下降；
+- `iter_spmv_recv_dot`、`init_zp/update_rz_reduce`、`update_x/update_p` 是否下降；
 - `kernel_reported` 是否下降；
 - 完整 `thermal2` 的 `ctrl=0x0` 失败边界是否变化。
 

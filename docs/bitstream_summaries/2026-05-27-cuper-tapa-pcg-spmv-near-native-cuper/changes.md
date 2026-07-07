@@ -49,7 +49,7 @@ packed `double_v8`，并把 `Metrics[5..15]` 明确为 packed memory packet work
 | 形态 | 入口/文件 | 作用 |
 | --- | --- | --- |
 | 满血 Cuper SpMV | `Cuper(...)` / `detail/cuper_spmv_tasks.hpp` | 当前 standalone TAPA Cuper SpMV 标准基准 |
-| full-PCG controller/update | `CuperPcg(...)` / `detail/pcg_controller.hpp` + `detail/pcg_spmv_service.hpp` | 当前性能优化对象，重点是 fused `iter_spmv_recv_dot`、`init_zp/update_z` reduction、`update_xr/update_p` 和 service/timer 开销 |
+| full-PCG controller/update | `CuperPcg(...)` / `detail/pcg_controller.hpp` + `detail/pcg_spmv_service.hpp` | 当前性能优化对象，重点是 fused `iter_spmv_recv_dot`、`init_zp/update_rz_reduce` reduction、`update_x/update_p` 和 service/timer 开销 |
 
 ## 代码改动
 
@@ -195,13 +195,88 @@ DATA/KERNEL/HBM clock 为 `172/500/405 MHz`。它比归档 controller-split demo
 提速，主力仍应放在把 `update_xr/update_p` 从单 controller 串行阶段里拆出去，或把
 AP stream 直接喂给后续 dot/update 流程，减少 `AP_spmv` 写回再读。
 
+### 2026-07-05 Callipepla 式 update 语义拆分
+
+本轮只改 full `CuperPcg(...)` 实际使用的 `detail/pcg_controller.hpp` 和
+host metrics 标签，不改 `Cuper(...)`、`CuperPcgSpmv(...)` single-SpMV demo、
+顶层 ABI、connectivity 或 Cuper 矩阵格式。
+
+核心变化：
+
+- 保留 `iter_spmv_stream`：继续接收 `A*p`、写 `AP_spmv`，并融合计算
+  `p_ap = p^T AP`；
+- 原 `update_xr` 改为 `update_x`，只读 `X/P` 并写回 `X`；
+- 原 `update_z_reduce` 改为 `update_rz_reduce`，读取旧 `R`、`AP_spmv` 和
+  `M_inv`，同时生成新 `R`、新 `Z` 和 `rz_new/rr_new`；
+- `AP_spmv` 仍是必要 HBM 断点，因为 `alpha` 只有在 `p^T AP` 全量归约后才知道，
+  不能直接把 SpMV stream 旁路给 residual update；
+- `update_p` 保持当前读 `Z/P`、写 `P/P_spmv` 的结构，暂不做跨迭代 `P` stream
+  旁路。
+
+工作量口径随语义调整：
+
+| Metrics | 旧标签 | 新标签 | 新含义 |
+| --- | --- | --- | --- |
+| `[8]` / `[20]` | `update_xr` | `update_x` | `X/P` 读和 `X` 写 |
+| `[9]` / `[21]` | `update_z_reduce` | `update_rz_reduce` | `AP_spmv/R/M_inv` 读和 `R/Z` 写，含 `rz/rr` 归约 |
+
+`pcg_vector_total` 仍统计 `init_zp + update_x + update_rz_reduce + update_p`。
+这轮源码改动尚未生成新 demo bitstream，也不更新正式 `source.diff`。
+
+### 2026-07-07 PCG 向量阶段 worker 拆分
+
+本轮继续只改 full `CuperPcg(...)` 实际使用的 PCG 内部 task graph，不改顶层
+ABI、HBM connectivity、Cuper SpMV matrix/vector 数据格式、`Cuper(...)` 或
+`CuperPcgSpmv(...)`。
+
+核心变化：
+
+- 新增 `detail/pcg_vector_phases.hpp`，定义 `PcgVectorCommand`、
+  `PcgVectorResult` 和常驻 `Pcg_Vector_Phases` task。
+- `Pcg_Controller` 移除大段 HBM 向量 mmap 端口和 `Spmv_in`，改为只连接
+  `Vector_Command_Stream` / `Vector_Result_Stream`。
+- `Pcg_Vector_Phases` 持有 `Spmv_in` 和 `B/M_inv/X/R/Z/P/AP_spmv/P_spmv` mmap，
+  接管 `init_spmv`、`init_zp`、`iter_dot`、`update_x`、
+  `update_rz_reduce` 和 `update_p`。
+- controller 现在只负责 SpMV command、vector command/result 边界、alpha/beta、
+  convergence/breakdown、stage timer 和 Metrics/Status 写回，更接近 Callipepla
+  的标量调度器。
+- `AP_spmv` 仍是 HBM 断点，因为 `alpha` 必须等 `p^T AP` 全量归约后才知道；
+  `P_spmv` 也仍保留为下一轮 SpMV 输入，本轮不改 Cuper vector loader 流控。
+
+Metrics/host 口径保持兼容：
+
+| Metrics | 当前含义 |
+| --- | --- |
+| `[5..15]` | packed memory packet work / packet 数，不是实测 cycle |
+| `[16]` | `init_spmv` stage cycle，边界包住 vector phase command/result |
+| `[17]` | `init_zp` stage cycle |
+| `[18]` | `iter_spmv_recv_dot` stage cycle，仍包含 `p^T AP` |
+| `[20]` | `update_x` stage cycle |
+| `[21]` | `update_rz_reduce` stage cycle |
+| `[22]` | `update_p` stage cycle |
+| `[23]` | `controller_total` |
+
+这轮已生成新的 `cuper-tapa-pcg` demo xclbin：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin
+UUID: 1de9a25a-0257-8c9d-e39d-a470554d0f20
+SHA256: 4b2ab1b8b10b27917947b044511da73812ddf688145719146780d21ad60baf25
+INFO SHA256: fb4f0c8c09eb43c0738f420bc0c35a1c4f4a1f63b308ea6577b458b2ffbcb9a1
+DATA/KERNEL/HBM: 228/500/422 MHz
+Routed timing: WNS -1.043 ns, TNS -24489.869 ns
+```
+
+该 artifact 尚未上板，且 timing 未收敛，因此仍不更新正式 `source.diff`。
+
 ## 预期影响
 
 当前后续预期改善：
 
 - 降低 `1iter kernel_reported`；
 - 降低 `controller_total`；
-- 降低 `iter_spmv_recv_dot`、`init_zp/update_z`、`update_xr/update_p`
+- 降低 `iter_spmv_recv_dot`、`init_zp/update_rz_reduce`、`update_x/update_p`
   这几个大头阶段；
 - 保持 `iter recv + dot` 不恶化；
 - 保持完整 `thermal2` 可返回和数值 diff 通过。
@@ -298,16 +373,26 @@ AP stream 直接喂给后续 dot/update 流程，减少 `AP_spmv` 写回再读�
     controller-split demo 的 `954.0779 ms` 略快；`thermal2_n262144` 1iter
     `210.3193 ms`，仍慢于标准版 `188.8202 ms` 和上一 demo `182.5644 ms`。
     本版不更新正式 `source.diff`。
+16. 2026-07-07 vector phase worker 拆分完成软件级验证：
+    `make cuper-tapa-pcg-fpga-host`、`make cuper-tapa-pcg-host`、`n512 MAX_ITERS=1`
+    和 `thermal2_n16 MAX_ITERS=1` local smoke 均通过；`sw_emu` link 因 XO target
+    只支持 `hw_emu/hw` 而失败。
+17. 2026-07-07 `make cuper-tapa-pcg-hw-tmux` 完整 `hw` 构建成功，并同步为
+    `395bitstream/cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin`。该 demo
+    `impl Complete`，但 routed timing 未收敛，尚未上板，不更新正式 `source.diff`。
 
 仍需完成：
 
 1. 以 2026-05-29 one-shot single SpMV demo 作为回归基线，避免后续 full-PCG 改动
    破坏 SpMV 成功边界和 diff。
-2. 直接分析 full `CuperPcg(...)` 的 `iter_spmv_recv_dot`、`init_zp/update_z`、
-   `update_xr/update_p` 大规模退化，不再用 single SpMV 本体解释 full-PCG 1iter
-   倒挂。
-3. 继续分析当前 controller/update 路径里 FP64 reduction recurrence、stage
-   串行化和 packed FP64 HBM 访问的大规模瓶颈；
+2. 直接分析 full `CuperPcg(...)` 的 `iter_spmv_recv_dot`、
+   `init_zp/update_rz_reduce`、`update_x/update_p` 大规模退化，不再用 single SpMV
+   本体解释 full-PCG 1iter 倒挂。
+3. 对当前 2026-07-07 demo 补跑 full-PCG demo-only 上板测试，至少覆盖
+   `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+   `thermal2_n262144` 和完整 `thermal2` 的 init-only / `MAX_ITERS=1`。
+4. 继续分析当前 controller/vector worker 路径里 FP64 reduction recurrence、stage
+   串行化、task 同步和 packed FP64 HBM 访问的大规模瓶颈；
    只有后续实测证明共同成功点接近或优于标准版，才更新正式 `source.diff`。
-4. 如后续仍要验证完整 `thermal2` full-run，需要按长跑任务单独安排，不再用 host
+5. 如后续仍要验证完整 `thermal2` full-run，需要按长跑任务单独安排，不再用 host
    默认 60 秒超时判断；本轮只确认禁用 host 超时后长时间仍未返回。

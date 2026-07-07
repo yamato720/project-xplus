@@ -155,8 +155,8 @@ struct PcgStageTimes {
     double init_spmv = 0.0;
     double init_zp = 0.0;
     double iter_spmv = 0.0;
-    double update_xr = 0.0;
-    double update_z = 0.0;
+    double update_x = 0.0;
+    double update_rz_reduce = 0.0;
     double update_p = 0.0;
     double controller_total = 0.0;
     double timer_total = 0.0;
@@ -166,7 +166,7 @@ struct PcgStageTimes {
     }
 
     double vector_stage_total() const {
-        return init_zp + update_xr + update_z + update_p;
+        return init_zp + update_x + update_rz_reduce + update_p;
     }
 
     double accounted_stage_total() const {
@@ -187,8 +187,8 @@ constexpr std::array<PcgStageReport, 6> kPcgStageReports = {{
     {"init_spmv_recv_r", 5, 16},
     {"init_zp_reduce_pack", 6, 17},
     {"iter_spmv_recv_dot", 7, 18},
-    {"update_xr", 8, 20},
-    {"update_z_reduce", 9, 21},
+    {"update_x", 8, 20},
+    {"update_rz_reduce", 9, 21},
     {"update_p_pack", 10, 22},
 }};
 double clock_mhz_to_period_ns(const double clock_mhz) {
@@ -1077,13 +1077,11 @@ int main(int argc, char** argv) {
         stage_times.init_spmv = cycles_to_ms(metrics[16], stage_clock_period_ns);
         stage_times.init_zp = cycles_to_ms(metrics[17], stage_clock_period_ns);
         stage_times.iter_spmv = cycles_to_ms(metrics[18], stage_clock_period_ns);
-        stage_times.update_xr = cycles_to_ms(metrics[20], stage_clock_period_ns);
-        stage_times.update_z = cycles_to_ms(metrics[21], stage_clock_period_ns);
+        stage_times.update_x = cycles_to_ms(metrics[20], stage_clock_period_ns);
+        stage_times.update_rz_reduce = cycles_to_ms(metrics[21], stage_clock_period_ns);
         stage_times.update_p = cycles_to_ms(metrics[22], stage_clock_period_ns);
         stage_times.controller_total = cycles_to_ms(metrics[23], stage_clock_period_ns);
         stage_times.timer_total = cycles_to_ms(metrics[24], stage_clock_period_ns);
-        const double update_z_stage_ms = cycles_to_ms(metrics[25], stage_clock_period_ns);
-        const double update_p_stage_ms = cycles_to_ms(metrics[26], stage_clock_period_ns);
 
         std::cout << std::fixed << std::setprecision(0);
         std::cout << "[stage-work-packets]"
@@ -1107,32 +1105,16 @@ int main(int argc, char** argv) {
         std::cout << " controller_total=" << metrics[23]
                   << " timer_total=" << metrics[24]
                   << "\n";
-        std::cout << "[worker-cycles]"
-                  << " update_z_stage=" << std::setprecision(0) << metrics[25]
-                  << " update_p_stage=" << metrics[26]
-                  << "\n";
-        std::cout << "[worker-counts]"
-                  << " update_z_commands=" << metrics[27]
-                  << " update_p_commands=" << metrics[28]
-                  << " update_z_double_v8_packets=" << metrics[29]
-                  << " update_p_packed_packets=" << metrics[30]
-                  << " update_z_breakdowns=" << metrics[33]
-                  << " update_p_done=" << metrics[34]
-                  << "\n";
         std::cout << std::scientific << std::setprecision(12);
         std::cout << "[stage-ms]"
                   << " init_spmv=" << stage_times.init_spmv
                   << " init_zp=" << stage_times.init_zp
                   << " iter_spmv_recv_dot=" << stage_times.iter_spmv
-                  << " update_xr=" << stage_times.update_xr
-                  << " update_z=" << stage_times.update_z
+                  << " update_x=" << stage_times.update_x
+                  << " update_rz_reduce=" << stage_times.update_rz_reduce
                   << " update_p=" << stage_times.update_p
                   << " controller_total=" << stage_times.controller_total
                   << " timer_total=" << stage_times.timer_total
-                  << "\n";
-        std::cout << "[worker-ms]"
-                  << " update_z_stage=" << update_z_stage_ms
-                  << " update_p_stage=" << update_p_stage_ms
                   << "\n";
         const double pcg_spmv_calls = 1.0 + static_cast<double>(status[1]);
         // metrics[18]/iter_spmv 已经是所有 PCG 迭代 A*p 的累计时间；
@@ -1171,8 +1153,8 @@ int main(int argc, char** argv) {
                   << " spmv_total=" << pcg_spmv_total_ms
                   << " pcg_vector_total=" << pcg_vector_total_ms
                   << " init_zp=" << stage_times.init_zp
-                  << " update_xr=" << stage_times.update_xr
-                  << " update_z=" << stage_times.update_z
+                  << " update_x=" << stage_times.update_x
+                  << " update_rz_reduce=" << stage_times.update_rz_reduce
                   << " update_p=" << stage_times.update_p
                   << " accounted_stage_total=" << accounted_stage_total_ms
                   << " unaccounted_controller=" << unaccounted_controller_ms
