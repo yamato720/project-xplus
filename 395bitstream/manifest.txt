@@ -44,3 +44,11 @@ bitfile=395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.x
 uuid=0f31be8c-e77e-4e25-d85a-1498693befbb
 sha256=1ea8f0051cad2c3a81ab50f9e66a0d8fa982a55310e82aa054bd753bb658ab8e
 status=standalone Chisel RTL full SpMV correctness-debug demo synced, impl complete, DATA clock lowered to 139 MHz, local host/datapath/AXI smoke/lint/XO checks passed; board CHECK_Y correctness sweep pending, previous 119 MHz UUID c36bff4e no-check thermal2 returned at user-provided 477.6 ms but failed correctness
+
+[cuper-tapa-pcg-callipepla-lowfreq]
+base_log=logs/cuper_tapa_pcg_callipepla_lowfreq_hw_20260708_105413.log
+date=2026-07-08 19:28:07 CST
+bitfile=395bitstream/cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin
+uuid=9faa45b3-b6cb-1851-21c6-02fdd9a904bc
+sha256=019163fafd84d9c399260962a7555bc010a63a404ae9fcbd122589f7eb6370d7
+status=Callipepla-style TAPA full-PCG isolated demo synced; local software smoke passed; impl complete at DATA/KERNEL/HBM 135/500/450 MHz; routed timing not met; board test pending

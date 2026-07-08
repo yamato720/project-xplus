@@ -28,7 +28,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | 已归档 | no-TAPA Cuper / single SpMV | host 或不跑 PCG | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_packed_spmv_kernel` | 原 `cuper-notapa-spmv-u55c-20260524.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | `cuper-notapa-spmv-u55c-20260703-chisel8-entryprobe-demo.xclbin` | no-TAPA Chisel / single SpMV experiment | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel entry-probe 历史 artifact，只验证 AXI-Lite、13 路 AXI master、HBM mapping、`Status`/`Metrics` 和 scalar `Y_out[0]` ABI；不执行完整 SpMV，150 MHz routed timing clean，未上板 |
 | `cuper-notapa-spmv-u55c-20260703-chisel8-drainprobe-demo.xclbin` | no-TAPA Chisel / single SpMV experiment | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel HBM drain-probe，完整读取 ptr table、X packets 和 8 路 `Matrix_data` beats，只写 drain 计数和摘要；不执行完整 SpMV，150 MHz routed timing clean，服务器侧 no-check 全 `thermal2` sweep 已通过，`--check-y` 按预期失败 |
-| `cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin` | no-TAPA Chisel / single SpMV demo | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel full SpMV owner-step8 phase-1 demo，保持 ABI/HBM mapping 不变，接入 ptr/X/matrix loaders、Chisel Core/Accumulator datapath、scalar `Y_out` writer 和 Status/Metrics writer；当前同步版用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout，并把 matrix issue 从 serial source/owner 改为同 owner slot 跨最多 8 source 发射；Vitis link `impl Complete`，DATA/KERNEL/HBM clock 为 `138/500/450 MHz`，routed timing 仍有 setup violation；服务器侧 `CHECK_Y=1`/性能 sweep 待跑，不是标准 bitstream |
+| `cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin` | no-TAPA Chisel / single SpMV demo | host 或不跑 PCG | `chisel/cuper-spmv8` / `CuperSpmvChisel8` | 独立 Chisel RTL kernel full SpMV owner-step8 phase-1 demo，保持 ABI/HBM mapping 不变，接入 ptr/X/matrix loaders、Chisel Core/Accumulator datapath、scalar `Y_out` writer 和 Status/Metrics writer；当前同步版用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1` 隔离重 debug fanout，并把 matrix issue 从 serial source/owner 改为同 owner slot 跨最多 8 source 发射；Vitis link `impl Complete`，DATA/KERNEL/HBM clock 为 `138/500/450 MHz`，routed timing 仍有 setup violation；服务器侧 `CHECK_Y=1` 已通过完整 `thermal2`，完整点 `245.090 ms`、`max_abs_diff=1.63e-6`，但仍比 strip8 `2.71420 ms` 慢约 `90.3x`，不是标准 bitstream |
 | 已归档 | no-TAPA Cuper / FPGA-PCG | FPGA kernel | `kernels/cuper_pcg_control_kernel.cpp` / `cuper_pcg_control_kernel` | 原 `cuper-notapa-pcg-fpga-u55c-20260522.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
 | 暂无标准文件 | TAPA Cuper / Jacobi iteration | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 第五主线已接入源码和软件测试，当前只有 demo 候选 |
 | 已归档 | TAPA Cuper / single SpMV demo | host 或不跑 PCG | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcgSpmv` | 原 `cuper-tapa-spmv-u55c-20260528-demo.xclbin` 已移入 `bitstream_archive/2026-06-22-pre-june-395bitstream-cleanup/` |
@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper/kernels/Cuper.cpp` / `CuperPcg` | full-PCG vector phase worker 拆分候选，保持顶层 ABI、Cuper SpMV 数据格式和 `CuperPcgSpmv(...)` 不变；软件 smoke 通过，Vitis link `impl Complete`，DATA/KERNEL/HBM clock 为 `228/500/422 MHz`，routed timing 未收敛；尚未上板，不是标准 bitstream |
+| `cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin` | TAPA Cuper / FPGA-PCG demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla-style full-PCG 隔离候选，复用 strip16 Cuper SpMV service；软件 smoke 通过，低频 Vitis link `impl Complete`，DATA/KERNEL/HBM clock 为 `135/500/450 MHz`，routed timing 未收敛；尚未上板，不是标准 bitstream |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -175,7 +175,7 @@ DATA/KERNEL/HBM clock: 138 / 500 / 450 MHz
 Routed timing: WNS -0.539 ns, TNS -718.710 ns, setup failing endpoints 4761, hold WHS 0.009 ns
 Build dir: cuper-spmv-chisel8-ownerstep8-build/
 Build log: logs/cuper_spmv_chisel8_ownerstep8_hw_retry_20260705_235929.log
-Status: Vitis link `impl Complete` / `Run completed`，已同步到同一个 demo 槽；保持 ABI/HBM mapping/AXI-Lite offsets/13 路 `m_axi_*` 端口和 scalar `Y_out` writer 不变，仍使用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1`；datapath issue 改为每 source 预取一个 pending beat、同 owner slot 跨最多 8 source 发射，X cache 使用 8 份单读/单写 `SyncReadMem`，避免回到旧 64-read-port RTL 爆内存边界；150 MHz DATA timing 仍未收敛，Vitis xclbin info 记录 DATA clock 为 138 MHz；服务器侧 `CHECK_Y=1` 和性能 sweep 待跑，不是标准 bitstream
+Status: Vitis link `impl Complete` / `Run completed`，已同步到同一个 demo 槽；保持 ABI/HBM mapping/AXI-Lite offsets/13 路 `m_axi_*` 端口和 scalar `Y_out` writer 不变，仍使用 `CUPER_SPMV_CHISEL8_SLIM_DEBUG=1`；datapath issue 改为每 source 预取一个 pending beat、同 owner slot 跨最多 8 source 发射，X cache 使用 8 份单读/单写 `SyncReadMem`，避免回到旧 64-read-port RTL 爆内存边界；150 MHz DATA timing 仍未收敛，Vitis xclbin info 记录 DATA clock 为 138 MHz；服务器侧 `CHECK_Y=1` 已通过所有 listed `thermal2*`，完整 `thermal2` 为 `245.090 ms`，`max_abs_diff=1.63e-6`，slim debug counters 全 0 为预期；比上一版 slim/no-debug `459.425 ms` 快 `1.88x`，但仍比 strip8 `2.71420 ms` 慢约 `90.3x`，不晋级标准 bitstream
 ```
 
 baseline no-check 验收首先采信 SpMV magic `0x53504d56`、ptr/X/matrix/tagged/Y-write
@@ -183,8 +183,10 @@ baseline no-check 验收首先采信 SpMV magic `0x53504d56`、ptr/X/matrix/tagg
 response 计数。full-debug 版 `--check-y` 失败时可使用新增 debug slots 判断断点；
 当前 owner-step8 同步版为了降低布线 fanout，debug counters 槽位保留但预期为 0。
 上一版 slim/no-debug demo 已完成板上 correctness，但性能仍远慢于 strip8；当前
-owner-step8 demo 只完成本地前置验证、完整 hw link 和同步，尚未上板确认 correctness
-或性能，因此不晋级标准 bitstream，不更新正式 `source.diff`。
+owner-step8 demo 已完成板上 correctness 和性能 sweep，完整 `thermal2` 为
+`245.090 ms`，比 slim/no-debug 快但仍远慢于 strip8，因此不晋级标准 bitstream，
+不更新正式 `source.diff`。下一轮源码已转向 512-bit `Y_out` vector writer，但尚未
+覆盖同步本文件中的 owner-step8 demo。
 
 服务器侧反馈目录为 `logs/spmv_chisel8_correctness_debug_hw_20260704_192807/`；该目录
 当前未同步到本地仓库，本记录只登记用户提供的结论。反馈显示 ptr/X/matrix decode
@@ -961,36 +963,36 @@ Cuper SpMV 标准略慢约 2.7% 到 8.1%，但成功边界从标准旧记录的
 TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 
 ```text
-cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin
+cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin
 ```
 
-这版是 2026-07-07 新生成的 `CuperPcg` vector phase worker 拆分实验 demo。
-它不替换当前标准 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`，也不覆盖
-`Cuper(...)` 或 `CuperPcgSpmv(...)` single-SpMV 路径。demo xclbin UUID 为
-`1de9a25a-0257-8c9d-e39d-a470554d0f20`，SHA256 为
-`4b2ab1b8b10b27917947b044511da73812ddf688145719146780d21ad60baf25`，
+这版是 2026-07-08 同步的 `CuperPcgCallipepla` 隔离 full-PCG 实验 demo。它按
+Callipepla-style streaming/vector task graph 重写 TAPA full-PCG 路径，同时复用
+strip16 Cuper SpMV service 和现有 Cuper matrix packing；它不替换当前标准
+`cuper-tapa-pcg-fpga-u55c-20260525.xclbin`，也不覆盖 `DLC/Cuper` 的
+`Cuper(...)` / `CuperPcg(...)` / `CuperPcgSpmv(...)` 路径。demo xclbin UUID 为
+`9faa45b3-b6cb-1851-21c6-02fdd9a904bc`，SHA256 为
+`019163fafd84d9c399260962a7555bc010a63a404ae9fcbd122589f7eb6370d7`，
 `.xclbin.info` SHA256 为
-`fb4f0c8c09eb43c0738f420bc0c35a1c4f4a1f63b308ea6577b458b2ffbcb9a1`。
-最终 xclbin info 中 DATA clock 为 228 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 422 MHz。routed timing summary 未收敛：WNS `-1.043 ns`，
-TNS `-24489.869 ns`，setup failing endpoints `69563`；其中
-`clk_kernel_00_unbuffered_net` WNS `-1.043 ns`，`hbm_aclk` WNS `-0.145 ns`。
-构建日志为 `logs/cuper_tapa_pcg_hw_20260707_131157.log`，构建目录为
-`cuper-tapa-pcg-fpga-u55c-20260525-build/`，版本记录见
-`docs/bitstream_summaries/2026-05-27-cuper-tapa-pcg-spmv-near-native-cuper/`。
+`10b9c0b93671abf03c06592d0f2ed28b29c5376971fe1f9af37232126068d185`。
+最终 xclbin info 中 DATA clock 为 135 MHz，KERNEL clock 为 500 MHz，
+HBM clock 为 450 MHz。routed timing summary 仍未收敛：WNS `-0.721 ns`，
+TNS `-3677.357 ns`，setup failing endpoints `10576`，hold clean。
+构建日志为 `logs/cuper_tapa_pcg_callipepla_lowfreq_hw_20260708_105413.log`，
+构建目录为 `cuper-tapa-pcg-callipepla-u55c-20260708-lowfreq-build/`，版本记录见
+`docs/bitstream_summaries/2026-07-07-cuper-tapa-pcg-callipepla/`。
 
-2026-07-07 已完成 host 编译、TAPA HLS/XO/patch、local software smoke 和完整
-`hw` bitstream 构建：`data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3`
-通过，`thermal2_n16 MAX_ITERS=1 DIFF_TOL=1e-3` 通过。`TARGET=sw_emu`
-在 Vitis link 阶段失败，原因为 TAPA 生成的 `CuperPcg.xo` 只声明
-`hw_emu/hw`，不支持 `sw_emu`。当前 demo 尚未做 init-only / 1iter 上板测试，
-因此暂不建议晋级，也不更新正式 `source.diff` 或 HTML 性能结论。
+2026-07-08 低频重试使用 `CLOCK_PERIOD=5.0` 和
+`CUPER_CALLIPEPLA_KERNEL_FREQUENCY=150`，在 tmux 中先完成
+`data/generated/cgsolver/n512 MAX_ITERS=1 DIFF_TOL=1e-3` 软件 smoke，再完成
+`hw` bitstream 构建。当前 demo 尚未做 init-only / 1iter 上板测试，因此暂不建议
+晋级，也不更新正式 `source.diff` 或 HTML 性能结论。
 
-上一版同步槽中的 2026-05-31 packed timing demo UUID 为
-`f5b4fb4b-d7cc-f559-b5ba-29e2e6a88668`，SHA256 为
-`a8df40e1bf21774c7608c329fd591012b84744a18dcf4e8b0dd36672d64ccf72`。
-它的 demo-only 上板结论只作为历史记录保留，不再对应当前
-`cuper-tapa-pcg-fpga-u55c-20260707-demo.xclbin`。
+上一版 full-PCG demo 槽中的 2026-07-07 `CuperPcg` vector phase worker 拆分 demo
+UUID 为 `1de9a25a-0257-8c9d-e39d-a470554d0f20`，SHA256 为
+`4b2ab1b8b10b27917947b044511da73812ddf688145719146780d21ad60baf25`。该文件已由
+当前 `cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin` 替换；旧 demo-only 结论只作为
+历史记录保留，不再对应同步目录中的当前 full-PCG demo 文件。
 
 TAPA Cuper / FPGA-PCG 已归档 demo 候选文件：
 

@@ -61,6 +61,7 @@ BUILD_DIR ?= $(ROOT_DIR)/build
 CUPER_TAPA_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-build
 CUPER_TAPA_PCG_SPMV_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-spmv-u55c-20260528-demo-build
 CUPER_JACOBI_BUILD_DIR ?= $(ROOT_DIR)/cuper-jacobi-iteration-build
+CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR ?= $(ROOT_DIR)/cuper-tapa-pcg-callipepla-build
 export JACOBI_SPMV_ACC_WINDOW
 export JACOBI_SPMV_SCOREBOARD_DEPTH
 export JACOBI_SPMV_SCHEDULED_STREAM_DEPTH
@@ -93,6 +94,7 @@ REPORT_DIR := $(ROOT_DIR)/reports
 LOG_DIR := $(ROOT_DIR)/logs
 CUPER_DIR := $(ROOT_DIR)/DLC/Cuper
 CUPER_JACOBI_DIR := $(ROOT_DIR)/DLC/Cuper-jacobi-iteration
+CUPER_CALLIPEPLA_DIR := $(ROOT_DIR)/DLC/Cuper-callipepla-pcg
 CUPER_TAPA_KERNEL_HEADERS := $(wildcard $(CUPER_DIR)/kernels/detail/*.hpp)
 CUPER_CONTROL_CFG := $(CFG_DIR)/connectivity_cuper_control_u55c.cfg
 CUPER_SPMV_CFG := $(CFG_DIR)/connectivity_cuper_spmv_u55c.cfg
@@ -141,6 +143,7 @@ LOCAL_HOST := $(BUILD_DIR)/xplus_host
 CUPER_PCG_HOST := $(BUILD_DIR)/xplus_cuper_pcg_host
 CUPER_TAPA_PCG_HOST := $(CUPER_TAPA_SPMV_BUILD_DIR)/xplus_cuper_tapa_pcg_host
 CUPER_TAPA_PCG_FPGA_HOST := $(CUPER_TAPA_FPGA_PCG_BUILD_DIR)/xplus_cuper_tapa_pcg_fpga_host
+CUPER_TAPA_PCG_CALLIPEPLA_HOST := $(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)/cuper_callipepla_pcg_host
 CUPER_NOTAPA_PCG_XRT_HOST := $(CUPER_NOTAPA_SPMV_BUILD_DIR)/xplus_cuper_notapa_pcg_xrt_host
 CUPER_SPMV_CHISEL8_XRT_HOST := $(CUPER_SPMV_CHISEL8_BUILD_DIR)/xplus_cuper_spmv_chisel_xrt
 CUPER_CONTROL_LOCAL_HOST := $(CUPER_NOTAPA_FPGA_PCG_BUILD_DIR)/xplus_cuper_control_local_host
@@ -335,6 +338,14 @@ help:
 	@echo "  make cuper-jacobi-link-xclbin"
 	@echo "  make cuper-jacobi-hw-tmux"
 	@echo "  make cuper-jacobi-run-hw MATRIX=DLC/Cuper-jacobi-iteration/data/matrices/cant.mtx"
+	@echo ""
+	@echo "DLC/Cuper-callipepla-pcg full-PCG experiment:"
+	@echo "  make cuper-tapa-pcg-callipepla-build-host"
+	@echo "  make run-cuper-tapa-pcg-callipepla DATASET=data/generated/cgsolver/n512 MAX_ITERS=1"
+	@echo "  make cuper-tapa-pcg-callipepla-build-xo"
+	@echo "  make cuper-tapa-pcg-callipepla-link-xclbin"
+	@echo "  make cuper-tapa-pcg-callipepla-hw-tmux"
+	@echo "  make cuper-tapa-pcg-callipepla-run-hw DATASET=data/suitesparse/Schmid/csr/thermal2_n16"
 
 env:
 	@test -f "$(XPLATFORM)" || (echo "ERROR: platform not found: $(XPLATFORM)" && exit 1)
@@ -464,6 +475,45 @@ cuper-jacobi-hw-tmux:
 
 cuper-jacobi-run-hw:
 	@$(MAKE) -C "$(CUPER_JACOBI_DIR)" run-hw BUILD_DIR="$(CUPER_JACOBI_BUILD_DIR)" MATRIX="$(abspath $(or $(MATRIX),$(CUPER_JACOBI_DIR)/data/matrices/cant.mtx))" $(JACOBI_DEBUG_ENV)
+
+CUPER_CALLIPEPLA_ENV := CUPER_CALLIPEPLA_HBM_CHANNELS="$(or $(CUPER_CALLIPEPLA_HBM_CHANNELS),16)" CUPER_CALLIPEPLA_SPMV_STRIP_PADDING="$(or $(CUPER_CALLIPEPLA_SPMV_STRIP_PADDING),1)" CUPER_CALLIPEPLA_SPMV_ACC_WINDOW="$(or $(CUPER_CALLIPEPLA_SPMV_ACC_WINDOW),10)" $(if $(CLOCK_PERIOD),CLOCK_PERIOD="$(CLOCK_PERIOD)") $(if $(CUPER_CALLIPEPLA_KERNEL_FREQUENCY),CUPER_CALLIPEPLA_KERNEL_FREQUENCY="$(CUPER_CALLIPEPLA_KERNEL_FREQUENCY)")
+
+cuper-tapa-pcg-callipepla-build-host:
+	@BUILD_DIR="$(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)" $(CUPER_CALLIPEPLA_ENV) "$(CUPER_CALLIPEPLA_DIR)/scripts/build_host.sh"
+
+run-cuper-tapa-pcg-callipepla: cuper-tapa-pcg-callipepla-build-host
+	@"$(CUPER_TAPA_PCG_CALLIPEPLA_HOST)" "$(abspath $(or $(DATASET),data/suitesparse/Schmid/csr/thermal2_n16))" \
+		$(if $(BITFILE),--bitstream "$(BITFILE)") \
+		--tau "$(or $(TAU),1e-10)" \
+		--max-iters "$(or $(MAX_ITERS),0)" \
+		--diff-tol "$(or $(DIFF_TOL),1e-3)" \
+		--kernel-timeout-sec "$(or $(KERNEL_TIMEOUT_SEC),60)" \
+		--live-status-poll-sec "$(or $(LIVE_STATUS_POLL_SEC),0)"
+
+cuper-tapa-pcg-callipepla-build-xo:
+	@BUILD_DIR="$(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)" $(CUPER_CALLIPEPLA_ENV) "$(CUPER_CALLIPEPLA_DIR)/scripts/build_xo_u55c.sh"
+
+cuper-tapa-pcg-callipepla-link-xclbin:
+	@BUILD_DIR="$(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)" $(CUPER_CALLIPEPLA_ENV) "$(CUPER_CALLIPEPLA_DIR)/scripts/link_xclbin_u55c.sh"
+
+cuper-tapa-pcg-callipepla-hw-tmux:
+	@mkdir -p "$(LOG_DIR)"
+	@if tmux has-session -t "project-xplus-cuper-tapa-pcg-callipepla-hw" 2>/dev/null; then \
+		echo "tmux session already exists: project-xplus-cuper-tapa-pcg-callipepla-hw"; \
+		echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-callipepla-hw"; \
+		exit 1; \
+	fi
+	@log="$(LOG_DIR)/cuper_tapa_pcg_callipepla_hw_$$(date +%Y%m%d_%H%M%S).log"; \
+	tmux new-session -d -s "project-xplus-cuper-tapa-pcg-callipepla-hw" \
+		"cd '$(ROOT_DIR)' && set -o pipefail; $(MAKE) cuper-tapa-pcg-callipepla-build-host cuper-tapa-pcg-callipepla-build-xo cuper-tapa-pcg-callipepla-link-xclbin 2>&1 | tee '$$log'; status=\$$?; echo; echo 'build finished with exit code:' \$$status; echo 'log: $$log'; bash"; \
+	echo "session: project-xplus-cuper-tapa-pcg-callipepla-hw"; \
+	echo "log: $$log"; \
+	echo "build dir: $(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)"; \
+	echo "xclbin: $(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)/CuperPcgCallipepla.xclbin"; \
+	echo "attach: tmux attach -t project-xplus-cuper-tapa-pcg-callipepla-hw"
+
+cuper-tapa-pcg-callipepla-run-hw:
+	@BUILD_DIR="$(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)" BITFILE="$(or $(BITFILE),$(CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR)/CuperPcgCallipepla.xclbin)" TAU="$(or $(TAU),1e-10)" MAX_ITERS="$(or $(MAX_ITERS),0)" DIFF_TOL="$(or $(DIFF_TOL),1e-3)" KERNEL_TIMEOUT_SEC="$(or $(KERNEL_TIMEOUT_SEC),60)" LIVE_STATUS_POLL_SEC="$(or $(LIVE_STATUS_POLL_SEC),0)" "$(CUPER_CALLIPEPLA_DIR)/scripts/run_hw.sh" "$(abspath $(or $(DATASET),data/suitesparse/Schmid/csr/thermal2_n16))"
 
 $(LOCAL_HOST): $(ARCHIVED_HOST_DIR)/main.cpp $(HOST_DIR)/run_defaults.hpp $(HOST_DIR)/cpu_reference.hpp $(HOST_DIR)/dataset_bridge.hpp $(ARCHIVED_HOST_DIR)/multi_kernel_solver.hpp $(INCLUDE_DIR)/cg_common.hpp $(ARCHIVED_INCLUDE_DIR)/cg_kernels.hpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp $(SRC_DIR)/CgSolverGolden.hpp $(SRC_DIR)/CsrDataset.hpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -I$(ARCHIVED_INCLUDE_DIR) -I$(HOST_DIR) -I$(ARCHIVED_HOST_DIR) -I$(SRC_DIR) $(ARCHIVED_HOST_DIR)/main.cpp $(ARCHIVED_KERNEL_DIR)/cg_kernels.cpp -o $(LOCAL_HOST)
