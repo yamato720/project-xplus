@@ -25,11 +25,12 @@ YYYY-MM-DD-<主线>-<简短说明>/
   默认启用 strip16 去 HBM padding 和 accumulator window=10。2026-07-08 低频
   full graph demo 已生成但最小上板 timeout；trace-light 版 routing verification
   失败；entry-probe 已在服务器侧通过完整 `thermal2` 入口/mmap/参数链路测试；
-  当前同步槽为 2026-07-09 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain` debug artifact
-  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`，UUID
-  `91f6c011-66d9-2ad2-bec4-a93337a2057b`，DATA/KERNEL/HBM 为 `100/500/450 MHz`，
-  routed timing clean。它保留真实 controller 和 stage timer，只验证 command
-  fanout/stop/fake ack 收尾，不代表完整 PCG/SpMV 功能或性能。
+	  当前同步槽为 2026-07-09 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain` 细粒度 checkpoint debug artifact
+	  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`，UUID
+	  `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107`，DATA/KERNEL/HBM 为 `100/500/440 MHz`，
+	  Vitis link `impl Complete` 但 routed setup 轻微未收敛。它保留真实 controller 和
+	  stage timer，只验证 command fanout/stop/fake ack 收尾，不代表完整 PCG/SpMV
+	  功能或性能。
 - `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
   `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，

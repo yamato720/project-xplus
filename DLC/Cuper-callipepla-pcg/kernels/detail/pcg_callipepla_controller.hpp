@@ -92,6 +92,8 @@ inline void PcgCallipepla_WriteProbeControllerStatus(
     const INDEX_TYPE spmv_rounds,
     const INDEX_TYPE vector_command_count,
     const INDEX_TYPE vector_result_count,
+    const INDEX_TYPE detail0,
+    const INDEX_TYPE detail1,
     const INDEX_TYPE float_packet_count,
     const INDEX_TYPE matrix_len,
     const INDEX_TYPE row_num,
@@ -107,8 +109,8 @@ inline void PcgCallipepla_WriteProbeControllerStatus(
     Status[55] = (spmv_rounds + 1) * HBM_CHANNEL_NUM;
     Status[56] = vector_command_count;
     Status[57] = vector_result_count;
-    Status[58] = 8;
-    Status[59] = 1;
+    Status[58] = detail0;
+    Status[59] = detail1;
     Status[60] = float_packet_count;
     Status[61] = matrix_len;
     Status[62] = row_num;
@@ -161,6 +163,23 @@ void PcgCallipepla_Controller(
     INDEX_TYPE vector_command_count = 0;
     INDEX_TYPE vector_result_count = 0;
 
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+#define PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(CODE, DETAIL0, DETAIL1) \
+    PcgCallipepla_WriteProbeControllerStatus(Status, \
+                                             CODE, \
+                                             spmv_rounds, \
+                                             vector_command_count, \
+                                             vector_result_count, \
+                                             DETAIL0, \
+                                             DETAIL1, \
+                                             float_packet_count, \
+                                             Matrix_len, \
+                                             Row_num, \
+                                             Batch_num, \
+                                             Max_iters, \
+                                             iterations)
+#endif
+
     unsigned long long init_spmv_work = 0;
     unsigned long long init_zp_work = 0;
     unsigned long long iter_spmv_work = 0;
@@ -202,6 +221,8 @@ void PcgCallipepla_Controller(
                                              spmv_rounds,
                                              vector_command_count,
                                              vector_result_count,
+                                             0,
+                                             0,
                                              float_packet_count,
                                              Matrix_len,
                                              Row_num,
@@ -209,28 +230,75 @@ void PcgCallipepla_Controller(
                                              Max_iters,
                                              iterations);
 #endif
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(10,
+                                        kPcgCallipeplaStageTotal,
+                                        kPcgCallipeplaStageBegin);
+#endif
     pcg_callipepla_stage_mark(Stage_Event_out,
                               kPcgCallipeplaStageTotal,
                               kPcgCallipeplaStageBegin);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(11,
+                                        kPcgCallipeplaStageTotal,
+                                        kPcgCallipeplaStageBegin);
+#endif
 
     if (Row_num <= 0 || Column_num <= 0 || Max_iters < 0 ||
         Tau <= 0.0 || pcg_callipepla_invalid(Tau)) {
         status_code = kPcgCallipeplaStatusBreakdown;
     } else {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(20,
+                                            kPcgCallipeplaStageInitSpmv,
+                                            kPcgCallipeplaStageBegin);
+#endif
         pcg_callipepla_stage_mark(Stage_Event_out,
                                   kPcgCallipeplaStageInitSpmv,
                                   kPcgCallipeplaStageBegin);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(21,
+                                            kPcgCallipeplaStageInitSpmv,
+                                            kPcgCallipeplaStageBegin);
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(30, 0, 0);
+        Ptr_Command_out.write(spmv_service_make_command());
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(31, 1, 0);
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(40, HBM_CHANNEL_NUM, 0);
+    send_init_matrix_command_probe:
+        for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+            Matrix_Command_out[index].write(spmv_service_make_command());
+        }
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(41,
+                                            HBM_CHANNEL_NUM,
+                                            HBM_CHANNEL_NUM);
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(50,
+                                            kPcgCallipeplaVectorSourceX,
+                                            x_bank);
+        Spmv_Vector_Command_out.write(
+            pcg_callipepla_make_spmv_vector_command(kPcgCallipeplaVectorSourceX,
+                                                    x_bank));
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(51,
+                                            kPcgCallipeplaVectorSourceX,
+                                            x_bank);
+#else
         pcg_callipepla_send_spmv_command(Ptr_Command_out,
                                          Matrix_Command_out,
                                          Spmv_Vector_Command_out,
                                          kPcgCallipeplaVectorSourceX,
                                          x_bank);
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_DebugTryWrite(Debug_Event_out,
                                     kPcgCallipeplaTraceSourceController,
                                     kPcgCallipeplaTracePhaseSend,
                                     kPcgCallipeplaPhaseInitSpmv,
                                     spmv_rounds);
+#endif
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(60,
+                                            kPcgCallipeplaPhaseInitSpmv,
+                                            vector_command_count);
 #endif
         PcgCallipepla_WriteVectorCommand(
             Vector_Command_out,
@@ -245,14 +313,37 @@ void PcgCallipepla_Controller(
                                                0.0,
                                                0.0),
             vector_command_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(61,
+                                            kPcgCallipeplaPhaseInitSpmv,
+                                            vector_command_count);
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(70,
+                                            kPcgCallipeplaPhaseInitSpmv,
+                                            vector_result_count);
+#endif
         (void)PcgCallipepla_ReadVectorResult(Vector_Result_in,
                                              vector_result_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(71,
+                                            kPcgCallipeplaPhaseInitSpmv,
+                                            vector_result_count);
+#endif
         ++spmv_rounds;
         init_spmv_work += static_cast<unsigned long long>(float_packet_count) +
                           static_cast<unsigned long long>(double_packet_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(80,
+                                            kPcgCallipeplaStageInitSpmv,
+                                            kPcgCallipeplaStageEnd);
+#endif
         pcg_callipepla_stage_mark(Stage_Event_out,
                                   kPcgCallipeplaStageInitSpmv,
                                   kPcgCallipeplaStageEnd);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(81,
+                                            kPcgCallipeplaStageInitSpmv,
+                                            kPcgCallipeplaStageEnd);
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_WriteLiveStatus(Status_Write_out,
                                       2,
@@ -283,6 +374,11 @@ void PcgCallipepla_Controller(
         pcg_callipepla_stage_mark(Stage_Event_out,
                                   kPcgCallipeplaStageInitZp,
                                   kPcgCallipeplaStageBegin);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(90,
+                                            kPcgCallipeplaPhaseInitZp,
+                                            vector_command_count);
+#endif
         PcgCallipepla_WriteVectorCommand(
             Vector_Command_out,
             pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseInitZp,
@@ -296,9 +392,22 @@ void PcgCallipepla_Controller(
                                                0.0,
                                                0.0),
             vector_command_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(91,
+                                            kPcgCallipeplaPhaseInitZp,
+                                            vector_command_count);
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(100,
+                                            kPcgCallipeplaPhaseInitZp,
+                                            vector_result_count);
+#endif
         const PcgCallipeplaVectorResult init_result =
             PcgCallipepla_ReadVectorResult(Vector_Result_in,
                                            vector_result_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(101,
+                                            init_result.phase,
+                                            vector_result_count);
+#endif
         rz = init_result.rz;
         rr = init_result.rr;
         Residuals[0] = rr;
@@ -600,9 +709,27 @@ void PcgCallipepla_Controller(
         }
     }
 
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(110, 0, 0);
+    Ptr_Command_out.write(spmv_service_make_stop_command());
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(111, 1, 0);
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(120, HBM_CHANNEL_NUM, 0);
+send_matrix_stop_probe:
+    for (INDEX_TYPE index = 0; index < HBM_CHANNEL_NUM; ++index) {
+#pragma HLS unroll
+        Matrix_Command_out[index].write(spmv_service_make_stop_command());
+    }
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(121,
+                                        HBM_CHANNEL_NUM,
+                                        HBM_CHANNEL_NUM);
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(130, 0, 0);
+    Spmv_Vector_Command_out.write(pcg_callipepla_make_spmv_vector_stop());
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(131, 1, 0);
+#else
     pcg_callipepla_send_spmv_stop(Ptr_Command_out,
                                   Matrix_Command_out,
                                   Spmv_Vector_Command_out);
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
     PcgCallipepla_DebugTryWrite(Debug_Event_out,
                                 kPcgCallipeplaTraceSourceController,
@@ -610,9 +737,20 @@ void PcgCallipepla_Controller(
                                 0,
                                 iterations);
 #endif
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(140,
+                                        kPcgCallipeplaPhaseInitSpmv,
+                                        vector_command_count);
+#endif
     PcgCallipepla_WriteVectorCommand(Vector_Command_out,
                                      pcg_callipepla_make_vector_stop(),
                                      vector_command_count);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(141,
+                                        kPcgCallipeplaPhaseInitSpmv,
+                                        vector_command_count);
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(150, 8, spmv_rounds);
+#endif
 stop_checkers:
     for (INDEX_TYPE index = 0; index < 8; ++index) {
 #pragma HLS unroll
@@ -620,19 +758,44 @@ stop_checkers:
     }
     Sort_Stop_out.write(1);
     Vector_Destroy_Expected_Rounds_out.write(spmv_rounds);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(151, 8, spmv_rounds);
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(160,
+                                        kPcgCallipeplaStageTotal,
+                                        kPcgCallipeplaStageEnd);
+#endif
 
     pcg_callipepla_stage_mark(Stage_Event_out,
                               kPcgCallipeplaStageTotal,
                               kPcgCallipeplaStageEnd);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(161,
+                                        kPcgCallipeplaStageTotal,
+                                        kPcgCallipeplaStageEnd);
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(170, 0, kPcgCallipeplaStageStop);
+#endif
     pcg_callipepla_stage_mark(Stage_Event_out, 0, kPcgCallipeplaStageStop);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(171, 0, kPcgCallipeplaStageStop);
+#endif
 
     ap_uint<64> stage_cycles[kPcgCallipeplaStageCount + 1];
 #pragma HLS array_partition variable=stage_cycles complete
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(180,
+                                        kPcgCallipeplaStageCount + 1,
+                                        0);
+#endif
 read_stage_cycles:
     for (INDEX_TYPE index = 0; index < kPcgCallipeplaStageCount + 1; ++index) {
 #pragma HLS pipeline II=1
         stage_cycles[index] = Stage_Ticks_in.read();
     }
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(181,
+                                        kPcgCallipeplaStageCount + 1,
+                                        kPcgCallipeplaStageCount + 1);
+#endif
 
     Metrics[0] = rz;
     Metrics[1] = rr;
@@ -707,6 +870,8 @@ write_stage_metrics:
                                              spmv_rounds,
                                              vector_command_count,
                                              vector_result_count,
+                                             status_code,
+                                             iterations,
                                              float_packet_count,
                                              Matrix_len,
                                              Row_num,
@@ -714,5 +879,8 @@ write_stage_metrics:
                                              Max_iters,
                                              iterations);
 #endif
+#endif
+#ifdef PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT
+#undef PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT
 #endif
 }

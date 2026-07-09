@@ -91,6 +91,12 @@
 - `cmd_drain` 模式保留真实 controller 和 stage timer；ptr/matrix/vector command
   consumers 全部替换为 drain/fake ack，用于验证 controller 是否能完成 init/stop
   流程。当前同步的 2026-07-09 demo xclbin 已切到该模式。
+- 2026-07-09 晚间同步版进一步在 `cmd_drain` controller 路径拆出细粒度 checkpoint：
+  `Status[52]` 可停在 `10/11` total stage begin、`20/21` init_spmv stage begin、
+  `30/31` ptr command、`40/41` matrix command fanout、`50/51` SpMV vector command、
+  `60/61` init-spmv vector fake command、`70/71` fake ack read、`80/81` init_spmv
+  stage end、`90/91` init_zp command、`100/101` init_zp result read，`110+` 覆盖
+  stop/finalization。`Status[58]/Status[59]` 现在作为 `detail0/detail1`。
 - `loader_drain` 模式逐档恢复真实 ptr/vector/matrix loader，但 core/acc/checker/sort
   仍保持 drain/stop 替身，用于定位卡死是否来自 HBM read/loader 层。
 - Probe 状态约定：`Status[50]=0x43505242`，`Status[51]=mode_id`，其中

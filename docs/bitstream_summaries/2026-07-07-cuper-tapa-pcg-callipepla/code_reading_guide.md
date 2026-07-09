@@ -62,7 +62,10 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已通过完整 `thermal2` 入口/mmap
   上板验证。
 - `cmd_drain`：保留 controller 和 stage timer，ptr/matrix/vector command consumer
-  全部换成 drain/fake ack。当前同步 xclbin 就是该模式。
+  全部换成 drain/fake ack。当前同步 xclbin 就是该模式；`Status[52]` 写细粒度
+  checkpoint，覆盖 stage begin、ptr/matrix/spmv-vector command、vector fake
+  command/result read 和 stop/finalization，`Status[58]/Status[59]` 是对应
+  `detail0/detail1`。
 - `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
 
 ## Metrics
@@ -72,7 +75,7 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
 - `Status[8..15]` 是 live progress snapshot。
 - Probe magic 是 `Status[50]=0x43505242`；`Status[51]` 是 mode id，
   `1/2/3` 对应 `entry/cmd_drain/loader_drain`。`Status[52..63]` 在 probe 中记录
-  stage、SpMV/matrix/vector command 计数和基础规模参数。
+  stage/checkpoint、SpMV/matrix/vector command 计数、`detail0/detail1` 和基础规模参数。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。
