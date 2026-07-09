@@ -491,7 +491,7 @@ THS=0.000 ns
 
 当前同步槽已由 2026-07-08 低频 full graph 失败 demo 替换为 2026-07-09 entry-probe
 debug artifact。该 artifact 不执行完整 PCG/SpMV datapath，不做性能或数值结论。
-下一步服务器侧只跑最小上板 smoke：
+服务器侧先跑最小上板 smoke：
 
 ```bash
 make cuper-tapa-pcg-callipepla-run-hw \
@@ -510,3 +510,116 @@ Status[52] = 99
 
 本轮不更新正式 `source.diff`，因为这是 debug/probe artifact，不是 full-PCG 性能提升
 候选。
+
+## 2026-07-09 entry-probe 服务器侧大规模上板
+
+用户反馈 `20260709 entry-probe` 在更大规模上板测试全部通过：
+
+```text
+Dataset             batch    matrix_len    row/col    result
+thermal2_n65536         8          4279      65536    pass
+thermal2_n131072       16          8572     131072    pass
+thermal2_n262144       32         17553     262144    pass
+thermal2              150         85839    1228045    pass
+```
+
+完整 `thermal2` 关键输出：
+
+```text
+[done] iter=0 status=converged
+[probe] magic=0x43505242 mode_id=1 stage=99
+slot58=16 slot59=0 slot60=150 slot61=85839 slot62=1228045 slot63=1228045
+```
+
+结论：entry-probe 在完整 `thermal2` 规模下也能正常加载 xclbin、传入 AXI-Lite
+参数、分配/同步 BO，并把 Status/Metrics/Residuals 写回；板卡 error report 未报错。
+这仍然只证明入口和 mmap/参数链路在大数据量下是通的，不代表 full graph 能跑。
+
+## 2026-07-09 cmd-drain 硬件构建与同步
+
+entry-probe 全规模通过后，下一档切到 `cmd_drain`，保留真实 controller 和 stage
+timer，后级 ptr/matrix/vector consumers 用 drain/fake ack 替代。
+
+本地软件 smoke：
+
+```bash
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+```
+
+两条均返回。关键计数：
+
+```text
+MAX_ITERS=0:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=1
+spmv_cmds_with_stop=2 matrix_cmds_with_stop=32 vector_cmds=3 vector_acks=2
+
+MAX_ITERS=1:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=2
+spmv_cmds_with_stop=3 matrix_cmds_with_stop=48 vector_cmds=8 vector_acks=7
+```
+
+硬件构建命令：
+
+```bash
+CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-probe-cmd-drain-xo-build \
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+CUPER_CALLIPEPLA_TRACE_LIGHT=0 \
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100 \
+make cuper-tapa-pcg-callipepla-hw-tmux
+```
+
+tmux/log：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-hw
+log: logs/cuper_tapa_pcg_callipepla_hw_20260709_182339.log
+build dir: cuper-tapa-pcg-callipepla-probe-cmd-drain-xo-build/
+```
+
+结果：Vitis link 完成并生成 xclbin。
+
+```text
+[20:06:48] Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-1230] ... hbm_aclk = 450, KERNEL = 500, DATA = 100
+INFO: [v++ 60-586] Created cuper-tapa-pcg-callipepla-probe-cmd-drain-xo-build/CuperPcgCallipepla.xclbin
+INFO: [v++ 60-791] Total elapsed time: 1h 38m 50s
+```
+
+同步文件仍覆盖同一个 full-PCG demo 槽：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin.info
+```
+
+bitstream 信息：
+
+```text
+UUID: 91f6c011-66d9-2ad2-bec4-a93337a2057b
+SHA256: 0a55daa5f91e4812379865420fd35b8dad3cd07222110babab91fa8650544002
+INFO SHA256: 78e9d16f39835b5c02f97ed931a83588aa9be70bbc4de548b731585708a466a9
+DATA/KERNEL/HBM clock: 100 / 500 / 450 MHz
+```
+
+routed timing summary：
+
+```text
+WNS=0.003 ns
+TNS=0.000 ns
+setup failing endpoints=0
+WHS=0.009 ns
+THS=0.000 ns
+```
+
+下一步服务器侧先跑 `thermal2_n16 MAX_ITERS=0/1 KERNEL_TIMEOUT_SEC=20
+LIVE_STATUS_POLL_SEC=1`。若 `cmd_drain` timeout，问题收敛到 controller
+command fanout、stop、stage timer 或 fake ack 路径；若返回，再进入
+`loader_drain level=1`。

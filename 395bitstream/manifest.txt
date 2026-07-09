@@ -45,11 +45,11 @@ uuid=0f31be8c-e77e-4e25-d85a-1498693befbb
 sha256=1ea8f0051cad2c3a81ab50f9e66a0d8fa982a55310e82aa054bd753bb658ab8e
 status=standalone Chisel RTL full SpMV correctness-debug demo synced, impl complete, DATA clock lowered to 139 MHz, local host/datapath/AXI smoke/lint/XO checks passed; board CHECK_Y correctness sweep pending, previous 119 MHz UUID c36bff4e no-check thermal2 returned at user-provided 477.6 ms but failed correctness
 
-[cuper-tapa-pcg-callipepla-entryprobe]
-base_log=logs/cuper_tapa_pcg_callipepla_probe_entry_hw_20260709_150430.log
-date=2026-07-09 16:44:51 CST
+[cuper-tapa-pcg-callipepla-cmddrain]
+base_log=logs/cuper_tapa_pcg_callipepla_hw_20260709_182339.log
+date=2026-07-09 20:06:54 CST
 bitfile=395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
-uuid=7ab50484-4649-ffd5-dd5c-0925c61a9504
-sha256=88a6750835c9e2b6c3c94e468d6468716730407e21ad9eabbf3df876fca48fcd
-info_sha256=0e3a8a283a417e0e0cdbcd8ebc410ce23d3cab605a01110a511fc2e7855d0a16
-status=Callipepla CuperPcgCallipepla entry-probe synced; CUPER_CALLIPEPLA_PROBE_MODE=entry; verifies kernel entry, AXI-Lite offsets, Status/Metrics mmap and HBM mapping only; impl complete at DATA/KERNEL/HBM 100/500/450 MHz; routed timing clean WNS 0.003 ns; board smoke pending; replaced 20260708 lowfreq failed full-graph timeout demo
+uuid=91f6c011-66d9-2ad2-bec4-a93337a2057b
+sha256=0a55daa5f91e4812379865420fd35b8dad3cd07222110babab91fa8650544002
+info_sha256=78e9d16f39835b5c02f97ed931a83588aa9be70bbc4de548b731585708a466a9
+status=Callipepla CuperPcgCallipepla cmd-drain probe synced; CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain; keeps real controller and stage timer, drains ptr/matrix/vector command consumers and uses fake vector ack; impl complete at DATA/KERNEL/HBM 100/500/450 MHz; routed timing clean WNS 0.003 ns; board smoke pending; replaced same-day entry-probe sync after entry-probe passed through full thermal2 on server

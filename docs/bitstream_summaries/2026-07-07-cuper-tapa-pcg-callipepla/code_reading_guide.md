@@ -58,10 +58,11 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
 
 三档 probe：
 
-- `entry`：只 touch 所有 mmap 端口并写 Status/Metrics/Residuals 后返回。当前同步
-  xclbin 就是该模式。
+- `entry`：只 touch 所有 mmap 端口并写 Status/Metrics/Residuals 后返回。旧同步
+  UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已通过完整 `thermal2` 入口/mmap
+  上板验证。
 - `cmd_drain`：保留 controller 和 stage timer，ptr/matrix/vector command consumer
-  全部换成 drain/fake ack。
+  全部换成 drain/fake ack。当前同步 xclbin 就是该模式。
 - `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
 
 ## Metrics

@@ -7,10 +7,11 @@
 - 顶层 kernel：`CuperPcgCallipepla`
 - 状态：软件级验证通过；第一轮 Vitis link 因全局拥塞失败；低频 full graph demo
   已生成但 `thermal2_n16 MAX_ITERS=0/1` 最小上板 smoke 均 timeout；trace-light
-  定位版 routing verification 失败；当前同步槽已切到更小的 `entry` probe xclbin，
-  用于先验证 kernel entry、AXI-Lite offsets、Status/Metrics mmap 和 HBM mapping
-- 构建目录：`cuper-tapa-pcg-callipepla-probe-entry-xo-build/`
-- 构建日志：`logs/cuper_tapa_pcg_callipepla_probe_entry_hw_20260709_150430.log`
+  定位版 routing verification 失败；entry-probe 已通过完整 `thermal2` 上板入口/mmap
+  验证；当前同步槽已切到 `cmd_drain` probe xclbin，用于验证真实 controller command
+  fanout、stop 和 fake vector ack 路径
+- 构建目录：`cuper-tapa-pcg-callipepla-probe-cmd-drain-xo-build/`
+- 构建日志：`logs/cuper_tapa_pcg_callipepla_hw_20260709_182339.log`
 - 同步文件：`395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`
 - tmux 会话：`project-xplus-cuper-tapa-pcg-callipepla-hw`
 - 默认配置：`CUPER_CALLIPEPLA_HBM_CHANNELS=16`，
@@ -37,14 +38,18 @@
 xclbin。
 
 当前同步文件为 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`，UUID
-`7ab50484-4649-ffd5-dd5c-0925c61a9504`，DATA/KERNEL/HBM clock 为
-`100/500/450 MHz`。该版是 `CUPER_CALLIPEPLA_PROBE_MODE=entry` 的 entry-probe
-debug artifact，只写 `Status[0..15]`、`Status[50..63]`、`Metrics` 和 `Residuals`
-固定槽位后返回，不执行完整 PCG/SpMV datapath。Vitis link `impl Complete` 且 timing
-clean，WNS `0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`。
+`91f6c011-66d9-2ad2-bec4-a93337a2057b`，DATA/KERNEL/HBM clock 为
+`100/500/450 MHz`。该版是 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain` 的 controller
+fanout debug artifact，保留真实 controller 和 stage timer，后级 ptr/matrix/vector
+consumers 用 drain/fake ack 替代，不执行完整 PCG/SpMV datapath。Vitis link
+`impl Complete` 且 timing clean，WNS `0.003 ns`、TNS `0.000 ns`、setup failing
+endpoints `0`。
 
 2026-07-08 低频 full graph demo UUID `9faa45b3-b6cb-1851-21c6-02fdd9a904bc`
-已被当前 entry-probe demo 槽替换；其最小上板 timeout 结论只作为历史失败边界保留。
-entry-probe 尚未上板，下一步只跑 `thermal2_n16 MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20`
-最小 smoke，检查 `Status[50]=0x43505242` 和 `Status[51]=1`。该版不晋级标准版，
-也不更新正式 `source.diff`。
+已被当前 probe demo 槽替换；其最小上板 timeout 结论只作为历史失败边界保留。
+2026-07-09 entry-probe 旧同步版 UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已在
+服务器侧通过 `thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
+`thermal2`，证明入口、AXI-Lite 参数、BO 分配/同步和 mmap 写回链路在大规模下可用。
+当前 cmd-drain 版下一步只跑 `thermal2_n16 MAX_ITERS=0/1 KERNEL_TIMEOUT_SEC=20`
+最小 controller fanout smoke，检查 `Status[50]=0x43505242` 和 `Status[51]=2`。
+该版不晋级标准版，也不更新正式 `source.diff`。

@@ -90,7 +90,7 @@
   就是该模式。
 - `cmd_drain` 模式保留真实 controller 和 stage timer；ptr/matrix/vector command
   consumers 全部替换为 drain/fake ack，用于验证 controller 是否能完成 init/stop
-  流程。
+  流程。当前同步的 2026-07-09 demo xclbin 已切到该模式。
 - `loader_drain` 模式逐档恢复真实 ptr/vector/matrix loader，但 core/acc/checker/sort
   仍保持 drain/stop 替身，用于定位卡死是否来自 HBM read/loader 层。
 - Probe 状态约定：`Status[50]=0x43505242`，`Status[51]=mode_id`，其中

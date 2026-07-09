@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla entry-probe 调试 artifact，只验证 kernel entry、Status/Metrics mmap、AXI-Lite offsets 和 HBM mapping；`CUPER_CALLIPEPLA_PROBE_MODE=entry`，不执行完整 PCG/SpMV datapath；100 MHz routed timing clean，等待服务器侧最小上板 |
+| `cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla cmd-drain 调试 artifact，保留真实 controller 和 stage timer，后级 ptr/matrix/vector consumers 用 drain/fake ack 替代；`CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain`，不执行完整 SpMV/PCG datapath；100 MHz routed timing clean，等待服务器侧 controller fanout 上板 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -966,28 +966,33 @@ TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
 ```
 
-这版是 2026-07-09 同步的 `CuperPcgCallipepla` entry-probe 调试 artifact。它保持
+这版是 2026-07-09 同步的 `CuperPcgCallipepla` cmd-drain 调试 artifact。它保持
 Callipepla full-PCG 顶层 kernel 名、host 参数顺序、AXI-Lite register offsets 和
-HBM mapping 不变，但使用 `CUPER_CALLIPEPLA_PROBE_MODE=entry` 掏空 PCG/SpMV 后级：
-只触碰所有顶层 mmap 端口，并写 `Status`、`Metrics`、`Residuals` 固定槽位后返回。
-该文件用于验证 XRT 启动、Status/Metrics mmap、基础 HBM mapping 和顶层 entry；
-不代表完整 PCG/SpMV 功能或性能，也不替换当前标准
+HBM mapping 不变，但使用 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain`：保留真实
+controller 和 stage timer，ptr/matrix/vector command consumers 全部替换为 drain
+或 fake ack。该文件用于验证 controller command fanout、stop、vector ack 和 stage
+timer 收尾路径；不执行完整 SpMV/PCG datapath，也不替换当前标准
 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。
 
-demo xclbin UUID 为 `7ab50484-4649-ffd5-dd5c-0925c61a9504`，SHA256 为
-`88a6750835c9e2b6c3c94e468d6468716730407e21ad9eabbf3df876fca48fcd`，
+demo xclbin UUID 为 `91f6c011-66d9-2ad2-bec4-a93337a2057b`，SHA256 为
+`0a55daa5f91e4812379865420fd35b8dad3cd07222110babab91fa8650544002`，
 `.xclbin.info` SHA256 为
-`0e3a8a283a417e0e0cdbcd8ebc410ce23d3cab605a01110a511fc2e7855d0a16`。
+`78e9d16f39835b5c02f97ed931a83588aa9be70bbc4de548b731585708a466a9`。
 最终 xclbin info 中 DATA clock 为 100 MHz，KERNEL clock 为 500 MHz，
 HBM clock 为 450 MHz。routed timing clean：WNS `0.003 ns`、TNS `0.000 ns`、
 setup failing endpoints `0`、WHS `0.009 ns`。
-构建日志为 `logs/cuper_tapa_pcg_callipepla_probe_entry_hw_20260709_150430.log`，
-构建目录为 `cuper-tapa-pcg-callipepla-probe-entry-xo-build/`，版本记录见
+构建日志为 `logs/cuper_tapa_pcg_callipepla_hw_20260709_182339.log`，
+构建目录为 `cuper-tapa-pcg-callipepla-probe-cmd-drain-xo-build/`，版本记录见
 `docs/bitstream_summaries/2026-07-07-cuper-tapa-pcg-callipepla/`。
 
-2026-07-09 entry-probe 的软件 smoke 已覆盖 `entry`、`cmd_drain` 和
-`loader_drain level=1/2/3`，其中同步 xclbin 对应 `entry` 模式。服务器侧最小上板
-建议先跑：
+2026-07-09 entry-probe 旧同步版 UUID
+`7ab50484-4649-ffd5-dd5c-0925c61a9504` 已在服务器侧从 `thermal2_n65536`、
+`thermal2_n131072`、`thermal2_n262144` 到完整 `thermal2` 全部通过，完整点输出
+`Status[50]=0x43505242`、`Status[51]=1`、`Status[52]=99`，说明 XRT 启动、
+AXI-Lite 参数、BO 分配/同步和 Status/Metrics/Residuals mmap 写回链路在大规模下
+是通的。当前同步槽已由 entry-probe 覆盖为 cmd-drain，entry 结果只作为历史边界。
+
+服务器侧下一步先跑 cmd-drain 最小 controller fanout smoke：
 
 ```bash
 make cuper-tapa-pcg-callipepla-run-hw \
@@ -996,9 +1001,11 @@ make cuper-tapa-pcg-callipepla-run-hw \
   MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
 ```
 
-预期只检查 probe magic `Status[50]=0x43505242`、`Status[51]=1` 和
-`Status[52..63]`，不做 PCG diff/性能结论。旧 2026-07-08 低频 full-graph demo UUID
-`9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 已被当前 entry-probe demo 槽替换；它的
+再补 `MAX_ITERS=1`。预期检查 probe magic `Status[50]=0x43505242`、`Status[51]=2`、
+`Status[52]=99`，以及 host 打印的 `spmv_rounds`、`spmv_cmds_with_stop`、
+`matrix_cmds_with_stop`、`vector_cmds`、`vector_acks`。不做 PCG diff/性能结论。
+旧 2026-07-08 低频 full-graph demo UUID
+`9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 已被当前 probe demo 槽替换；它的
 `thermal2_n16 MAX_ITERS=0/1` timeout 结论只作为历史失败边界保留。
 
 上一版 full-PCG demo 槽中的 2026-07-07 `CuperPcg` vector phase worker 拆分 demo
