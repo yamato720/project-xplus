@@ -19,6 +19,16 @@ YYYY-MM-DD-<主线>-<简短说明>/
 
 ## 已有版本记录
 
+- `2026-07-07-cuper-tapa-pcg-callipepla/`：隔离的 `cuper-tapa-pcg`
+  Callipepla-style full-PCG 实验。源码在 `DLC/Cuper-callipepla-pcg/`，顶层为
+  `CuperPcgCallipepla`，矩阵仍用 Cuper `SpElement_list_ptr + Matrix_data[0..15]`，
+  默认启用 strip16 去 HBM padding 和 accumulator window=10。2026-07-08 低频
+  full graph demo 已生成但最小上板 timeout；trace-light 版 routing verification
+  失败；当前同步槽为 2026-07-09 `CUPER_CALLIPEPLA_PROBE_MODE=entry` debug artifact
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`，UUID
+  `7ab50484-4649-ffd5-dd5c-0925c61a9504`，DATA/KERNEL/HBM 为 `100/500/450 MHz`，
+  routed timing clean。它只验证 entry、AXI-Lite offsets、Status/Metrics mmap 和
+  HBM mapping，不代表完整 PCG/SpMV 功能或性能。
 - `2026-07-04-cuper-notapa-spmv-chisel8-spmvbaseline/`：独立 no-TAPA Chisel RTL
   kernel `CuperSpmvChisel8` 的 full SpMV baseline 和 correctness-debug 记录。已同步
   `395bitstream/cuper-notapa-spmv-u55c-20260703-chisel8-spmvbaseline-demo.xclbin`，

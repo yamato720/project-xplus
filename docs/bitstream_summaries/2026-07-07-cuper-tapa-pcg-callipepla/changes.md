@@ -9,6 +9,17 @@
 - 新环境变量采用 PCG-facing 命名：
   `CUPER_CALLIPEPLA_HBM_CHANNELS`、`CUPER_CALLIPEPLA_SPMV_STRIP_PADDING`、
   `CUPER_CALLIPEPLA_SPMV_ACC_WINDOW`。脚本内部映射到沿用的 `JACOBI_*` 编译宏。
+- 2026-07-08 追加 `CUPER_CALLIPEPLA_TRACE_LIGHT=1` 编译开关。trace-light 版不新增
+  HBM 端口，不改变 `CuperPcgCallipepla` ABI，只把早期进度写入既有 `Status`
+  BO 的扩展槽 `Status[16..63]`。
+- 2026-07-09 追加 `CUPER_CALLIPEPLA_PROBE_MODE=entry|cmd_drain|loader_drain`
+  编译开关，并与 `CUPER_CALLIPEPLA_TRACE_LIGHT` 互斥。probe 版保持 kernel 名、
+  host 参数顺序、AXI-Lite offsets 和 HBM mapping 不变，用于先定位 entry/Status
+  mmap/controller fanout/loader HBM read 边界。
+- `loader_drain` 额外支持 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1|2|3`：
+  level 1 恢复真实 ptr loader 并 drain `PE_Param`；level 2 再恢复真实 vector loader
+  并 drain `Vector_X`；level 3 只让 matrix loader ch0/ch15 读取 HBM，其它 matrix
+  command 仍 drain。
 
 ## Kernel ABI 和 HBM 映射
 
@@ -53,3 +64,35 @@
   `--kernel-timeout-sec`、`--live-status-poll-sec`。
 - XRT 路径使用 `xrt::ip` 原生寄存器启动，支持 timeout 前同步
   `Status/Metrics/Residuals`。
+- live poll 继续输出 `Status[8..15]`。如果 `Status[50]` 出现 trace magic，
+  host 会额外打印 `Status[16..63]`；timeout 前最后一次同步也输出完整 debug
+  snapshot。
+
+## Trace-light 调试版
+
+- `Status[8]` 的第一次 live 更新已移到 controller 入口最前面，早于 stage timer
+  事件和 SpMV/vector command。
+- trace source 固定覆盖 controller、ptr loader、vector loader、matrix loader
+  ch0/ch15、core0/core15、acc0/acc15、checker0/checker7、sort tree 和 vector
+  phases。
+- 业务 task 只用 `try_write` 发 debug event，trace monitor 是 `Status` mmap 的唯一
+  trace 写入者，避免 debug stream 反压数据通路。
+- `Status[16..31]` 记录各 source 最后事件，`Status[32..47]` 记录事件计数，
+  `Status[48]` 是 heartbeat，`Status[49]` 是 drop/异常计数，`Status[50]` 是
+  debug magic。
+
+## Hollow-probe 调试版
+
+- 新增 `pcg_callipepla_probe.hpp`，提供 entry writeback、mmap port touch、command
+  drain、fake vector ack、PE/vector/matrix drain helper。
+- `entry` 模式只保留顶层 mmap touch 和一个 writer task：写 `Status[0..15]`、
+  `Status[50..63]`、`Metrics`、`Residuals` 后返回。同步的 2026-07-09 demo xclbin
+  就是该模式。
+- `cmd_drain` 模式保留真实 controller 和 stage timer；ptr/matrix/vector command
+  consumers 全部替换为 drain/fake ack，用于验证 controller 是否能完成 init/stop
+  流程。
+- `loader_drain` 模式逐档恢复真实 ptr/vector/matrix loader，但 core/acc/checker/sort
+  仍保持 drain/stop 替身，用于定位卡死是否来自 HBM read/loader 层。
+- Probe 状态约定：`Status[50]=0x43505242`，`Status[51]=mode_id`，其中
+  `1/2/3` 对应 `entry/cmd_drain/loader_drain`；`Status[52..63]` 记录 probe stage、
+  SpMV command 轮数、matrix command 计数、vector command/ack 计数和基础规模参数。

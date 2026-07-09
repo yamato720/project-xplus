@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <iostream>
 #include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -71,6 +72,8 @@ constexpr double kKernelClockPeriodNs = 3.3;
 constexpr INDEX_TYPE kHostStatusConverged = 0;
 constexpr INDEX_TYPE kHostStatusMaxIter = 1;
 constexpr INDEX_TYPE kHostStatusBreakdown = 2;
+constexpr INDEX_TYPE kCallipeplaTraceMagic = 0x434c5452;
+constexpr INDEX_TYPE kCallipeplaProbeMagic = 0x43505242;
 
 constexpr std::array<int, 28> kMemoryGroups = {
     16,  // SpElement_list_ptr
@@ -456,6 +459,51 @@ void write_reg_double(xrt::ip& ip, const uint32_t offset, const double value) {
     write_reg_u64(ip, offset, bits);
 }
 
+bool callipepla_trace_present(const AlignedVector<INDEX_TYPE>& status) {
+    return status.size() > 50 && status[50] == kCallipeplaTraceMagic;
+}
+
+bool callipepla_probe_present(const AlignedVector<INDEX_TYPE>& status) {
+    return status.size() > 50 && status[50] == kCallipeplaProbeMagic;
+}
+
+void print_status_range(const char* label,
+                        const AlignedVector<INDEX_TYPE>& status,
+                        const int begin,
+                        const int end) {
+    std::cerr << "[" << label << "] Status[" << begin << ".." << end << "]=";
+    for (int index = begin; index <= end; ++index) {
+        if (index > begin) {
+            std::cerr << ",";
+        }
+        std::cerr << status[static_cast<std::size_t>(index)];
+    }
+    std::cerr << "\n";
+}
+
+void print_callipepla_snapshot(const char* label,
+                               const AlignedVector<INDEX_TYPE>& status,
+                               const AlignedVector<double>& metrics,
+                               const AlignedVector<double>& residuals,
+                               const uint32_t ctrl) {
+    std::cerr << "[" << label << "] phase=" << status[8]
+              << " iter=" << status[9]
+              << " x=" << status[10]
+              << " r=" << status[11]
+              << " p=" << status[12]
+              << " spmv_rounds=" << status[13]
+              << " rr=" << metrics[1]
+              << " residual0=" << residuals[0]
+              << " ctrl=0x" << std::hex << ctrl << std::dec << "\n";
+    if (callipepla_probe_present(status)) {
+        print_status_range(label, status, 50, 63);
+    } else if (callipepla_trace_present(status)) {
+        print_status_range(label, status, 16, 31);
+        print_status_range(label, status, 32, 47);
+        print_status_range(label, status, 48, 63);
+    }
+}
+
 xrt::ip open_ip(const xrt::device& device, const xrt::uuid& uuid) {
     const std::array<std::string, 3> names = {
         "CuperPcgCallipepla:CuperPcgCallipepla_1",
@@ -563,15 +611,11 @@ double run_xrt(const CliOptions& options,
             sync_from_bo(status_bo, status);
             sync_from_bo(metrics_bo, metrics);
             sync_from_bo(residuals_bo, residuals);
-            std::cerr << "[live-status] phase=" << status[8]
-                      << " iter=" << status[9]
-                      << " x=" << status[10]
-                      << " r=" << status[11]
-                      << " p=" << status[12]
-                      << " spmv_rounds=" << status[13]
-                      << " rr=" << metrics[1]
-                      << " residual0=" << residuals[0]
-                      << " ctrl=0x" << std::hex << last_ctrl << std::dec << "\n";
+            print_callipepla_snapshot("live-status",
+                                      status,
+                                      metrics,
+                                      residuals,
+                                      last_ctrl);
             next_poll = now + std::chrono::seconds(options.live_status_poll_sec);
         }
         if (options.kernel_timeout_sec > 0 &&
@@ -592,8 +636,15 @@ double run_xrt(const CliOptions& options,
     sync_from_bo(r1_bo, r_banks[1]);
 
     if (!completed) {
-        throw std::runtime_error("kernel timeout before completion, ctrl=0x" +
-                                 std::to_string(last_ctrl));
+        print_callipepla_snapshot("timeout-status",
+                                  status,
+                                  metrics,
+                                  residuals,
+                                  last_ctrl);
+        std::ostringstream message;
+        message << "kernel timeout before completion, ctrl=0x"
+                << std::hex << last_ctrl;
+        throw std::runtime_error(message.str());
     }
 
     return elapsed_ms(kernel_start, std::chrono::steady_clock::now());
@@ -783,6 +834,26 @@ int main(int argc, char** argv) {
             std::cout << " r" << index << "=" << residuals[static_cast<std::size_t>(index)];
         }
         std::cout << "\n";
+
+        if (callipepla_probe_present(status)) {
+            std::cout << std::fixed << std::setprecision(0);
+            std::cout << "[probe] magic=0x" << std::hex << status[50] << std::dec
+                      << " mode_id=" << status[51]
+                      << " stage=" << status[52]
+                      << " spmv_rounds=" << status[53]
+                      << " spmv_cmds_with_stop=" << status[54]
+                      << " matrix_cmds_with_stop=" << status[55]
+                      << " vector_cmds=" << status[56]
+                      << " vector_acks=" << status[57]
+                      << " slot58=" << status[58]
+                      << " slot59=" << status[59]
+                      << " slot60=" << status[60]
+                      << " slot61=" << status[61]
+                      << " slot62=" << status[62]
+                      << " slot63=" << status[63]
+                      << "\n";
+            return 0;
+        }
 
         if (status[0] != kHostStatusConverged &&
             status[0] != kHostStatusMaxIter) {

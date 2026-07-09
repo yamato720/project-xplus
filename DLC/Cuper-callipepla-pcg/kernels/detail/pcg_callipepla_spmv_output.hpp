@@ -4,6 +4,7 @@
 
 #include "cuper_spmv_tasks.hpp"
 #include "pcg_callipepla_common.hpp"
+#include "pcg_callipepla_trace.hpp"
 
 void PcgCallipepla_DestroyInt(tapa::istream<INDEX_TYPE> &PE_Param) {
     for (;;) {
@@ -51,9 +52,20 @@ void PcgCallipepla_Vector_Checker(
     const INDEX_TYPE Row_num,
     tapa::istreams<float_v2, HBM_CHANNEL_NUM_DIV_8> &Vector_Y_Stream,
     tapa::ostream<float_v2> &Vector_Y_Stream_Aftck,
-    tapa::istream<INDEX_TYPE> &Stop_in) {
+    tapa::istream<INDEX_TYPE> &Stop_in,
+    const INDEX_TYPE Debug_channel
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    ,
+    tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out
+#endif
+    ) {
     const INDEX_TYPE num_pe_output = pcg_callipepla_num_checker_pe_outputs(Row_num);
     const INDEX_TYPE num_out = pcg_callipepla_num_float_v16_packets(Row_num);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Debug_channel == 0 ? kPcgCallipeplaTraceSourceChecker0 :
+        Debug_channel == 7 ? kPcgCallipeplaTraceSourceChecker7 : -1;
+#endif
 
 checker_rounds:
     for (;;) {
@@ -67,10 +79,28 @@ checker_rounds:
             if (!Stop_in.empty()) {
                 INDEX_TYPE stop = 0;
                 Stop_in.try_read(stop);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                if (Trace_source >= 0) {
+                    PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                                Trace_source,
+                                                kPcgCallipeplaTracePhaseStop,
+                                                Debug_channel,
+                                                stop);
+                }
+#endif
                 return;
             }
         }
 
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Debug_channel,
+                                        num_pe_output);
+        }
+#endif
     forward_valid_outputs:
         for (INDEX_TYPE i = 0, c_idx = 0, o_idx = 0; i < num_pe_output;) {
 #pragma HLS loop_tripcount min=1 max=1800
@@ -83,21 +113,54 @@ checker_rounds:
                                                Vector_Y_Stream,
                                                Vector_Y_Stream_Aftck);
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Debug_channel,
+                                        num_out);
+        }
+#endif
     }
 }
 
 void PcgCallipepla_Mult_Sort_Tree(
     tapa::istreams<float_v2, 8> &Vector_Y_Stream_Aftck,
     tapa::ostream<float_v16> &Vector_Y_Stream_Ans,
-    tapa::istream<INDEX_TYPE> &Stop_in) {
+    tapa::istream<INDEX_TYPE> &Stop_in
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    ,
+    tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out
+#endif
+    ) {
+    INDEX_TYPE pack_count = 0;
 sort_tree_loop:
     for (;;) {
 #pragma HLS pipeline II=1
         if (!Stop_in.empty()) {
             INDEX_TYPE stop = 0;
             Stop_in.try_read(stop);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceSortTree,
+                                        kPcgCallipeplaTracePhaseStop,
+                                        0,
+                                        stop);
+#endif
             return;
         }
-        (void)Cuper_TryPackFloatV16(Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans);
+        if (Cuper_TryPackFloatV16(Vector_Y_Stream_Aftck, Vector_Y_Stream_Ans)) {
+            ++pack_count;
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if ((pack_count & 0xff) == 1) {
+                PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                            kPcgCallipeplaTraceSourceSortTree,
+                                            kPcgCallipeplaTracePhaseProgress,
+                                            0,
+                                            pack_count);
+            }
+#endif
+        }
     }
 }

@@ -150,11 +150,12 @@ service/PCG 向量图造成局部 SLL demand 超额。
 
 ## 当前待补
 
-- 已用低频重试生成并同步 demo，下一步是 demo-only 上板 smoke。
-- 如果上板出现卡死或 timing 相关异常，再减少 16 路 service 周边局部 fanout/stream
-  depth 或做更明确的 SLR/port 布局约束。
-- 按 demo-only 规则补 `thermal2_n16` init-only / 1iter 上板 smoke。
-- 未完成上板性能确认前不更新正式 `source.diff`。
+- 低频 demo UUID `9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 已在最小上板 smoke
+  timeout，不继续 sweep。
+- 下一步只构建并同步 `CUPER_CALLIPEPLA_TRACE_LIGHT=1` 定位版，覆盖同一 full-PCG
+  demo 槽后再跑 `thermal2_n16 MAX_ITERS=0/1`。
+- trace-light 最小 smoke 未返回前，不跑更大规模、不晋级标准版、不更新正式
+  `source.diff`。
 
 ## 2026-07-08 低频重试
 
@@ -200,7 +201,7 @@ bitstream 信息：
 ```text
 UUID: 9faa45b3-b6cb-1851-21c6-02fdd9a904bc
 SHA256: 019163fafd84d9c399260962a7555bc010a63a404ae9fcbd122589f7eb6370d7
-INFO SHA256: 10b9c0b93671abf03c06592d0f2ed28b29c5376971fe1f9af37232126068d185
+INFO SHA256: 0505aa6378d8e1b05d097778fb8d7b73b5d250abddf726c11bfbf74c85ab621e
 DATA/KERNEL/HBM clock: 135 / 500 / 450 MHz
 Requested DATA clock: 150 MHz
 Achieved DATA clock: 135.3 MHz
@@ -217,4 +218,295 @@ THS=0.000 ns
 ```
 
 结论：低频重试解决了 `global congestion level 7` 的不可布线问题，但 timing 仍未收敛。
-该 xclbin 只作为 demo 候选同步，尚未上板，不晋级标准版。
+该 xclbin 只作为 demo 候选同步，进入最小上板 smoke。
+
+## 2026-07-08 demo-only 上板 smoke
+
+测试对象为同步槽当前 UUID `9faa45b3-b6cb-1851-21c6-02fdd9a904bc`。
+
+```bash
+make cuper-tapa-pcg-callipepla-run-hw \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
+
+make cuper-tapa-pcg-callipepla-run-hw \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
+```
+
+结果：
+
+| Dataset | MAX_ITERS | Timeout | 最后 live phase | 结论 |
+| --- | ---: | ---: | ---: | --- |
+| `thermal2_n16` | 0 | 20s | 1 | timeout |
+| `thermal2_n16` | 1 | 20s | 0 | timeout |
+
+该 UUID 先定性为失败 demo：最小 init-only / 1iter 都没有返回，尚未跑更大规模，
+不晋级标准版，不更新正式 `source.diff`。
+
+## 2026-07-08 trace-light 软件 smoke
+
+上板 timeout 后新增 `CUPER_CALLIPEPLA_TRACE_LIGHT=1` 定位版，保持 ABI/HBM mapping
+不变，只用 `Status[16..63]` 输出 task/stream 进度。
+
+```bash
+make cuper-tapa-pcg-callipepla-build-host CUPER_CALLIPEPLA_TRACE_LIGHT=1
+
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 DIFF_TOL=1e-3 CUPER_CALLIPEPLA_TRACE_LIGHT=1
+
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 DIFF_TOL=1e-3 CUPER_CALLIPEPLA_TRACE_LIGHT=1
+```
+
+结果：三条命令均通过。关键输出：
+
+```text
+MAX_ITERS=0: [done] iter=0 status=max_iter rr=1.104105301696e+02
+MAX_ITERS=0: max_abs_diff=0 max_rel_diff=0
+MAX_ITERS=1: [done] iter=1 status=converged final_x_bank=1 final_r_bank=1 final_p_bank=0
+MAX_ITERS=1: max_abs_diff=1.086781531434e-08 max_rel_diff=9.286405498855e-09
+```
+
+## 2026-07-09 trace-light 硬件构建失败
+
+启动命令：
+
+```bash
+make cuper-tapa-pcg-callipepla-hw-tmux \
+  CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-u55c-20260708-trace-build \
+  CUPER_CALLIPEPLA_TRACE_LIGHT=1 \
+  CLOCK_PERIOD=8.0 \
+  CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100 \
+  CUPER_CALLIPEPLA_HBM_CHANNELS=16 \
+  CUPER_CALLIPEPLA_SPMV_STRIP_PADDING=1 \
+  CUPER_CALLIPEPLA_SPMV_ACC_WINDOW=10
+```
+
+构建记录：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-hw
+log: logs/cuper_tapa_pcg_callipepla_hw_20260708_232242.log
+build dir: cuper-tapa-pcg-callipepla-u55c-20260708-trace-build
+```
+
+TAPA/XO 阶段已通过，且 Vitis link 已进入并通过 synthesis：
+
+```text
+I0708 23:35:41.445 ... generated the v++ xo file at .../CuperPcgCallipepla.xo
+[23:39:37] Run vpl: Step synth: Started
+[00:23:13] Run vpl: Step synth: Completed
+[00:23:13] Run vpl: Step impl: Started
+```
+
+最终失败在 Vivado routing verification，没有生成 `CuperPcgCallipepla.xclbin`：
+
+```text
+[05:28:43] Phase 9 Verifying routed nets
+[05:35:09] Run vpl: Step impl: Failed
+[05:35:10] Run vpl: FINISHED. Run Status: impl ERROR
+ERROR: [VPL 18-1000] Routing results verification failed due to partially-conflicted nets
+ERROR: [VPL 60-704] Integration error ... route_design ERROR
+ERROR: [v++ 60-703] Failed to finish linking
+make: *** [Makefile:489: cuper-tapa-pcg-callipepla-link-xclbin] Error 1
+```
+
+Vivado `impl_1/runme.log` 中的 routing 失败信号：
+
+```text
+CRITICAL WARNING: [Route 35-162] 13926 signals failed to route due to routing congestion.
+CRITICAL WARNING: [Route 35-2] Design is not legally routed. There are 9945 node overlaps.
+ERROR: [Constraints 18-1000] Routing results verification failed due to partially-conflicted nets
+```
+
+拥塞报告显示主要仍是 routing congestion，而不是 C++/TAPA front-end 错误：
+
+```text
+South Dir 64x64 Area, Max Cong = 92.6611%
+Direction: South
+Congested clusters found at Level 6
+Effective congestion level: 7
+```
+
+前 10 个 partially-conflicted nets 同时包含 HBM shell/interconnect 路径和 kernel 内
+trace/command FIFO：
+
+```text
+level0_i/ulp/hmss_0/inst/path_28/interconnect27_28/...
+level0_i/ulp/hmss_0/inst/path_16/interconnect1_16/...
+level0_i/ulp/CuperPcgCallipepla_1/inst/Matrix_Command_Stream_14/...
+level0_i/ulp/CuperPcgCallipepla_1/inst/Matrix_Command_Stream_8/...
+level0_i/ulp/hmss_0/inst/path_12/...
+level0_i/ulp/hmss_0/inst/path_23/...
+```
+
+结论：
+
+- trace-light 源码和软件 smoke 通过，但当前 trace-light xclbin 未生成。
+- 当时 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260708-demo.xclbin` 未被覆盖，仍是旧
+  UUID `9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 的失败 demo；2026-07-09 后续已由
+  entry-probe demo 槽替换。
+- 本轮没有新 UUID、没有新 SHA256、没有上板测试结果。
+- 不继续 sweep，不晋级标准版，不更新正式 `source.diff`。
+- 下一步若继续做硬件定位，需要先减少 trace-light 的 routing 压力，例如降低
+  trace stream 数量/深度、只保留 controller+ptr/vector loader+少量 ch0 观测点，
+  或改成更小的 mmap-only/entry-probe 定位 kernel。
+
+## 2026-07-09 hollow-probe 软件 smoke
+
+trace-light 路由失败后，新增互斥的 hollow-probe 编译模式，先验证 entry、Status
+mmap、controller command fanout 和 loader 层边界。
+
+Host/TAPA 编译检查：
+
+```bash
+make cuper-tapa-pcg-callipepla-build-host CUPER_CALLIPEPLA_PROBE_MODE=entry
+make cuper-tapa-pcg-callipepla-build-host CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain
+make cuper-tapa-pcg-callipepla-build-host \
+  CUPER_CALLIPEPLA_PROBE_MODE=loader_drain CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1
+```
+
+结果：三条命令均通过。
+
+TAPA software smoke：
+
+```bash
+CUPER_CALLIPEPLA_PROBE_MODE=entry \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1 \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=2 \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=3 \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+```
+
+结果：六条 smoke 均返回。关键 probe 输出：
+
+```text
+entry MAX_ITERS=0:
+[probe] magic=0x43505242 mode_id=1 stage=99 spmv_rounds=0
+slot58=16 slot59=0 slot60=1 slot61=11 slot62=16 slot63=16
+
+cmd_drain MAX_ITERS=0:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=1
+spmv_cmds_with_stop=2 matrix_cmds_with_stop=32 vector_cmds=3 vector_acks=2
+
+cmd_drain MAX_ITERS=1:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=2
+spmv_cmds_with_stop=3 matrix_cmds_with_stop=48 vector_cmds=8 vector_acks=7
+
+loader_drain level=1/2/3 MAX_ITERS=0:
+[probe] magic=0x43505242 mode_id=3 stage=99 spmv_rounds=1
+spmv_cmds_with_stop=2 matrix_cmds_with_stop=32 vector_cmds=3 vector_acks=2
+```
+
+这些 smoke 只验证 probe graph 可退出，不代表完整 PCG 数值正确性。
+
+## 2026-07-09 entry-probe 硬件构建与同步
+
+构建命令：
+
+```bash
+CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-probe-entry-xo-build \
+CUPER_CALLIPEPLA_PROBE_MODE=entry \
+CUPER_CALLIPEPLA_TRACE_LIGHT=0 \
+make cuper-tapa-pcg-callipepla-build-xo
+
+make CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-probe-entry-xo-build \
+  CUPER_CALLIPEPLA_PROBE_MODE=entry \
+  CUPER_CALLIPEPLA_TRACE_LIGHT=0 \
+  CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100 \
+  cuper-tapa-pcg-callipepla-link-xclbin
+```
+
+tmux/log：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-probe-entry-hw
+log: logs/cuper_tapa_pcg_callipepla_probe_entry_hw_20260709_150430.log
+build dir: cuper-tapa-pcg-callipepla-probe-entry-xo-build/
+```
+
+结果：Vitis link 完成并生成 xclbin。
+
+```text
+[16:44:45] Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-1230] ... hbm_aclk = 450, KERNEL = 500, DATA = 100
+INFO: [v++ 60-586] Created .../CuperPcgCallipepla.xclbin
+INFO: [v++ 60-791] Total elapsed time: 1h 40m 21s
+```
+
+同步文件：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin.info
+```
+
+bitstream 信息：
+
+```text
+UUID: 7ab50484-4649-ffd5-dd5c-0925c61a9504
+SHA256: 88a6750835c9e2b6c3c94e468d6468716730407e21ad9eabbf3df876fca48fcd
+INFO SHA256: 0e3a8a283a417e0e0cdbcd8ebc410ce23d3cab605a01110a511fc2e7855d0a16
+DATA/KERNEL/HBM clock: 100 / 500 / 450 MHz
+```
+
+routed timing summary：
+
+```text
+WNS=0.003 ns
+TNS=0.000 ns
+setup failing endpoints=0
+WHS=0.009 ns
+THS=0.000 ns
+```
+
+当前同步槽已由 2026-07-08 低频 full graph 失败 demo 替换为 2026-07-09 entry-probe
+debug artifact。该 artifact 不执行完整 PCG/SpMV datapath，不做性能或数值结论。
+下一步服务器侧只跑最小上板 smoke：
+
+```bash
+make cuper-tapa-pcg-callipepla-run-hw \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
+```
+
+预期检查：
+
+```text
+Status[50] = 0x43505242
+Status[51] = 1
+Status[52] = 99
+```
+
+本轮不更新正式 `source.diff`，因为这是 debug/probe artifact，不是 full-PCG 性能提升
+候选。

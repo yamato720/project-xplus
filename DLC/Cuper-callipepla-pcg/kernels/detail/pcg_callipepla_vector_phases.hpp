@@ -3,6 +3,7 @@
 #include <tapa.h>
 
 #include "pcg_callipepla_common.hpp"
+#include "pcg_callipepla_trace.hpp"
 
 inline double_v8 PcgCallipepla_ReadBank(tapa::mmap<double_v8> &B0,
                                         tapa::mmap<double_v8> &B1,
@@ -37,7 +38,12 @@ void PcgCallipepla_Vector_Phases(
     tapa::mmap<double_v8> R0,
     tapa::mmap<double_v8> R1,
     tapa::mmap<double_v8> M_inv,
-    const INDEX_TYPE Row_num) {
+    const INDEX_TYPE Row_num
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    ,
+    tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out
+#endif
+    ) {
     const INDEX_TYPE float_packet_count =
         Row_num > 0 ? pcg_callipepla_num_float_v16_packets(Row_num) : 0;
     const INDEX_TYPE double_packet_count =
@@ -48,8 +54,22 @@ vector_phase_loop:
 #pragma HLS loop_flatten off
         const PcgCallipeplaVectorCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseStop,
+                                        command.phase,
+                                        command.iter);
+#endif
             return;
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                    kPcgCallipeplaTraceSourceVectorPhases,
+                                    kPcgCallipeplaTracePhaseRecv,
+                                    command.phase,
+                                    command.iter);
+#endif
 
         PcgCallipeplaVectorResult result =
             pcg_callipepla_make_vector_result(command.phase);
@@ -96,6 +116,13 @@ vector_phase_loop:
                 }
             }
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        float_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseInitZp) {
             double rz = 0.0;
             double rr = 0.0;
@@ -124,6 +151,13 @@ vector_phase_loop:
             result.rz = rz;
             result.rr = rr;
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        double_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseIterDot) {
             double p_ap = 0.0;
         iter_dot:
@@ -162,6 +196,13 @@ vector_phase_loop:
             }
             result.p_ap = p_ap;
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        float_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseUpdateX) {
             const double alpha = command.alpha;
         update_x:
@@ -182,6 +223,13 @@ vector_phase_loop:
                 PcgCallipepla_WriteBank(X0, X1, command.x_write_bank, packet, x_new);
             }
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        double_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseUpdateR) {
             const double alpha = command.alpha;
         update_r:
@@ -222,6 +270,13 @@ vector_phase_loop:
                 }
             }
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        float_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseApplyMInvDot) {
             double rz = 0.0;
             double rr = 0.0;
@@ -252,6 +307,13 @@ vector_phase_loop:
             result.rz = rz;
             result.rr = rr;
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        double_packet_count);
+#endif
         } else if (command.phase == kPcgCallipeplaPhaseUpdateP) {
             const double beta = command.beta;
         update_p:
@@ -272,8 +334,22 @@ vector_phase_loop:
                 PcgCallipepla_WriteBank(P0, P1, command.p_write_bank, packet, p_new);
             }
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        double_packet_count);
+#endif
         } else {
             Result_out.write(result);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorPhases,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        command.phase,
+                                        0);
+#endif
         }
     }
 }

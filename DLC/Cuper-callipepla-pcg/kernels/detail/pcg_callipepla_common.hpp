@@ -9,6 +9,7 @@
 static constexpr INDEX_TYPE kPcgCallipeplaStatusConverged = 0;
 static constexpr INDEX_TYPE kPcgCallipeplaStatusMaxIter = 1;
 static constexpr INDEX_TYPE kPcgCallipeplaStatusBreakdown = 2;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeMagic = 0x43505242;
 
 static constexpr INDEX_TYPE kPcgCallipeplaVectorSourceX = 0;
 static constexpr INDEX_TYPE kPcgCallipeplaVectorSourceP = 1;

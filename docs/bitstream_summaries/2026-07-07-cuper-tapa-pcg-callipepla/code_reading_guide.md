@@ -4,9 +4,13 @@
 
 - `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` 只 include 顶层 task graph。
 - `DLC/Cuper-callipepla-pcg/include/Cuper.h` 定义编译常量、vector typedef 和
-  `CuperPcgCallipepla` 顶层声明。
+  `CuperPcgCallipepla` 顶层声明，也定义 `CUPER_CALLIPEPLA_PROBE_MODE_ID` /
+  `CUPER_CALLIPEPLA_PROBE_ENABLED`。
 - `DLC/Cuper-callipepla-pcg/kernels/detail/pcg_callipepla_top_graphs.hpp` 是实际
   TAPA task graph。
+- `DLC/Cuper-callipepla-pcg/kernels/detail/pcg_callipepla_probe.hpp` 是 2026-07-09
+  hollow-probe helper，包含 entry writer、mmap touch、command drain、fake vector ack
+  和 loader drain task。
 
 ## Host 到 Kernel 的数据
 
@@ -48,11 +52,26 @@
 `X[0]` 这类 `mmaps` index 表达式。物理 bank ABI、argument order 和 HBM mapping
 仍等价于两个 bank。
 
+`CUPER_CALLIPEPLA_PROBE_MODE=entry|cmd_drain|loader_drain` 不改变顶层函数签名、
+host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 内部
+替换后级 task，因此同一个 host/XRT register 写入路径可以直接加载 probe xclbin。
+
+三档 probe：
+
+- `entry`：只 touch 所有 mmap 端口并写 Status/Metrics/Residuals 后返回。当前同步
+  xclbin 就是该模式。
+- `cmd_drain`：保留 controller 和 stage timer，ptr/matrix/vector command consumer
+  全部换成 drain/fake ack。
+- `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
+
 ## Metrics
 
 - `Status[0..7]` 是正式完成状态：status、iteration、final bank、HBM channel 数、
   vector packet count、matrix len。
 - `Status[8..15]` 是 live progress snapshot。
+- Probe magic 是 `Status[50]=0x43505242`；`Status[51]` 是 mode id，
+  `1/2/3` 对应 `entry/cmd_drain/loader_drain`。`Status[52..63]` 在 probe 中记录
+  stage、SpMV/matrix/vector command 计数和基础规模参数。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。

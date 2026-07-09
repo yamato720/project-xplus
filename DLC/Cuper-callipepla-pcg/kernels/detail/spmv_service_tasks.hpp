@@ -9,6 +9,7 @@
 #include <tapa.h>
 
 #include "cuper_spmv_tasks.hpp"
+#include "pcg_callipepla_trace.hpp"
 #include "spmv_service_common.hpp"
 #ifdef JACOBI_TRACE_ENABLED
 #include "jacobi_deadlock_debug.hpp"
@@ -25,6 +26,10 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
                                     tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
                                     tapa::istream<CuperSpmvServiceCommand> &Command_in,
                                     tapa::ostream<INDEX_TYPE> &PE_Param
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                                    ,
+                                    tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
 #ifdef JACOBI_TRACE_ENABLED
                                     ,
                                     tapa::ostream<JacobiDebugEvent> &Debug_Event_out
@@ -34,6 +39,13 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        kPcgCallipeplaTraceSourcePtrLoader,
+                                        kPcgCallipeplaTracePhaseStop,
+                                        0,
+                                        Batch_num);
+#endif
 #ifdef JACOBI_TRACE_ENABLED
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  kJacobiDebugSourcePtrLoader,
@@ -44,6 +56,13 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
             PE_Param.write(kSpmvServiceStopToken);
             return;
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                    kPcgCallipeplaTraceSourcePtrLoader,
+                                    kPcgCallipeplaTracePhaseRecv,
+                                    Batch_num,
+                                    Row_num);
+#endif
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePtrLoader,
@@ -68,6 +87,13 @@ void SpmvService_SpElementPtrLoader(const INDEX_TYPE Batch_num,
         Cuper_ReadSpElementPtrPackets(batch_num_plus_1,
                                       SpElement_list_ptr,
                                       PE_Param);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                    kPcgCallipeplaTraceSourcePtrLoader,
+                                    kPcgCallipeplaTracePhaseDone,
+                                    0,
+                                    batch_num_plus_1);
+#endif
 #ifdef JACOBI_TRACE_ENABLED
         Jacobi_DebugTryWrite(Debug_Event_out,
                              kJacobiDebugSourcePtrLoader,
@@ -87,6 +113,10 @@ void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
                               tapa::ostream<ap_uint<512>> &Matrix_A_Stream
                               ,
                               const INDEX_TYPE Debug_channel
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                              ,
+                              tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
 #ifdef JACOBI_TRACE_FULL
                               ,
                               tapa::ostream<JacobiDebugEvent> &Debug_Event_out
@@ -95,10 +125,24 @@ void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
 #ifdef JACOBI_TRACE_FULL
     const INDEX_TYPE Debug_source = kJacobiDebugSourceMatrixLoaderBase + Debug_channel;
 #endif
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Debug_channel == 0 ? kPcgCallipeplaTraceSourceMatrix0 :
+        Debug_channel == 15 ? kPcgCallipeplaTraceSourceMatrix15 : -1;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if (Trace_source >= 0) {
+                PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                            Trace_source,
+                                            kPcgCallipeplaTracePhaseStop,
+                                            Debug_channel,
+                                            Matrix_len);
+            }
+#endif
 #ifdef JACOBI_TRACE_FULL
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  Debug_source,
@@ -109,6 +153,15 @@ void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
             return;
         }
 
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Debug_channel,
+                                        Matrix_len);
+        }
+#endif
 #ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
@@ -120,6 +173,15 @@ void SpmvService_MatrixLoader(const INDEX_TYPE Matrix_len,
         Cuper_ReadMatrixPackets(Matrix_len,
                                 Matrix_data,
                                 Matrix_A_Stream);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Debug_channel,
+                                        Matrix_len);
+        }
+#endif
 #ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
@@ -145,7 +207,12 @@ void SpmvService_StripPtrLoader(const INDEX_TYPE Batch_num,
                                 tapa::async_mmap<INDEX_TYPE> &SpElement_list_ptr,
                                 tapa::istream<CuperSpmvServiceCommand> &Command_in,
                                 tapa::ostream<INDEX_TYPE> &PE_Param,
-                                tapa::ostreams<INDEX_TYPE, HBM_CHANNEL_NUM> &Matrix_Len_Stream) {
+                                tapa::ostreams<INDEX_TYPE, HBM_CHANNEL_NUM> &Matrix_Len_Stream
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                                ,
+                                tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
+                                ) {
     INDEX_TYPE matrix_len[HBM_CHANNEL_NUM];
 #pragma HLS array_partition variable=matrix_len complete
 
@@ -164,14 +231,35 @@ read_strip_lengths:
             ++i_response;
         }
     }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                kPcgCallipeplaTraceSourcePtrLoader,
+                                kPcgCallipeplaTracePhaseEntry,
+                                HBM_CHANNEL_NUM,
+                                matrix_len[0]);
+#endif
 
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        kPcgCallipeplaTraceSourcePtrLoader,
+                                        kPcgCallipeplaTracePhaseStop,
+                                        0,
+                                        Batch_num);
+#endif
             PE_Param.write(kSpmvServiceStopToken);
             return;
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                    kPcgCallipeplaTraceSourcePtrLoader,
+                                    kPcgCallipeplaTracePhaseRecv,
+                                    Batch_num,
+                                    Row_num);
+#endif
 
         PE_Param.write(Batch_num);
         PE_Param.write(Row_num);
@@ -200,6 +288,13 @@ read_strip_lengths:
                 ++i_response;
             }
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                    kPcgCallipeplaTraceSourcePtrLoader,
+                                    kPcgCallipeplaTracePhaseDone,
+                                    0,
+                                    packet_count);
+#endif
     }
 }
 
@@ -209,19 +304,56 @@ void SpmvService_MatrixLoaderStrip(
     tapa::istream<INDEX_TYPE> &Matrix_Len_Stream,
     tapa::ostream<ap_uint<512>> &Matrix_A_Stream
     ,
-    const INDEX_TYPE Debug_channel) {
+    const INDEX_TYPE Debug_channel
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    ,
+    tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
+    ) {
     (void)Debug_channel;
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Debug_channel == 0 ? kPcgCallipeplaTraceSourceMatrix0 :
+        Debug_channel == 15 ? kPcgCallipeplaTraceSourceMatrix15 : -1;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if (Trace_source >= 0) {
+                PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                            Trace_source,
+                                            kPcgCallipeplaTracePhaseStop,
+                                            Debug_channel,
+                                            0);
+            }
+#endif
             return;
         }
 
         const INDEX_TYPE matrix_len = Matrix_Len_Stream.read();
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Debug_channel,
+                                        matrix_len);
+        }
+#endif
         Cuper_ReadMatrixPackets(matrix_len,
                                 Matrix_data,
                                 Matrix_A_Stream);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Debug_channel,
+                                        matrix_len);
+        }
+#endif
     }
 }
 
@@ -351,17 +483,45 @@ void SpmvService_CoreStrip(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                            tapa::ostream<float_v16>     &Vector_X_Stream_out,
                            tapa::ostream<INDEX_TYPE>    &Vector_Y_Param,
                            tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
-                           const INDEX_TYPE Core_id) {
+                           const INDEX_TYPE Core_id
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                           ,
+                           tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
+                           ) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Core_id == 0 ? kPcgCallipeplaTraceSourceCore0 :
+        Core_id == 15 ? kPcgCallipeplaTraceSourceCore15 : -1;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         const INDEX_TYPE Batch_num = PE_Param_in.read();
         if (Batch_num == kSpmvServiceStopToken) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if (Trace_source >= 0) {
+                PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                            Trace_source,
+                                            kPcgCallipeplaTracePhaseStop,
+                                            Core_id,
+                                            0);
+            }
+#endif
             PE_Param_out.write(kSpmvServiceStopToken);
             Vector_Y_Param.write(kSpmvServiceStopToken);
             return;
         }
         const INDEX_TYPE Row_num = PE_Param_in.read();
         const INDEX_TYPE Column_num = PE_Param_in.read();
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Core_id,
+                                        Row_num);
+        }
+#endif
 
         PE_Param_out.write(Batch_num);
         PE_Param_out.write(Row_num);
@@ -380,6 +540,15 @@ void SpmvService_CoreStrip(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                                           Vector_X_Stream_out,
                                           Vector_Y_Param,
                                           Matrix_Mult_Vector_Stream);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Core_id,
+                                        Column_num);
+        }
+#endif
     }
 }
 #endif
@@ -392,19 +561,48 @@ void SpmvService_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                       tapa::ostream<INDEX_TYPE>    &PE_Param_out,
                       tapa::ostream<float_v16>     &Vector_X_Stream_out,
                       tapa::ostream<INDEX_TYPE>    &Vector_Y_Param,
-                      tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream) {
+                      tapa::ostream<Matrix_Mult_X> &Matrix_Mult_Vector_Stream,
+                      const INDEX_TYPE Core_id
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                      ,
+                      tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
+                      ) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Core_id == 0 ? kPcgCallipeplaTraceSourceCore0 :
+        Core_id == 15 ? kPcgCallipeplaTraceSourceCore15 : -1;
+#endif
     for (;;) {
 #pragma HLS loop_flatten off
         // PE_Param_in 的第一项是 Batch_num 或停止令牌。停止令牌沿 core 链
         // 继续传到 PE_Param_out，让链尾 drain 也能退出。
         const INDEX_TYPE Batch_num = PE_Param_in.read();
         if (Batch_num == kSpmvServiceStopToken) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if (Trace_source >= 0) {
+                PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                            Trace_source,
+                                            kPcgCallipeplaTracePhaseStop,
+                                            Core_id,
+                                            0);
+            }
+#endif
             PE_Param_out.write(kSpmvServiceStopToken);
             Vector_Y_Param.write(kSpmvServiceStopToken);
             return;
         }
         const INDEX_TYPE Row_num = PE_Param_in.read();
         const INDEX_TYPE Column_num = PE_Param_in.read();
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Core_id,
+                                        Row_num);
+        }
+#endif
 
         PE_Param_out.write(Batch_num);
         PE_Param_out.write(Row_num);
@@ -426,6 +624,15 @@ void SpmvService_Core(tapa::istream<INDEX_TYPE>    &PE_Param_in,
                                  Vector_X_Stream_out,
                                  Vector_Y_Param,
                                  Matrix_Mult_Vector_Stream);
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Core_id,
+                                        Column_num);
+        }
+#endif
     }
 }
 
@@ -437,6 +644,10 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                              tapa::ostream<float_v2>      &Vector_Y_Stream
                              ,
                              const INDEX_TYPE Debug_channel
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+                             ,
+                             tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
+#endif
 #ifdef JACOBI_TRACE_FULL
                              ,
                              tapa::ostream<JacobiDebugEvent> &Debug_Event_out
@@ -444,6 +655,11 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                              ) {
 #ifdef JACOBI_TRACE_FULL
     const INDEX_TYPE Debug_source = kJacobiDebugSourceAccumulatorBase + Debug_channel;
+#endif
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    const INDEX_TYPE Trace_source =
+        Debug_channel == 0 ? kPcgCallipeplaTraceSourceAcc0 :
+        Debug_channel == 15 ? kPcgCallipeplaTraceSourceAcc15 : -1;
 #endif
 #ifdef PINGPONG
     // ping/pong 分别保存偶数行和奇数行的部分和。row 编码来自 host 侧
@@ -468,6 +684,15 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
         // 后续 batch 边界由 Core 写入同一条 stream。
         const INDEX_TYPE Batch_num = Vector_Y_Param.read();
         if (Batch_num == kSpmvServiceStopToken) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            if (Trace_source >= 0) {
+                PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                            Trace_source,
+                                            kPcgCallipeplaTracePhaseStop,
+                                            Debug_channel,
+                                            0);
+            }
+#endif
 #ifdef JACOBI_TRACE_FULL
             Jacobi_DebugTryWrite(Debug_Event_out,
                                  Debug_source,
@@ -478,6 +703,15 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
             return;
         }
         const INDEX_TYPE Row_num = Vector_Y_Param.read();
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseRecv,
+                                        Debug_channel,
+                                        Row_num);
+        }
+#endif
 #ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,
                              Debug_source,
@@ -500,6 +734,15 @@ void SpmvService_Accumulator(tapa::istream<INDEX_TYPE>    &Vector_Y_Param,
                                         Matrix_Mult_Vector_Stream,
                                         Vector_Y_Stream,
                                         local_part_Y_ping);
+#endif
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        if (Trace_source >= 0) {
+            PcgCallipepla_DebugTryWrite(Trace_Event_out,
+                                        Trace_source,
+                                        kPcgCallipeplaTracePhaseDone,
+                                        Debug_channel,
+                                        spmv_service_num_accumulator_outputs(Row_num));
+        }
 #endif
 #ifdef JACOBI_TRACE_FULL
         Jacobi_DebugTryWrite(Debug_Event_out,

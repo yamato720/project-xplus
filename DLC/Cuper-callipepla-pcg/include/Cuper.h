@@ -10,6 +10,26 @@
 #define PINGPONG
 #define FLEX_REUSE
 
+#ifndef CUPER_CALLIPEPLA_PROBE_MODE_ID
+#define CUPER_CALLIPEPLA_PROBE_MODE_ID 0
+#endif
+
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID > 0
+#define CUPER_CALLIPEPLA_PROBE_ENABLED 1
+#endif
+
+#if defined(CUPER_CALLIPEPLA_TRACE_LIGHT) && defined(CUPER_CALLIPEPLA_PROBE_ENABLED)
+#error "CUPER_CALLIPEPLA_TRACE_LIGHT and CUPER_CALLIPEPLA_PROBE_MODE are mutually exclusive."
+#endif
+
+#if defined(CUPER_CALLIPEPLA_TRACE_LIGHT)
+#define CUPER_CALLIPEPLA_TRACE_ENABLED 1
+#endif
+
+#ifndef CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL
+#define CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL 1
+#endif
+
 // The Callipepla-style PCG experiment keeps the proven Cuper strip16 SpMV
 // datapath.  The host/build scripts map CUPER_CALLIPEPLA_* env vars to the
 // existing JACOBI_* compile flags used by the copied strip16 service code.

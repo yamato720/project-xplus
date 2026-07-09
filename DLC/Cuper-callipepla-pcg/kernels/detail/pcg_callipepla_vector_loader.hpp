@@ -3,6 +3,7 @@
 #include <tapa.h>
 
 #include "pcg_callipepla_common.hpp"
+#include "pcg_callipepla_trace.hpp"
 
 inline double_v8 PcgCallipepla_ReadDoubleBank(tapa::mmap<double_v8> &X0,
                                               tapa::mmap<double_v8> &X1,
@@ -28,7 +29,12 @@ void PcgCallipepla_Vector_Loader(
     tapa::mmap<double_v8> P0,
     tapa::mmap<double_v8> P1,
     tapa::istream<PcgCallipeplaSpmvVectorCommand> &Command_in,
-    tapa::ostream<float_v16> &Vector_X_Stream) {
+    tapa::ostream<float_v16> &Vector_X_Stream
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+    ,
+    tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out
+#endif
+    ) {
     const INDEX_TYPE packet_count =
         pcg_callipepla_num_float_v16_packets(Column_num);
     const INDEX_TYPE double_packet_count =
@@ -39,8 +45,22 @@ vector_loader_loop:
 #pragma HLS loop_flatten off
         const PcgCallipeplaSpmvVectorCommand command = Command_in.read();
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+            PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                        kPcgCallipeplaTraceSourceVectorLoader,
+                                        kPcgCallipeplaTracePhaseStop,
+                                        command.vector_source,
+                                        command.bank);
+#endif
             return;
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                    kPcgCallipeplaTraceSourceVectorLoader,
+                                    kPcgCallipeplaTracePhaseRecv,
+                                    command.vector_source,
+                                    command.bank);
+#endif
 
         if (Batch_num == 0) {
             continue;
@@ -82,5 +102,12 @@ vector_loader_loop:
             }
             Vector_X_Stream.write(out);
         }
+#ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
+        PcgCallipepla_DebugTryWrite(Debug_Event_out,
+                                    kPcgCallipeplaTraceSourceVectorLoader,
+                                    kPcgCallipeplaTracePhaseDone,
+                                    command.vector_source,
+                                    packet_count);
+#endif
     }
 }
