@@ -86,6 +86,38 @@ inline PcgCallipeplaVectorResult PcgCallipepla_ReadVectorResult(
 }
 
 #ifdef CUPER_CALLIPEPLA_PROBE_ENABLED
+inline void PcgCallipepla_WriteProbeControllerHeader(
+    tapa::mmap<INDEX_TYPE> &Status,
+    const INDEX_TYPE stage,
+    const INDEX_TYPE float_packet_count,
+    const INDEX_TYPE matrix_len,
+    const INDEX_TYPE row_num,
+    const INDEX_TYPE batch_num,
+    const INDEX_TYPE max_iters) {
+#pragma HLS inline
+    Status[50] = kPcgCallipeplaProbeMagic;
+    Status[51] = CUPER_CALLIPEPLA_PROBE_MODE_ID;
+    Status[52] = stage;
+    Status[53] = 0;
+    Status[54] = 0;
+    Status[55] = 0;
+    Status[56] = 0;
+    Status[57] = 0;
+    Status[58] = 0;
+    Status[59] = 0;
+    Status[60] = float_packet_count;
+    Status[61] = matrix_len;
+    Status[62] = row_num;
+    Status[63] = (batch_num << 16) ^ ((max_iters & 0xff) << 8);
+}
+
+inline void PcgCallipepla_WriteProbeControllerCheckpoint(
+    tapa::mmap<INDEX_TYPE> &Status,
+    const INDEX_TYPE stage) {
+#pragma HLS inline
+    Status[52] = stage;
+}
+
 inline void PcgCallipepla_WriteProbeControllerStatus(
     tapa::mmap<INDEX_TYPE> &Status,
     const INDEX_TYPE stage,
@@ -165,19 +197,7 @@ void PcgCallipepla_Controller(
 
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
 #define PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(CODE, DETAIL0, DETAIL1) \
-    PcgCallipepla_WriteProbeControllerStatus(Status, \
-                                             CODE, \
-                                             spmv_rounds, \
-                                             vector_command_count, \
-                                             vector_result_count, \
-                                             DETAIL0, \
-                                             DETAIL1, \
-                                             float_packet_count, \
-                                             Matrix_len, \
-                                             Row_num, \
-                                             Batch_num, \
-                                             Max_iters, \
-                                             iterations)
+    PcgCallipepla_WriteProbeControllerCheckpoint(Status, CODE)
 #endif
 
     unsigned long long init_spmv_work = 0;
@@ -216,19 +236,13 @@ void PcgCallipepla_Controller(
                                   Matrix_len);
 #endif
 #ifdef CUPER_CALLIPEPLA_PROBE_ENABLED
-    PcgCallipepla_WriteProbeControllerStatus(Status,
+    PcgCallipepla_WriteProbeControllerHeader(Status,
                                              1,
-                                             spmv_rounds,
-                                             vector_command_count,
-                                             vector_result_count,
-                                             0,
-                                             0,
                                              float_packet_count,
                                              Matrix_len,
                                              Row_num,
                                              Batch_num,
-                                             Max_iters,
-                                             iterations);
+                                             Max_iters);
 #endif
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
     PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(10,
@@ -244,8 +258,25 @@ void PcgCallipepla_Controller(
                                         kPcgCallipeplaStageBegin);
 #endif
 
-    if (Row_num <= 0 || Column_num <= 0 || Max_iters < 0 ||
-        Tau <= 0.0 || pcg_callipepla_invalid(Tau)) {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(12, Row_num, Column_num);
+#endif
+    const bool dimensions_valid =
+        Row_num > 0 && Column_num > 0 && Max_iters >= 0;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(13, Row_num, Max_iters);
+#endif
+    const bool tau_valid = Tau > 0.0 && !pcg_callipepla_invalid(Tau);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(14, Max_iters, float_packet_count);
+#endif
+
+    if (!dimensions_valid || !tau_valid) {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(15,
+                                            kPcgCallipeplaStatusBreakdown,
+                                            0);
+#endif
         status_code = kPcgCallipeplaStatusBreakdown;
     } else {
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2

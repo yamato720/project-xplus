@@ -25,7 +25,7 @@ YYYY-MM-DD-<主线>-<简短说明>/
   默认启用 strip16 去 HBM padding 和 accumulator window=10。2026-07-08 低频
   full graph demo 已生成但最小上板 timeout；trace-light 版 routing verification
   失败；entry-probe 已在服务器侧通过完整 `thermal2` 入口/mmap/参数链路测试；
-	  当前同步槽为 2026-07-09 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain` 细粒度 checkpoint debug artifact
+  当前同步槽为 2026-07-10 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain` thin-status checkpoint debug artifact，运行中只更新 `Status[52]`
 	  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin`，UUID
 	  `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107`，DATA/KERNEL/HBM 为 `100/500/440 MHz`，
 	  Vitis link `impl Complete` 但 routed setup 轻微未收敛。它保留真实 controller 和

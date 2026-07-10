@@ -46,10 +46,10 @@ sha256=1ea8f0051cad2c3a81ab50f9e66a0d8fa982a55310e82aa054bd753bb658ab8e
 status=standalone Chisel RTL full SpMV correctness-debug demo synced, impl complete, DATA clock lowered to 139 MHz, local host/datapath/AXI smoke/lint/XO checks passed; board CHECK_Y correctness sweep pending, previous 119 MHz UUID c36bff4e no-check thermal2 returned at user-provided 477.6 ms but failed correctness
 
 [cuper-tapa-pcg-callipepla-cmddrain]
-base_log=logs/cuper_tapa_pcg_callipepla_hw_20260709_182339.log
-date=2026-07-09 20:06:54 CST
+base_log=logs/cuper_tapa_pcg_callipepla_thinstatus_hw_20260709_234820.log
+date=2026-07-10 01:29:34 CST
 bitfile=395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
-uuid=91f6c011-66d9-2ad2-bec4-a93337a2057b
-sha256=0a55daa5f91e4812379865420fd35b8dad3cd07222110babab91fa8650544002
-info_sha256=78e9d16f39835b5c02f97ed931a83588aa9be70bbc4de548b731585708a466a9
-status=Callipepla CuperPcgCallipepla cmd-drain probe synced; CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain; keeps real controller and stage timer, drains ptr/matrix/vector command consumers and uses fake vector ack; impl complete at DATA/KERNEL/HBM 100/500/450 MHz; routed timing clean WNS 0.003 ns; board smoke pending; replaced same-day entry-probe sync after entry-probe passed through full thermal2 on server
+uuid=ad7b2a61-23d4-5c05-360d-acb2ee604830
+sha256=7a83e480304dc16225e83cdc52ba38a9d759051a7085a6494161ca4d274cf6b5
+info_sha256=f6a8062acd475c123978ed0ff66f5aab42d0ff682fe0b44cc1408fd2a01d73e0
+status=Callipepla CuperPcgCallipepla cmd-drain thin-status probe synced; CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain; writes probe header once, updates only Status[52] while running, and writes full final counters on completion; keeps real controller and stage timer, drains ptr/matrix/vector command consumers and uses fake vector ack; impl complete at DATA/KERNEL/HBM 100/500/450 MHz; routed timing clean WNS 0.003 ns; board smoke pending

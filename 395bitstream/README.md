@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla cmd-drain 细粒度 checkpoint 调试 artifact，保留真实 controller 和 stage timer，后级 ptr/matrix/vector consumers 用 drain/fake ack 替代；`CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain`，不执行完整 SpMV/PCG datapath；100 MHz `impl Complete`，routed setup 轻微未收敛，等待服务器侧 controller fanout 上板 |
+| `cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla cmd-drain thin-status checkpoint 调试 artifact，入口写一次 header，运行中只更新 `Status[52]`；保留真实 controller 和 stage timer，后级 consumers 用 drain/fake ack 替代，不执行完整 SpMV/PCG datapath；100 MHz timing-clean，等待服务器侧最小 smoke |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -966,7 +966,8 @@ TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
 ```
 
-这版是 2026-07-09 同步的 `CuperPcgCallipepla` cmd-drain 调试 artifact。它保持
+这版是 2026-07-10 覆盖到同一个 2026-07-09 demo 槽的 `CuperPcgCallipepla`
+cmd-drain thin-status 调试 artifact。它保持
 Callipepla full-PCG 顶层 kernel 名、host 参数顺序、AXI-Lite register offsets 和
 HBM mapping 不变，但使用 `CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain`：保留真实
 controller 和 stage timer，ptr/matrix/vector command consumers 全部替换为 drain
@@ -974,17 +975,21 @@ controller 和 stage timer，ptr/matrix/vector command consumers 全部替换为
 timer 收尾路径；不执行完整 SpMV/PCG datapath，也不替换当前标准
 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。
 
-demo xclbin UUID 为 `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107`，SHA256 为
-`1346b57afcaa1167294a048f00533398be5995b4ebf20c727d6267fdae2a23d3`，
+demo xclbin UUID 为 `ad7b2a61-23d4-5c05-360d-acb2ee604830`，SHA256 为
+`7a83e480304dc16225e83cdc52ba38a9d759051a7085a6494161ca4d274cf6b5`，
 `.xclbin.info` SHA256 为
-`7862fed40dfa4dc8d5ee70582ac067a723e59de677818ffebcb04a39025e4399`。
+`f6a8062acd475c123978ed0ff66f5aab42d0ff682fe0b44cc1408fd2a01d73e0`。
 最终 xclbin info 中 DATA clock 为 100 MHz，KERNEL clock 为 500 MHz，
-HBM clock 为 440 MHz。Vitis link `impl Complete`，但 routed timing 有轻微 setup
-violation：WNS `-0.048 ns`、TNS `-0.470 ns`、setup failing endpoints `34`、
-WHS `0.010 ns`。构建日志为
-`logs/cuper_tapa_pcg_callipepla_hw_20260709_211951.log`，构建目录为
-`cuper-tapa-pcg-callipepla-probe-cmd-drain-trace-xo-build/`，版本记录见
+HBM clock 为 450 MHz。Vitis link `impl Complete` 且 routed timing clean：WNS
+`0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`、WHS `0.009 ns`、
+THS `0.000 ns`。构建日志为
+`logs/cuper_tapa_pcg_callipepla_thinstatus_hw_20260709_234820.log`，构建目录为
+`cuper-tapa-pcg-callipepla-probe-cmd-drain-thinstatus-build/`，版本记录见
 `docs/bitstream_summaries/2026-07-07-cuper-tapa-pcg-callipepla/`。
+
+上一版多槽 checkpoint cmd-drain UUID `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107`
+在服务器侧 `thermal2_n16` 最小 smoke 停在 `Status[52]=11`。该旧 artifact 已被
+thin-status 版覆盖，旧 timeout 只作为定位边界保留。
 
 2026-07-09 entry-probe 旧同步版 UUID
 `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已在服务器侧从 `thermal2_n65536`、
@@ -1003,13 +1008,15 @@ make cuper-tapa-pcg-callipepla-run-hw \
 ```
 
 再补 `MAX_ITERS=1`。预期检查 probe magic `Status[50]=0x43505242`、`Status[51]=2`。
-若正常返回，`Status[52]=99`；若 timeout，`Status[52]` 是细粒度 checkpoint：`10/11`
-为 total stage begin 前后，`20/21` 为 init_spmv stage begin 前后，`30/31` 为 ptr
-command 写入前后，`40/41` 为 16 路 matrix command fanout 前后，`50/51` 为 SpMV
-vector command 前后，`60/61` 为 init-spmv vector fake command 前后，`70/71` 为 fake
-ack read 前后，`80/81` 为 init_spmv stage end 前后，`90/91` 为 init_zp command 前后，
-`100/101` 为 init_zp result read 前后，`110+` 为 stop/finalization。同步 host
-打印 `detail0/detail1` 对应 `Status[58]/Status[59]`。不做 PCG diff/性能结论。
+若正常返回，`Status[52]=99`；若 timeout，thin-status 运行中只保证 `Status[52]`
+是最新值：`10/11` 为 total stage begin 前后，`12` 为条件判断前，`13` 为
+`Row_num/Column_num/Max_iters` 判断后，`14` 为 Tau 判断后，`15` 为 breakdown 分支，
+`20/21` 为 init_spmv stage begin 前后，`30/31` 为 ptr command 写入前后，`40/41`
+为 16 路 matrix command fanout 前后，`50/51` 为 SpMV vector command 前后，
+`60/61` 为 init-spmv vector fake command 前后，`70/71` 为 fake ack read 前后，
+`80/81` 为 init_spmv stage end 前后，`90/91` 为 init_zp command 前后，`100/101`
+为 init_zp result read 前后，`110+` 为 stop/finalization。运行中
+`Status[58]/Status[59]` 的 `detail0/detail1` 可能是 stale 值；不做 PCG diff/性能结论。
 旧 2026-07-08 低频 full-graph demo UUID
 `9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 已被当前 probe demo 槽替换；它的
 `thermal2_n16 MAX_ITERS=0/1` timeout 结论只作为历史失败边界保留。

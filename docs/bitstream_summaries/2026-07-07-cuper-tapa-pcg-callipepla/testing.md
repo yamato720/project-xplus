@@ -631,3 +631,111 @@ THS=0.000 ns
 LIVE_STATUS_POLL_SEC=1`。若 `cmd_drain` timeout，问题收敛到 controller
 command fanout、stop、stage timer 或 fake ack 路径，并可直接用 `Status[52]`
 checkpoint 判断卡点；若返回，再进入 `loader_drain level=1`。
+
+## 2026-07-09/10 cmd-drain thin-status checkpoint 更新
+
+服务器侧上一版 timeout 停在 `Status[52]=11`，说明 controller 已完成入口 live/probe
+写和 `total stage begin` 事件写入后的 checkpoint，但尚未进入 init SpMV command。
+下一版不继续扩大业务图，而是把 `cmd_drain` 的运行中 probe checkpoint 减薄：入口只写
+一次 `Status[50]=0x43505242`、`Status[51]=2` 和规模信息，运行中 checkpoint 只写
+`Status[52]`，正常完成时再写完整最终 `Status[50..63]` counters。timeout 解释只看
+`Status[52]`；运行中 `detail0/detail1` 可能是 stale 值。
+
+新增 checkpoint：
+
+```text
+12: 进入条件判断前
+13: 完成 Row_num/Column_num/Max_iters 判断后
+14: 完成 Tau <= 0 / Tau != Tau 判断后
+15: 进入 breakdown 分支
+20: 进入 valid 分支、准备 init_spmv stage begin
+```
+
+保留既有业务 checkpoint：`20/21` init_spmv stage begin 前后，`30/31` ptr command
+写入前后，`40/41` matrix command fanout 前后，`50/51` SpMV vector command 前后，
+`60/61` init-spmv fake vector command 前后，`70/71` fake ack read 前后，`80/81`
+init_spmv stage end 前后，`90/91` init_zp command 前后，`100/101` init_zp result
+read 前后，`110+` stop/finalization。
+
+本地软件 smoke：
+
+```bash
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+make run-cuper-tapa-pcg-callipepla \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0
+```
+
+两条均返回 `stage=99`，最终 counters 与上一版一致：
+
+```text
+MAX_ITERS=0:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=1
+spmv_cmds_with_stop=2 matrix_cmds_with_stop=32 vector_cmds=3 vector_acks=2
+detail0=1 detail1=0 slot60=1 slot61=11 slot62=16 slot63=65536
+
+MAX_ITERS=1:
+[probe] magic=0x43505242 mode_id=2 stage=99 spmv_rounds=2
+spmv_cmds_with_stop=3 matrix_cmds_with_stop=48 vector_cmds=8 vector_acks=7
+detail0=1 detail1=1 slot60=1 slot61=11 slot62=16 slot63=65793
+```
+
+硬件构建命令：
+
+```bash
+CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-probe-cmd-drain-thinstatus-build \
+CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+CUPER_CALLIPEPLA_TRACE_LIGHT=0 \
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100 \
+make cuper-tapa-pcg-callipepla-hw-tmux
+```
+
+实际使用独立 tmux 会话
+`project-xplus-cuper-tapa-pcg-callipepla-thinstatus-hw` 启动同一组
+host/XO/xclbin targets，构建日志为
+`logs/cuper_tapa_pcg_callipepla_thinstatus_hw_20260709_234820.log`。
+
+构建结果：
+
+```text
+[01:29:29] Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-1230] ... hbm_aclk = 450, KERNEL = 500, DATA = 100
+INFO: [v++ 60-586] Created cuper-tapa-pcg-callipepla-probe-cmd-drain-thinstatus-build/CuperPcgCallipepla.xclbin
+INFO: [v++ 60-791] Total elapsed time: 1h 36m 58s
+```
+
+bitstream 信息：
+
+```text
+UUID: ad7b2a61-23d4-5c05-360d-acb2ee604830
+SHA256: 7a83e480304dc16225e83cdc52ba38a9d759051a7085a6494161ca4d274cf6b5
+INFO SHA256: f6a8062acd475c123978ed0ff66f5aab42d0ff682fe0b44cc1408fd2a01d73e0
+DATA/KERNEL/HBM clock: 100 / 500 / 450 MHz
+```
+
+routed timing clean：
+
+```text
+WNS=0.003 ns
+TNS=0.000 ns
+setup failing endpoints=0
+WHS=0.009 ns
+THS=0.000 ns
+hold failing endpoints=0
+```
+
+已覆盖同步到同一个 full-PCG demo 槽：
+
+```text
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin
+395bitstream/cuper-tapa-pcg-fpga-u55c-20260709-demo.xclbin.info
+```
+
+该版本仍是 debug artifact，尚未完成服务器侧 demo-only smoke，不晋级标准版，也不
+更新正式 `source.diff`。服务器侧先跑 `thermal2_n16 MAX_ITERS=0`；若返回再跑
+`MAX_ITERS=1`，均使用 `KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1`。
