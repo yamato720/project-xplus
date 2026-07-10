@@ -941,11 +941,50 @@ INFO SHA256: 9c62740088b12652bf9ee3249af67b21636118ad8de8b0532b4aa93f8bb411b8
 ```
 
 旧顺序修复 UUID `d46c3285-6cc2-1b02-9350-1ad3dadb5c56` 的 `Status[52]=60`
-timeout 结论只作为历史记录，不再对应当前同步文件。新 artifact 上板前不更新 HTML，
-也不更新正式 `source.diff`。
+timeout 结论只作为历史记录，不再对应当前同步文件。
 
 板上判定：attempts 增长且 full 增长但 accepted 为 0，说明 command FIFO `full_n`
 未开放；full 为 0 但 accepted 为 0，说明 `nbwrite` 实现异常；accepted 大于 0 但
 ack receive 为 0，问题在 command FIFO/consumer；ack receive 大于 result sent，问题在
 fake-ack；result sent 大于 controller received，问题在 result FIFO/controller read；
 controller received 已增长但未完成，则继续查 stage timer、stop 或 finalization。
+
+## 2026-07-11 独立握手 monitor 服务器侧板测记录
+
+测试对象固定为：
+
+```text
+file: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin
+UUID: 4a272f84-1e4d-fdb8-0cfa-1fa5e77f433c
+git baseline: bbdb0d9
+probe mode: cmd_drain / mode_id=2
+```
+
+本地没有同步服务器 raw log；下表按用户提供的服务器侧反馈登记。五组数据集均先跑
+`MAX_ITERS=0`，再跑 `MAX_ITERS=1`；最小数据集另补 `10/100` 轮压力测试。
+
+| Dataset | MAX_ITERS | command accepted / result | ack command / result | full | event/drop | XRT/CU |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| `thermal2_n16` | 0 | `3 / 2` | `2 / 2` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n16` | 1 | `8 / 7` | `7 / 7` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n65536` | 0 / 1 | `3 / 2`; `8 / 7` | `2 / 2`; `7 / 7` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n131072` | 0 / 1 | `3 / 2`; `8 / 7` | `2 / 2`; `7 / 7` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n262144` | 0 / 1 | `3 / 2`; `8 / 7` | `2 / 2`; `7 / 7` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2` | 0 / 1 | `3 / 2`; `8 / 7` | `2 / 2`; `7 / 7` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n16` | 10 | `53 / 52` | `52 / 52` | 0 | `99`, `0 / 0` | error 空，IDLE |
+| `thermal2_n16` | 100 | `503 / 502` | `502 / 502` | 0 | `99`, `0 / 0` | error 空，IDLE |
+
+所有运行中 `command_attempts=command_accepted`，controller done、ack stop 和最后一次
+write-success flag 均置位；计数满足：
+
+```text
+vector commands, including stop = 5 * I + 3
+vector results                = 5 * I + 2
+ack commands, excluding stop  = 5 * I + 2
+```
+
+结论：controller、command FIFO、fake-ack consumer、result FIFO、stage timer stop 和
+finalization 已排除死锁。该 artifact 仍不读取真实 ptr/matrix/vector datapath，fake-ack
+结果不用于 PCG correctness、分段时间或性能结论，也不更新正式 `source.diff`。下一步
+进入 `loader_drain level=1`，只恢复真实 strip ptr HBM 读取、matrix-length fanout 和
+`PE_Param` drain。

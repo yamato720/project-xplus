@@ -5,11 +5,12 @@
 - 主线：`cuper-tapa-pcg`
 - 新源码目录：`DLC/Cuper-callipepla-pcg/`
 - 顶层 kernel：`CuperPcgCallipepla`
-- 状态：真实 controller 的七条 command/result 配对已改成显式非阻塞状态握手；旧
-  顺序修复 artifact 上板后 `Status[52]=60` 无法区分 command、ack 和 result 边界，
-  当前 `cmd_drain` 已加入独立握手 monitor 并完成 Vitis link、覆盖 demo 槽，等待服务器
-  最小 smoke。实现完成但请求 500 MHz DATA 下 routed setup timing 未收敛，最终 xclbin
-  自动选择 138 MHz DATA
+- 状态：UUID `4a272f84-1e4d-fdb8-0cfa-1fa5e77f433c` 的独立握手 monitor
+  `cmd_drain` 已完成服务器侧五组数据集 `MAX_ITERS=0/1` 和
+  `thermal2_n16 MAX_ITERS=10/100` 压力测试。所有运行均返回 `event=99`，command
+  FIFO `full=0`，controller/fake-ack/result/stop 计数闭合，事件 drop 为 0，XRT error
+  为空且 CU 回到 IDLE。该版据此定性为握手链路通过的 debug 基线；请求 500 MHz DATA
+  下 routed setup timing 仍未收敛，最终 xclbin 自动选择 138 MHz DATA
 - 本轮 XO/硬件目录：
   `cuper-tapa-pcg-callipepla-handshake-monitor-cmd-drain-xo-build/`
 - 本轮硬件日志：
@@ -56,6 +57,20 @@ receive/result send 和 controller result receive，独立 handshake monitor 是
 唯一 Status writer。后级 ptr/matrix/vector consumers 仍由 drain/fake ack 替代，
 不执行完整 PCG/SpMV datapath。
 
+2026-07-11 服务器侧反馈确认该握手 artifact 已通过以下 demo-only 覆盖：
+
+- `thermal2_n16`、`thermal2_n65536`、`thermal2_n131072`、
+  `thermal2_n262144` 和完整 `thermal2` 的 `MAX_ITERS=0/1`；
+- `thermal2_n16` 的 `MAX_ITERS=10/100` 压力测试。
+
+`MAX_ITERS=I` 的 vector command/result 计数稳定为 `5*I+3` / `5*I+2`：
+`I=0/1/10/100` 分别为 `3/2`、`8/7`、`53/52`、`503/502`。所有点均为
+`command_full=0`、controller/ack event drop=`0/0`，controller done 和 ack stop flag
+置位，XRT error 为空且 CU 回到 IDLE。该结果排除 controller、command FIFO、fake-ack、
+result FIFO 和 stop/finalization 的握手死锁；由于 vector phase 仍是 fake-ack，结果不进入
+PCG correctness、分段时间或性能图表。本地没有服务器 raw log，本记录按用户提供的
+服务器侧反馈登记。
+
 2026-07-08 低频 full graph demo UUID `9faa45b3-b6cb-1851-21c6-02fdd9a904bc`
 已被当前 probe demo 槽替换；其最小上板 timeout 结论只作为历史失败边界保留。
 2026-07-09 entry-probe 旧同步版 UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已在
@@ -67,12 +82,11 @@ RTL 中存在调度合并歧义，已由当前独立 monitor 版覆盖。更早�
 UUID `ad7b2a61-23d4-5c05-360d-acb2ee604830` 在服务器侧
 最小 smoke 停在 `Status[52]=14`，现已由 command/result 顺序修复版覆盖。更早的多槽
 checkpoint cmd-drain UUID `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107` 停在
-`Status[52]=11`。当前版下一步只跑
-`thermal2_n16 MAX_ITERS=0/1 KERNEL_TIMEOUT_SEC=20`，检查
-`Status[50]=0x43505242` 和 `Status[51]=2`；若 timeout，使用 `Status[54..59]` 的
-command attempts/full/accepted、ack receive/result send 和 controller result receive
-逐级定位握手边界。
-该版不晋级标准版，也不更新正式 `source.diff`。
+`Status[52]=11`。握手链路通过后，下一定位边界进入
+`CUPER_CALLIPEPLA_PROBE_MODE=loader_drain`、
+`CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1`：只恢复真实 strip ptr HBM 读取、16 路
+matrix-length fanout 和 `PE_Param` drain，继续使用 fake-ack，不恢复 matrix/vector
+datapath。当前握手 artifact 不晋级标准版，也不更新正式 `source.diff`。
 
 2026-07-10 对 thin-status 同步版的后续上板反馈显示 timeout 稳定停在
 `Status[52]=14`。同一源码生成的旧 `cmd_drain` 与正式 full-graph RTL 都在 valid 分支
@@ -80,5 +94,6 @@ command attempts/full/accepted、ack receive/result send 和 controller result r
 result，因此形成真实调度死锁。本轮修复后，两份 controller 报告都显示 7 个
 `vector_command_transaction` 和外层 `pcg_iteration_loop` 为 `Pipelined=no`；生成 RTL
 中 send-state 只检查 `Vector_Command_out_s_full_n`，wait-state 才读取
-`Vector_Result_in_s_empty_n`。当前独立 monitor 版已覆盖同主线 demo 槽；服务器上板前
-不更新 HTML 或正式 `source.diff`。
+`Vector_Result_in_s_empty_n`。当前独立 monitor 版已覆盖同主线 demo 槽并完成上述
+服务器侧握手验证；HTML 只新增 debug demo-only 边界，不把 fake-ack 数据混入 PCG
+correctness/性能图表，也不更新正式 `source.diff`。

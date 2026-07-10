@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla cmd-drain 独立握手 monitor artifact；controller/ack 用事件流报告 command full/accepted/result 进度，monitor 是唯一 Status writer；最终 DATA/KERNEL/HBM 为 138/500/450 MHz，请求 500 MHz DATA 下 routed timing 未收敛，等待服务器侧 `MAX_ITERS=0/1` 最小 smoke |
+| `cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla cmd-drain 独立握手 monitor artifact；controller/ack 用事件流报告 command full/accepted/result 进度，monitor 是唯一 Status writer；最终 DATA/KERNEL/HBM 为 138/500/450 MHz，请求 500 MHz DATA 下 routed timing 未收敛；服务器侧五组数据集 `MAX_ITERS=0/1` 和 n16 `10/100iter` 压测均返回 `event=99`、full/drop=0，已定性为握手通过的 debug 基线 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -1008,23 +1008,22 @@ artifact 已被当前顺序修复版覆盖。更早的多槽 checkpoint cmd-drai
 AXI-Lite 参数、BO 分配/同步和 Status/Metrics/Residuals mmap 写回链路在大规模下
 是通的。当前同步槽已由 entry-probe 覆盖为 cmd-drain，entry 结果只作为历史边界。
 
-服务器侧下一步先跑 cmd-drain 最小 controller fanout smoke：
+2026-07-11 服务器侧反馈确认当前 cmd-drain artifact 已完成 demo-only 握手验证：
 
-```bash
-make cuper-tapa-pcg-callipepla-run-hw \
-  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin \
-  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
-  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
+```text
+datasets: thermal2_n16, thermal2_n65536, thermal2_n131072,
+          thermal2_n262144, thermal2
+MAX_ITERS: 0 / 1; thermal2_n16 additionally 10 / 100
+result: event=99, command_full=0, controller/ack event drop=0/0,
+        controller done=1, ack stop=1, XRT error empty, CU IDLE
+counts: commands/results = 3/2, 8/7, 53/52, 503/502
 ```
 
-再补 `MAX_ITERS=1`。预期检查 probe magic `Status[50]=0x43505242`、`Status[51]=2`。
-若正常返回，`Status[52]=99`。若 timeout，mode 2 的 `Status[52..63]` 依次表示 last
-event、monitor heartbeat、command attempts、command full observations、command
-accepted、ack command received、ack result sent、controller result received、current
-phase、controller transaction state、ack heartbeat 和 flags/drop counters。attempts/full
-增长但 accepted 为 0 指向 command FIFO full；accepted 已增长但 ack receive 为 0 指向
-command FIFO/consumer；ack receive、result sent、controller receive 三者可继续定位
-fake-ack、result FIFO 或 controller read。该 artifact 不做 PCG diff/性能结论。
+本地没有服务器 raw log，本记录按用户提供的反馈登记。该结果排除 controller、command
+FIFO、fake-ack、result FIFO 和 stop/finalization 的握手死锁；由于仍是 fake-ack debug
+artifact，不做 PCG diff/性能结论。下一构建边界为 `loader_drain level=1`：恢复真实 strip
+ptr HBM 读取、16 路 matrix-length fanout 和 `PE_Param` drain，仍不恢复 Matrix_data、
+vector loader 或 SpMV core。
 旧 2026-07-08 低频 full-graph demo UUID
 `9faa45b3-b6cb-1851-21c6-02fdd9a904bc` 已被当前 probe demo 槽替换；它的
 `thermal2_n16 MAX_ITERS=0/1` timeout 结论只作为历史失败边界保留。
