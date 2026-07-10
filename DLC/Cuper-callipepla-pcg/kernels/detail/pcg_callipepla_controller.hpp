@@ -67,22 +67,12 @@ inline void PcgCallipepla_WriteStatusSlot(tapa::mmap<INDEX_TYPE> &Status,
 }
 #endif
 
-inline void PcgCallipepla_WriteVectorCommand(
+inline void PcgCallipepla_WriteVectorStop(
     tapa::ostream<PcgCallipeplaVectorCommand> &Vector_Command_out,
-    const PcgCallipeplaVectorCommand &command,
     INDEX_TYPE &vector_command_count) {
 #pragma HLS inline
-    Vector_Command_out.write(command);
+    Vector_Command_out.write(pcg_callipepla_make_vector_stop());
     ++vector_command_count;
-}
-
-inline PcgCallipeplaVectorResult PcgCallipepla_ReadVectorResult(
-    tapa::istream<PcgCallipeplaVectorResult> &Vector_Result_in,
-    INDEX_TYPE &vector_result_count) {
-#pragma HLS inline
-    const PcgCallipeplaVectorResult result = Vector_Result_in.read();
-    ++vector_result_count;
-    return result;
 }
 
 #ifdef CUPER_CALLIPEPLA_PROBE_ENABLED
@@ -149,6 +139,69 @@ inline void PcgCallipepla_WriteProbeControllerStatus(
     Status[63] = (batch_num << 16) ^ ((max_iters & 0xff) << 8) ^ (iterations & 0xff);
 }
 #endif
+
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(...) , __VA_ARGS__
+#else
+#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(...)
+#endif
+
+inline PcgCallipeplaVectorResult PcgCallipepla_ExchangeVectorCommand(
+    tapa::ostream<PcgCallipeplaVectorCommand> &Vector_Command_out,
+    tapa::istream<PcgCallipeplaVectorResult> &Vector_Result_in,
+    const PcgCallipeplaVectorCommand &command,
+    INDEX_TYPE &vector_command_count,
+    INDEX_TYPE &vector_result_count
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    ,
+    tapa::mmap<INDEX_TYPE> &Status,
+    const INDEX_TYPE command_accepted_checkpoint,
+    const INDEX_TYPE wait_result_checkpoint,
+    const INDEX_TYPE result_accepted_checkpoint
+#endif
+    ) {
+#pragma HLS inline
+    static constexpr INDEX_TYPE kSendCommand = 0;
+    static constexpr INDEX_TYPE kWaitResult = 1;
+    static constexpr INDEX_TYPE kTransactionDone = 2;
+
+    INDEX_TYPE state = kSendCommand;
+    PcgCallipeplaVectorResult result =
+        pcg_callipepla_make_vector_result(command.phase);
+
+vector_command_transaction:
+    while (state != kTransactionDone) {
+#pragma HLS loop_flatten off
+#pragma HLS pipeline off
+        // Keep command acceptance and result consumption in different FSM states.
+        if (state == kSendCommand) {
+            if (Vector_Command_out.try_write(command)) {
+                ++vector_command_count;
+                state = kWaitResult;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+                if (command_accepted_checkpoint >= 0) {
+                    PcgCallipepla_WriteProbeControllerCheckpoint(
+                        Status, command_accepted_checkpoint);
+                }
+                if (wait_result_checkpoint >= 0) {
+                    PcgCallipepla_WriteProbeControllerCheckpoint(
+                        Status, wait_result_checkpoint);
+                }
+#endif
+            }
+        } else if (Vector_Result_in.try_read(result)) {
+            ++vector_result_count;
+            state = kTransactionDone;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+            if (result_accepted_checkpoint >= 0) {
+                PcgCallipepla_WriteProbeControllerCheckpoint(
+                    Status, result_accepted_checkpoint);
+            }
+#endif
+        }
+    }
+    return result;
+}
 
 void PcgCallipepla_Controller(
     tapa::ostream<CuperSpmvServiceCommand> &Ptr_Command_out,
@@ -331,34 +384,25 @@ void PcgCallipepla_Controller(
                                             kPcgCallipeplaPhaseInitSpmv,
                                             vector_command_count);
 #endif
-        PcgCallipepla_WriteVectorCommand(
-            Vector_Command_out,
-            pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseInitSpmv,
-                                               -1,
-                                               x_bank,
-                                               x_bank,
-                                               r_bank,
-                                               r_bank,
-                                               p_bank,
-                                               p_bank,
-                                               0.0,
-                                               0.0),
-            vector_command_count);
-#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(61,
-                                            kPcgCallipeplaPhaseInitSpmv,
-                                            vector_command_count);
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(70,
-                                            kPcgCallipeplaPhaseInitSpmv,
-                                            vector_result_count);
-#endif
-        (void)PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                             vector_result_count);
-#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(71,
-                                            kPcgCallipeplaPhaseInitSpmv,
-                                            vector_result_count);
-#endif
+        const PcgCallipeplaVectorResult init_spmv_result =
+            PcgCallipepla_ExchangeVectorCommand(
+                Vector_Command_out,
+                Vector_Result_in,
+                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseInitSpmv,
+                                                   -1,
+                                                   x_bank,
+                                                   x_bank,
+                                                   r_bank,
+                                                   r_bank,
+                                                   p_bank,
+                                                   p_bank,
+                                                   0.0,
+                                                   0.0),
+                vector_command_count,
+                vector_result_count
+                PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                    Status, 61, 70, 71));
+        (void)init_spmv_result;
         ++spmv_rounds;
         init_spmv_work += static_cast<unsigned long long>(float_packet_count) +
                           static_cast<unsigned long long>(double_packet_count);
@@ -410,35 +454,24 @@ void PcgCallipepla_Controller(
                                             kPcgCallipeplaPhaseInitZp,
                                             vector_command_count);
 #endif
-        PcgCallipepla_WriteVectorCommand(
-            Vector_Command_out,
-            pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseInitZp,
-                                               -1,
-                                               x_bank,
-                                               x_bank,
-                                               r_bank,
-                                               r_bank,
-                                               p_bank,
-                                               p_bank,
-                                               0.0,
-                                               0.0),
-            vector_command_count);
-#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(91,
-                                            kPcgCallipeplaPhaseInitZp,
-                                            vector_command_count);
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(100,
-                                            kPcgCallipeplaPhaseInitZp,
-                                            vector_result_count);
-#endif
         const PcgCallipeplaVectorResult init_result =
-            PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                           vector_result_count);
-#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-        PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(101,
-                                            init_result.phase,
-                                            vector_result_count);
-#endif
+            PcgCallipepla_ExchangeVectorCommand(
+                Vector_Command_out,
+                Vector_Result_in,
+                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseInitZp,
+                                                   -1,
+                                                   x_bank,
+                                                   x_bank,
+                                                   r_bank,
+                                                   r_bank,
+                                                   p_bank,
+                                                   p_bank,
+                                                   0.0,
+                                                   0.0),
+                vector_command_count,
+                vector_result_count
+                PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                    Status, 91, 100, 101));
         rz = init_result.rz;
         rr = init_result.rr;
         Residuals[0] = rr;
@@ -500,22 +533,24 @@ void PcgCallipepla_Controller(
                                         kPcgCallipeplaPhaseIterDot,
                                         iter);
 #endif
-            PcgCallipepla_WriteVectorCommand(
-                Vector_Command_out,
-                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseIterDot,
-                                                   iter,
-                                                   x_bank,
-                                                   x_next_bank,
-                                                   r_bank,
-                                                   r_next_bank,
-                                                   p_bank,
-                                                   p_next_bank,
-                                                   0.0,
-                                                   0.0),
-                vector_command_count);
             const PcgCallipeplaVectorResult iter_dot =
-                PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                               vector_result_count);
+                PcgCallipepla_ExchangeVectorCommand(
+                    Vector_Command_out,
+                    Vector_Result_in,
+                    pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseIterDot,
+                                                       iter,
+                                                       x_bank,
+                                                       x_next_bank,
+                                                       r_bank,
+                                                       r_next_bank,
+                                                       p_bank,
+                                                       p_next_bank,
+                                                       0.0,
+                                                       0.0),
+                    vector_command_count,
+                    vector_result_count
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                        Status, -1, -1, -1));
             p_ap = iter_dot.p_ap;
             ++spmv_rounds;
             iter_spmv_work +=
@@ -559,21 +594,25 @@ void PcgCallipepla_Controller(
             pcg_callipepla_stage_mark(Stage_Event_out,
                                       kPcgCallipeplaStageUpdateX,
                                       kPcgCallipeplaStageBegin);
-            PcgCallipepla_WriteVectorCommand(
-                Vector_Command_out,
-                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateX,
-                                                   iter,
-                                                   x_bank,
-                                                   x_next_bank,
-                                                   r_bank,
-                                                   r_next_bank,
-                                                   p_bank,
-                                                   p_next_bank,
-                                                   alpha,
-                                                   0.0),
-                vector_command_count);
-            (void)PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                                 vector_result_count);
+            const PcgCallipeplaVectorResult update_x_result =
+                PcgCallipepla_ExchangeVectorCommand(
+                    Vector_Command_out,
+                    Vector_Result_in,
+                    pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateX,
+                                                       iter,
+                                                       x_bank,
+                                                       x_next_bank,
+                                                       r_bank,
+                                                       r_next_bank,
+                                                       p_bank,
+                                                       p_next_bank,
+                                                       alpha,
+                                                       0.0),
+                    vector_command_count,
+                    vector_result_count
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                        Status, -1, -1, -1));
+            (void)update_x_result;
             x_bank = x_next_bank;
             update_x_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
             pcg_callipepla_stage_mark(Stage_Event_out,
@@ -583,21 +622,25 @@ void PcgCallipepla_Controller(
             pcg_callipepla_stage_mark(Stage_Event_out,
                                       kPcgCallipeplaStageUpdateR,
                                       kPcgCallipeplaStageBegin);
-            PcgCallipepla_WriteVectorCommand(
-                Vector_Command_out,
-                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateR,
-                                                   iter,
-                                                   x_bank,
-                                                   x_bank,
-                                                   r_bank,
-                                                   r_next_bank,
-                                                   p_bank,
-                                                   p_next_bank,
-                                                   alpha,
-                                                   0.0),
-                vector_command_count);
-            (void)PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                                 vector_result_count);
+            const PcgCallipeplaVectorResult update_r_result =
+                PcgCallipepla_ExchangeVectorCommand(
+                    Vector_Command_out,
+                    Vector_Result_in,
+                    pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateR,
+                                                       iter,
+                                                       x_bank,
+                                                       x_bank,
+                                                       r_bank,
+                                                       r_next_bank,
+                                                       p_bank,
+                                                       p_next_bank,
+                                                       alpha,
+                                                       0.0),
+                    vector_command_count,
+                    vector_result_count
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                        Status, -1, -1, -1));
+            (void)update_r_result;
             r_bank = r_next_bank;
             update_r_work += static_cast<unsigned long long>(float_packet_count) +
                              2ULL * static_cast<unsigned long long>(double_packet_count);
@@ -608,22 +651,25 @@ void PcgCallipepla_Controller(
             pcg_callipepla_stage_mark(Stage_Event_out,
                                       kPcgCallipeplaStageApplyMInv,
                                       kPcgCallipeplaStageBegin);
-            PcgCallipepla_WriteVectorCommand(
-                Vector_Command_out,
-                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseApplyMInvDot,
-                                                   iter,
-                                                   x_bank,
-                                                   x_bank,
-                                                   r_bank,
-                                                   r_bank,
-                                                   p_bank,
-                                                   p_next_bank,
-                                                   alpha,
-                                                   0.0),
-                vector_command_count);
             const PcgCallipeplaVectorResult rz_result =
-                PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                               vector_result_count);
+                PcgCallipepla_ExchangeVectorCommand(
+                    Vector_Command_out,
+                    Vector_Result_in,
+                    pcg_callipepla_make_vector_command(
+                        kPcgCallipeplaPhaseApplyMInvDot,
+                        iter,
+                        x_bank,
+                        x_bank,
+                        r_bank,
+                        r_bank,
+                        p_bank,
+                        p_next_bank,
+                        alpha,
+                        0.0),
+                    vector_command_count,
+                    vector_result_count
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                        Status, -1, -1, -1));
             const double rz_new = rz_result.rz;
             const double rr_new = rz_result.rr;
             apply_m_inv_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
@@ -707,21 +753,25 @@ void PcgCallipepla_Controller(
             pcg_callipepla_stage_mark(Stage_Event_out,
                                       kPcgCallipeplaStageUpdateP,
                                       kPcgCallipeplaStageBegin);
-            PcgCallipepla_WriteVectorCommand(
-                Vector_Command_out,
-                pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateP,
-                                                   iter,
-                                                   x_bank,
-                                                   x_bank,
-                                                   r_bank,
-                                                   r_bank,
-                                                   p_bank,
-                                                   p_next_bank,
-                                                   alpha,
-                                                   beta),
-                vector_command_count);
-            (void)PcgCallipepla_ReadVectorResult(Vector_Result_in,
-                                                 vector_result_count);
+            const PcgCallipeplaVectorResult update_p_result =
+                PcgCallipepla_ExchangeVectorCommand(
+                    Vector_Command_out,
+                    Vector_Result_in,
+                    pcg_callipepla_make_vector_command(kPcgCallipeplaPhaseUpdateP,
+                                                       iter,
+                                                       x_bank,
+                                                       x_bank,
+                                                       r_bank,
+                                                       r_bank,
+                                                       p_bank,
+                                                       p_next_bank,
+                                                       alpha,
+                                                       beta),
+                    vector_command_count,
+                    vector_result_count
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
+                        Status, -1, -1, -1));
+            (void)update_p_result;
             p_bank = p_next_bank;
             update_p_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
             pcg_callipepla_stage_mark(Stage_Event_out,
@@ -773,9 +823,7 @@ send_matrix_stop_probe:
                                         kPcgCallipeplaPhaseInitSpmv,
                                         vector_command_count);
 #endif
-    PcgCallipepla_WriteVectorCommand(Vector_Command_out,
-                                     pcg_callipepla_make_vector_stop(),
-                                     vector_command_count);
+    PcgCallipepla_WriteVectorStop(Vector_Command_out, vector_command_count);
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
     PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(141,
                                         kPcgCallipeplaPhaseInitSpmv,
@@ -915,3 +963,5 @@ write_stage_metrics:
 #undef PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT
 #endif
 }
+
+#undef PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS

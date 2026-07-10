@@ -38,6 +38,11 @@
 
 - `pcg_callipepla_controller.hpp` 是标量 controller：发 SpMV/vector command，
   计算 alpha/beta，维护 convergence/status/metrics。
+- controller 中七条有返回值的 vector phase 统一经过
+  `PcgCallipepla_ExchangeVectorCommand()`：state `0` 只尝试 `try_write(command)`，
+  command 接受后 state 才变为 `1`；state `1` 只尝试 `try_read(result)`，读到后变为
+  state `2`。该循环禁止 pipeline/flatten，读代码时不要再把 command 和 result 当成
+  可被 HLS 同周期重排的两个独立 blocking 调用。
 - `pcg_callipepla_vector_loader.hpp` 把当前 X 或 P bank 从 FP64 `double_v8`
   转成 SpMV service 需要的 FP32 `float_v16`。
 - `pcg_callipepla_vector_phases.hpp` 执行 init residual、init z/p、pAp dot、
@@ -62,12 +67,12 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已通过完整 `thermal2` 入口/mmap
   上板验证。
 - `cmd_drain`：保留 controller 和 stage timer，ptr/matrix/vector command consumer
-  全部换成 drain/fake ack。当前同步 xclbin 就是该模式；thin-status 版入口只写一次
-  `Status[50]=0x43505242`、`Status[51]=2` 和基础规模信息，运行中 checkpoint 只写
-  `Status[52]`。`Status[52]` 覆盖 stage begin、条件判断、ptr/matrix/spmv-vector
-  command、vector fake command/result read 和 stop/finalization。timeout 分析只以
-  `Status[52]` 为准，运行中的 `Status[58]/Status[59]` 可能是 stale 的
-  `detail0/detail1`。
+  全部换成 drain/fake ack。当前同步的 `20260710-demo` 就是修复后 controller 的该模式；
+  thin-status 版入口只写一次 `Status[50]=0x43505242`、`Status[51]=2` 和基础规模信息，
+  运行中 checkpoint 只写 `Status[52]`。`Status[52]` 覆盖 stage begin、条件判断、
+  ptr/matrix/spmv-vector command、vector fake command/result read 和
+  stop/finalization。timeout 分析只以 `Status[52]` 为准，运行中的
+  `Status[58]/Status[59]` 可能是 stale 的 `detail0/detail1`。
 - `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
 
 ## Metrics

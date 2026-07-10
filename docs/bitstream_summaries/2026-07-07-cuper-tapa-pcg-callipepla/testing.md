@@ -739,3 +739,110 @@ hold failing endpoints=0
 该版本仍是 debug artifact，尚未完成服务器侧 demo-only smoke，不晋级标准版，也不
 更新正式 `source.diff`。服务器侧先跑 `thermal2_n16 MAX_ITERS=0`；若返回再跑
 `MAX_ITERS=1`，均使用 `KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1`。
+
+## 2026-07-10 controller command/result 顺序修复
+
+thin-status 同步版后续服务器侧最小 smoke timeout 停在 `Status[52]=14`。旧
+`cmd_drain` 与正式 full-graph XO 的 controller RTL 都把
+`Vector_Result_in_s_empty_n` 纳入 valid 分支入口条件，导致 vector command 尚未发出
+时先等待 result；vector phase 又必须先收到 command 才能产生 result，构成调度死锁。
+
+本轮直接修复真实 `PcgCallipepla_Controller`，没有增加 Tau bypass 或新 probe mode。
+配对的 vector command/result 改为 nonblocking 状态事务，覆盖初始化和迭代的全部七条
+路径。
+
+软件 smoke 使用独立 build dir：
+
+```bash
+make run-cuper-tapa-pcg-callipepla \
+  CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-orderfix-cmd-drain-build \
+  CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0 DIFF_TOL=1e-3
+
+make run-cuper-tapa-pcg-callipepla \
+  CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-orderfix-cmd-drain-build \
+  CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0 DIFF_TOL=1e-3
+
+make run-cuper-tapa-pcg-callipepla \
+  CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-orderfix-full-build \
+  CUPER_CALLIPEPLA_PROBE_MODE= \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0 DIFF_TOL=1e-3
+
+make run-cuper-tapa-pcg-callipepla \
+  CUPER_TAPA_PCG_CALLIPEPLA_BUILD_DIR=cuper-tapa-pcg-callipepla-orderfix-full-build \
+  CUPER_CALLIPEPLA_PROBE_MODE= \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=1 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=0 DIFF_TOL=1e-3
+```
+
+结果：四条均返回。`cmd_drain` counters 保持既有语义：
+
+```text
+MAX_ITERS=0: stage=99, spmv_rounds=1, vector_cmds=3, vector_acks=2
+MAX_ITERS=1: stage=99, spmv_rounds=2, vector_cmds=8, vector_acks=7
+full MAX_ITERS=0: max_abs_diff=0, rr=110.4105301696
+full MAX_ITERS=1: converged, max_abs_diff=1.086781531434e-08
+```
+
+分别生成 `cmd_drain` 与无 probe 正式图 XO：
+
+```text
+cuper-tapa-pcg-callipepla-orderfix-cmd-drain-xo-build/CuperPcgCallipepla.xo
+cuper-tapa-pcg-callipepla-orderfix-full-xo-build/CuperPcgCallipepla.xo
+```
+
+两份 `PcgCallipepla_Controller_csynth.rpt` 均显示：两个初始化事务、外层
+`pcg_iteration_loop` 和其中五个迭代事务全部 `Pipelined=no`。两份生成 RTL 均满足：
+
+- vector command write 条件不依赖 `Vector_Result_in_s_empty_n`；
+- state `0` 由 `Vector_Command_out_s_full_n` 成功握手切到 state `1`；
+- result read 只在 state 非 `0` 且非 `2` 时使能，成功后切到 state `2`；
+- 正式图 valid 分支入口 block 条件不再包含 result-empty。
+
+通过 XO 审查后，使用已审查的 `cmd_drain` XO 启动 100 MHz Vitis link：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-orderfix-cmd-drain-hw
+build dir: cuper-tapa-pcg-callipepla-orderfix-cmd-drain-xo-build/
+log: logs/cuper_tapa_pcg_callipepla_orderfix_cmd_drain_hw_20260710_125452.log
+requested DATA clock: 100 MHz
+final clocks: DATA/KERNEL/HBM = 100/500/450 MHz
+```
+
+Vitis link 在 2026-07-10 14:43 完成，`Run Status: impl Complete`，POST-VPL `0 errors`，
+总耗时 `1h45m07s`。routed timing summary：
+
+```text
+WNS=0.000 ns
+TNS=0.000 ns
+setup failing endpoints=0
+WHS=0.009 ns
+THS=0.000 ns
+hold failing endpoints=0
+```
+
+同步 artifact：
+
+```text
+file: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin
+UUID: d46c3285-6cc2-1b02-9350-1ad3dadb5c56
+SHA256: e24b1bf9e8e5b2c5d262fbb0fed90154940867d95020f43618cb4d4191478cdd
+INFO SHA256: 091f9db8072425596743b10255e6227928bf1d4a5e0c0898ad2e4f46cb95ed6c
+```
+
+该文件已覆盖同一 `cuper-tapa-pcg` demo 槽，旧 `20260709-demo` 动态结论只作为历史
+定位记录。服务器侧仍需先跑：
+
+```bash
+make cuper-tapa-pcg-callipepla-run-hw \
+  BITFILE=395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin \
+  DATASET=data/suitesparse/Schmid/csr/thermal2_n16 \
+  MAX_ITERS=0 KERNEL_TIMEOUT_SEC=20 LIVE_STATUS_POLL_SEC=1 DIFF_TOL=1e-3
+```
+
+返回后再补 `MAX_ITERS=1`。上板前不更新 HTML，也不更新正式 `source.diff`；该 artifact
+不晋级标准 bitstream。

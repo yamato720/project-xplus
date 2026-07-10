@@ -56,6 +56,25 @@
 - SpMV 边界仍是 FP32 packed `float_v16`；PCG 状态和 dot/update 保持 FP64
   `double_v8`。
 
+## 2026-07-10 command/result 顺序修复
+
+- `pcg_callipepla_controller.hpp` 不再对配对的 vector command/result 使用分离的
+  blocking `write()` / `read()`。新的事务循环包含 `send-command`、`wait-result`、
+  `done` 三态，只在 `try_write()` 成功后递增 command counter 并进入等待态，只在
+  `try_read()` 成功后递增 result counter 并结束事务。
+- 状态循环显式设置 `loop_flatten off` 和 `pipeline off`，避免 HLS 把 result read
+  提前到 command write 之前。相同事务模式覆盖 `InitSpmv`、`InitZp`、`IterDot`、
+  `UpdateX`、`UpdateR`、`ApplyMInvDot`、`UpdateP`。
+- `cmd_drain` checkpoint 保持原编号：`61/91` 只在 command 真正接受后写入，
+  `70/100` 表示已进入 result 等待态，`71/101` 只在 result 真正读到后写入；
+  `20..51` 和 `110+` 语义不变。
+- 单向 stop command 仍使用 blocking write；它不等待 result，不属于本次配对事务。
+- 顶层签名、参数顺序、AXI-Lite offsets、HBM mapping、probe mode 名称和真实
+  Tau/dimension 判断均未改变。
+- 修复后的 `cmd_drain` 已生成 100 MHz timing-clean xclbin，并同步为
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin`。该文件只验证 controller
+  事务顺序和收尾边界，不代表完整 SpMV/PCG datapath 已通过硬件验证。
+
 ## Host
 
 - 默认加载 Project-XPlus CSR dataset，并直接打包原始矩阵 `A`，不拆 `A=D+R`。
