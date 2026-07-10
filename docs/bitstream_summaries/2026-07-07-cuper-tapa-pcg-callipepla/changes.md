@@ -71,9 +71,36 @@
 - 单向 stop command 仍使用 blocking write；它不等待 result，不属于本次配对事务。
 - 顶层签名、参数顺序、AXI-Lite offsets、HBM mapping、probe mode 名称和真实
   Tau/dimension 判断均未改变。
-- 修复后的 `cmd_drain` 已生成 100 MHz timing-clean xclbin，并同步为
-  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin`。该文件只验证 controller
-  事务顺序和收尾边界，不代表完整 SpMV/PCG datapath 已通过硬件验证。
+- 修复后的 thin-status `cmd_drain` 曾生成 100 MHz timing-clean xclbin；该历史 artifact
+  已由下面的独立握手 monitor 版覆盖，不再对应同步槽中的当前文件。
+
+## 2026-07-10 独立握手 monitor
+
+- 顺序修复版上板稳定显示 `Status[52]=60`，但生成 RTL 中事务内部的 `61/70/71`
+  Status 写已被 HLS 合并或消除。因此 `60` 只能证明 controller 到达首条 vector
+  transaction，不能证明 `try_write()` 没有接受 command。
+- `cmd_drain` 新增 controller/ack 两条窄 `PcgCallipeplaProbeEvent` stream。controller
+  直接采样 `Vector_Command_out.full()`，分别记录 command attempt、full、accepted、
+  wait-result 和 result-received；fake-ack 分别记录 command-received、result-sent 和
+  stop。
+- 新增 `PcgCallipepla_Probe_HandshakeMonitor`，它是 `cmd_drain` 下唯一的 Status mmap
+  writer。controller 不再直接写细粒度 Status，因此握手事件不会再被 controller 的
+  AXI 写调度合并掉。monitor 每 `2^22` 个循环更新 heartbeat，并在 controller/ack
+  都完成后写 `Status[52]=99` 和标准完成状态。
+- `Status[50..63]` 改为 handshake 语义：magic、mode、last event、monitor heartbeat、
+  command attempts/full/accepted、ack command/result、controller result、当前 phase、
+  controller state、ack heartbeat 和 packed flags/drop counters。host 对 mode 2 解码
+  这些名字；entry/loader mode 保持旧输出标签。
+- `cmd_drain` fake-ack 删除按 iteration 做的 FP64 division，改为固定安全结果：
+  InitZp 返回 `rz=rr=1`，IterDot 返回 `p_ap=1`，ApplyMInvDot 返回 `rz=rr=0.5`。
+  生成 HLS 报告显示该 task 非流水、0 DSP、无 divider。
+- 顶层 kernel 名、参数顺序、AXI-Lite offsets、HBM mapping、probe mode 名称和真实
+  full graph controller 事务均未改变；本轮仍是定位 artifact，不更新正式
+  `source.diff`。
+- 独立 monitor 版已完成 `impl Complete` 并覆盖
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin`。最终 DATA/KERNEL/HBM
+  clock 为 `138/500/450 MHz`；请求 500 MHz DATA 下 routed timing 未收敛，WNS
+  `-5.200 ns`、TNS `-26783.914 ns`，因此该文件只作为待上板的 debug artifact。
 
 ## Host
 

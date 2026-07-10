@@ -846,3 +846,106 @@ make cuper-tapa-pcg-callipepla-run-hw \
 
 返回后再补 `MAX_ITERS=1`。上板前不更新 HTML，也不更新正式 `source.diff`；该 artifact
 不晋级标准 bitstream。
+
+## 2026-07-10 独立握手 monitor 定位版
+
+顺序修复版 UUID `d46c3285-6cc2-1b02-9350-1ad3dadb5c56` 在服务器侧
+`thermal2_n16 MAX_ITERS=0` timeout，最后可见 `Status[52]=60`。同一 host、板卡和
+数据运行旧 entry-probe 正常返回，当前源码 software simulation 也正常，因此问题仍在
+综合后硬件边界。
+
+重新检查顺序修复版 XO 后发现：controller schedule 虽然保留 state 0 command
+`nbwrite` 和 state 1 result `nbread`，但事务内部的 `61/70/71` Status 写已被 HLS
+合并/消除，controller RTL 只保留常量 `60`。所以 `60` 不能继续解释成 command 未被
+接受；它也可能表示 command 已接受但 fake-ack/result/controller 后续任一点未推进。
+
+本轮在现有 `cmd_drain` mode 中加入独立事件 monitor，不新增 probe mode。软件 smoke：
+
+```text
+cmd_drain MAX_ITERS=0:
+  event=99 command_attempts=3 command_full=0 command_accepted=3
+  ack_command_received=2 ack_result_sent=2 controller_result_received=2
+  flags=0xe controller_done=1 ack_stop=1 drops=0/0
+
+cmd_drain MAX_ITERS=1:
+  event=99 command_attempts=8 command_full=0 command_accepted=8
+  ack_command_received=7 ack_result_sent=7 controller_result_received=7
+  flags=0xe controller_done=1 ack_stop=1 drops=0/0
+
+loader_drain level=1 MAX_ITERS=0:
+  stage=99 vector_cmds=3 vector_acks=2
+
+full graph MAX_ITERS=0:
+  max_abs_diff=0, rr=110.4105301696
+
+full graph MAX_ITERS=1:
+  converged, max_abs_diff=1.086781531434e-08
+```
+
+XO 目录：
+
+```text
+cuper-tapa-pcg-callipepla-handshake-monitor-cmd-drain-xo-build/
+```
+
+XO 静态审查通过：
+
+- `PcgCallipepla_Controller.v` 没有 Status/m_axi_Status 端口；
+  `PcgCallipepla_Probe_HandshakeMonitor` 是顶层唯一 Status master。
+- controller schedule 同时保留 `NbWriteReq` 对 `Vector_Command_out.full()` 的直接采样
+  和 `NbWrite` command 尝试；result `NbRead` predicate 仍是 state 非 0/2。
+- controller、monitor 和 fake-ack RTL 中保留 handshake event 常量，正常完成常量
+  `99` 由 monitor 写回。
+- fake-ack `probe_vector_ack_loop` 为 `Pipelined=no`、iteration latency 2、DSP 0，
+  RTL/report 中没有 divider。
+
+使用已审查 XO 启动硬件 link：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-handshake-monitor-hw
+log: logs/cuper_tapa_pcg_callipepla_handshake_monitor_hw_20260710_174735.log
+build dir: cuper-tapa-pcg-callipepla-handshake-monitor-cmd-drain-xo-build/
+requested DATA/KERNEL clock: 500/500 MHz
+```
+
+Vitis link 已完成：
+
+```text
+[21:10:31] Run vpl: FINISHED. Run Status: impl Complete!
+Check VPL, containing 1 checks, has run: 0 errors
+Check POST-VPL, containing 1 checks, has run: 0 errors
+Total elapsed time: 3h 23m 3s
+```
+
+最终 xclbin 时钟与 routed timing：
+
+```text
+DATA/KERNEL/HBM clock: 138 / 500 / 450 MHz
+DATA requested/achieved: 500 / 138.8 MHz
+WNS=-5.200 ns
+TNS=-26783.914 ns
+setup failing endpoints=24766
+WHS=0.009 ns
+THS=0.000 ns
+hold failing endpoints=0
+```
+
+实现和封装成功，但请求 500 MHz DATA 下 setup timing 未收敛；该 artifact 只用于
+握手定位，不作为 timing-clean 或性能候选。已覆盖同步到同一个 full-PCG demo 槽：
+
+```text
+file: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin
+UUID: 4a272f84-1e4d-fdb8-0cfa-1fa5e77f433c
+SHA256: 840018ee2c1cb30e7e8ed6f5f6c815e9abf830f9e060de850bfc6aeecb17198c
+INFO SHA256: 9c62740088b12652bf9ee3249af67b21636118ad8de8b0532b4aa93f8bb411b8
+```
+
+旧顺序修复 UUID `d46c3285-6cc2-1b02-9350-1ad3dadb5c56` 的 `Status[52]=60`
+timeout 结论只作为历史记录，不再对应当前同步文件。新 artifact 上板前不更新 HTML，
+也不更新正式 `source.diff`。
+
+板上判定：attempts 增长且 full 增长但 accepted 为 0，说明 command FIFO `full_n`
+未开放；full 为 0 但 accepted 为 0，说明 `nbwrite` 实现异常；accepted 大于 0 但
+ack receive 为 0，问题在 command FIFO/consumer；ack receive 大于 result sent，问题在
+fake-ack；result sent 大于 controller received，问题在 result FIFO/controller read；
+controller received 已增长但未完成，则继续查 stage timer、stop 或 finalization。

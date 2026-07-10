@@ -481,6 +481,54 @@ void print_status_range(const char* label,
     std::cerr << "\n";
 }
 
+void print_callipepla_probe_fields(std::ostream& output,
+                                   const char* label,
+                                   const AlignedVector<INDEX_TYPE>& status) {
+    if (status[51] != 2) {
+        output << "[" << label << "] magic=0x" << std::hex << status[50]
+               << std::dec
+               << " mode_id=" << status[51]
+               << " stage=" << status[52]
+               << " spmv_rounds=" << status[53]
+               << " spmv_cmds_with_stop=" << status[54]
+               << " matrix_cmds_with_stop=" << status[55]
+               << " vector_cmds=" << status[56]
+               << " vector_acks=" << status[57]
+               << " detail0=" << status[58]
+               << " detail1=" << status[59]
+               << " slot60=" << status[60]
+               << " slot61=" << status[61]
+               << " slot62=" << status[62]
+               << " slot63=" << status[63]
+               << "\n";
+        return;
+    }
+
+    const uint32_t flags = static_cast<uint32_t>(status[63]);
+    output << "[" << label << "] magic=0x" << std::hex << status[50]
+           << std::dec
+           << " mode_id=" << status[51]
+           << " event=" << status[52]
+           << " monitor_heartbeat=" << status[53]
+           << " command_attempts=" << status[54]
+           << " command_full=" << status[55]
+           << " command_accepted=" << status[56]
+           << " ack_command_received=" << status[57]
+           << " ack_result_sent=" << status[58]
+           << " controller_result_received=" << status[59]
+           << " current_phase=" << status[60]
+           << " controller_state=" << status[61]
+           << " ack_heartbeat=" << status[62]
+           << " flags=0x" << std::hex << flags << std::dec
+           << " last_full=" << ((flags >> 0) & 1)
+           << " last_write_success=" << ((flags >> 1) & 1)
+           << " controller_done=" << ((flags >> 2) & 1)
+           << " ack_stop=" << ((flags >> 3) & 1)
+           << " controller_event_drops=" << ((flags >> 8) & 0xff)
+           << " ack_event_drops=" << ((flags >> 16) & 0xff)
+           << "\n";
+}
+
 void print_callipepla_snapshot(const char* label,
                                const AlignedVector<INDEX_TYPE>& status,
                                const AlignedVector<double>& metrics,
@@ -496,7 +544,7 @@ void print_callipepla_snapshot(const char* label,
               << " residual0=" << residuals[0]
               << " ctrl=0x" << std::hex << ctrl << std::dec << "\n";
     if (callipepla_probe_present(status)) {
-        print_status_range(label, status, 50, 63);
+        print_callipepla_probe_fields(std::cerr, label, status);
     } else if (callipepla_trace_present(status)) {
         print_status_range(label, status, 16, 31);
         print_status_range(label, status, 32, 47);
@@ -836,22 +884,7 @@ int main(int argc, char** argv) {
         std::cout << "\n";
 
         if (callipepla_probe_present(status)) {
-            std::cout << std::fixed << std::setprecision(0);
-            std::cout << "[probe] magic=0x" << std::hex << status[50] << std::dec
-                      << " mode_id=" << status[51]
-                      << " stage=" << status[52]
-                      << " spmv_rounds=" << status[53]
-                      << " spmv_cmds_with_stop=" << status[54]
-                      << " matrix_cmds_with_stop=" << status[55]
-                      << " vector_cmds=" << status[56]
-                      << " vector_acks=" << status[57]
-                      << " detail0=" << status[58]
-                      << " detail1=" << status[59]
-                      << " slot60=" << status[60]
-                      << " slot61=" << status[61]
-                      << " slot62=" << status[62]
-                      << " slot63=" << status[63]
-                      << "\n";
+            print_callipepla_probe_fields(std::cout, "probe", status);
             return 0;
         }
 

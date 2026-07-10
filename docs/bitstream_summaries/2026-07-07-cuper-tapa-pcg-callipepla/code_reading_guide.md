@@ -67,12 +67,11 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   UUID `7ab50484-4649-ffd5-dd5c-0925c61a9504` 已通过完整 `thermal2` 入口/mmap
   上板验证。
 - `cmd_drain`：保留 controller 和 stage timer，ptr/matrix/vector command consumer
-  全部换成 drain/fake ack。当前同步的 `20260710-demo` 就是修复后 controller 的该模式；
-  thin-status 版入口只写一次 `Status[50]=0x43505242`、`Status[51]=2` 和基础规模信息，
-  运行中 checkpoint 只写 `Status[52]`。`Status[52]` 覆盖 stage begin、条件判断、
-  ptr/matrix/spmv-vector command、vector fake command/result read 和
-  stop/finalization。timeout 分析只以 `Status[52]` 为准，运行中的
-  `Status[58]/Status[59]` 可能是 stale 的 `detail0/detail1`。
+  全部换成 drain/fake ack。最新源码不再让 controller 直接写 Status；controller 和
+  fake-ack 分别向事件 stream 发握手事件，独立
+  `PcgCallipepla_Probe_HandshakeMonitor` 是 mode 2 唯一 Status writer。controller 在
+  每次 command attempt 前直接读取 `Vector_Command_out.full()`，因此 timeout 时可区分
+  FIFO full、command 已接受、ack 未读、result 未写或 controller 未读。
 - `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
 
 ## Metrics
@@ -81,9 +80,12 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   vector packet count、matrix len。
 - `Status[8..15]` 是 live progress snapshot。
 - Probe magic 是 `Status[50]=0x43505242`；`Status[51]` 是 mode id，
-  `1/2/3` 对应 `entry/cmd_drain/loader_drain`。最终完成后 `Status[52..63]`
-  记录 stage/checkpoint、SpMV/matrix/vector command 计数、`detail0/detail1` 和
-  基础规模参数；thin-status 运行中只保证 `Status[52]` 最新。
+  `1/2/3` 对应 `entry/cmd_drain/loader_drain`。mode 2 的握手布局为：`52` last event、
+  `53` monitor heartbeat、`54` command attempts、`55` command full observations、
+  `56` command accepted、`57` ack command received、`58` ack result sent、`59`
+  controller result received、`60` current phase、`61` controller transaction state、
+  `62` ack heartbeat、`63` flags/drop counters。正常完成时 `52=99`；mode 1/3 保持旧
+  probe counter 布局。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。

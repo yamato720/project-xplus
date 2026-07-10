@@ -141,9 +141,35 @@ inline void PcgCallipepla_WriteProbeControllerStatus(
 #endif
 
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(...) , __VA_ARGS__
+inline void PcgCallipepla_ControllerProbeTryWrite(
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out,
+    INDEX_TYPE &drop_count,
+    const INDEX_TYPE event,
+    const INDEX_TYPE phase,
+    const INDEX_TYPE value0,
+    const INDEX_TYPE value1) {
+#pragma HLS inline
+    if (!Probe_Event_out.try_write(
+            pcg_callipepla_make_probe_event(event, phase, value0, value1))) {
+        drop_count = pcg_callipepla_probe_saturating_increment(
+            drop_count, 0xff);
+    }
+}
+
+inline void PcgCallipepla_ControllerProbeWrite(
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out,
+    const INDEX_TYPE event,
+    const INDEX_TYPE phase,
+    const INDEX_TYPE value0,
+    const INDEX_TYPE value1) {
+#pragma HLS inline
+    Probe_Event_out.write(
+        pcg_callipepla_make_probe_event(event, phase, value0, value1));
+}
+
+#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(...) , __VA_ARGS__
 #else
-#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(...)
+#define PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(...)
 #endif
 
 inline PcgCallipeplaVectorResult PcgCallipepla_ExchangeVectorCommand(
@@ -154,54 +180,161 @@ inline PcgCallipeplaVectorResult PcgCallipepla_ExchangeVectorCommand(
     INDEX_TYPE &vector_result_count
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
     ,
-    tapa::mmap<INDEX_TYPE> &Status,
-    const INDEX_TYPE command_accepted_checkpoint,
-    const INDEX_TYPE wait_result_checkpoint,
-    const INDEX_TYPE result_accepted_checkpoint
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out,
+    INDEX_TYPE &vector_command_attempt_count,
+    INDEX_TYPE &vector_command_full_count,
+    INDEX_TYPE &probe_event_drop_count
 #endif
     ) {
 #pragma HLS inline
-    static constexpr INDEX_TYPE kSendCommand = 0;
-    static constexpr INDEX_TYPE kWaitResult = 1;
-    static constexpr INDEX_TYPE kTransactionDone = 2;
-
-    INDEX_TYPE state = kSendCommand;
+    INDEX_TYPE state = kPcgCallipeplaProbeTxSend;
+    INDEX_TYPE transaction_attempt_count = 0;
     PcgCallipeplaVectorResult result =
         pcg_callipepla_make_vector_result(command.phase);
 
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PcgCallipepla_ControllerProbeTryWrite(
+        Probe_Event_out,
+        probe_event_drop_count,
+        kPcgCallipeplaProbeEventTransactionEnter,
+        command.phase,
+        vector_command_attempt_count,
+        pcg_callipepla_pack_controller_probe_value(
+            vector_command_full_count, false, probe_event_drop_count));
+#endif
+
 vector_command_transaction:
-    while (state != kTransactionDone) {
+    while (state != kPcgCallipeplaProbeTxDone) {
 #pragma HLS loop_flatten off
 #pragma HLS pipeline off
         // Keep command acceptance and result consumption in different FSM states.
-        if (state == kSendCommand) {
-            if (Vector_Command_out.try_write(command)) {
-                ++vector_command_count;
-                state = kWaitResult;
+        if (state == kPcgCallipeplaProbeTxSend) {
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-                if (command_accepted_checkpoint >= 0) {
-                    PcgCallipepla_WriteProbeControllerCheckpoint(
-                        Status, command_accepted_checkpoint);
-                }
-                if (wait_result_checkpoint >= 0) {
-                    PcgCallipepla_WriteProbeControllerCheckpoint(
-                        Status, wait_result_checkpoint);
-                }
+            const bool full_before = Vector_Command_out.full();
+            ++vector_command_attempt_count;
+            ++transaction_attempt_count;
+            if (full_before) {
+                ++vector_command_full_count;
+            }
+#endif
+            const bool command_accepted = Vector_Command_out.try_write(command);
+            if (command_accepted) {
+                ++vector_command_count;
+                state = kPcgCallipeplaProbeTxWaitResult;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+                PcgCallipepla_ControllerProbeTryWrite(
+                    Probe_Event_out,
+                    probe_event_drop_count,
+                    kPcgCallipeplaProbeEventCommandAccepted,
+                    command.phase,
+                    vector_command_attempt_count,
+                    pcg_callipepla_pack_controller_probe_value(
+                        vector_command_full_count,
+                        full_before,
+                        probe_event_drop_count));
+                PcgCallipepla_ControllerProbeTryWrite(
+                    Probe_Event_out,
+                    probe_event_drop_count,
+                    kPcgCallipeplaProbeEventWaitResult,
+                    command.phase,
+                    vector_command_attempt_count,
+                    pcg_callipepla_pack_controller_probe_value(
+                        vector_command_full_count,
+                        full_before,
+                        probe_event_drop_count));
+#endif
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+            } else if (transaction_attempt_count == 1 ||
+                       (transaction_attempt_count & 0x000fffff) == 0) {
+                PcgCallipepla_ControllerProbeTryWrite(
+                    Probe_Event_out,
+                    probe_event_drop_count,
+                    kPcgCallipeplaProbeEventCommandBlocked,
+                    command.phase,
+                    vector_command_attempt_count,
+                    pcg_callipepla_pack_controller_probe_value(
+                        vector_command_full_count,
+                        full_before,
+                        probe_event_drop_count));
 #endif
             }
         } else if (Vector_Result_in.try_read(result)) {
             ++vector_result_count;
-            state = kTransactionDone;
+            state = kPcgCallipeplaProbeTxDone;
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
-            if (result_accepted_checkpoint >= 0) {
-                PcgCallipepla_WriteProbeControllerCheckpoint(
-                    Status, result_accepted_checkpoint);
-            }
+            PcgCallipepla_ControllerProbeTryWrite(
+                Probe_Event_out,
+                probe_event_drop_count,
+                kPcgCallipeplaProbeEventResultReceived,
+                command.phase,
+                vector_result_count,
+                probe_event_drop_count);
 #endif
         }
     }
     return result;
 }
+
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+inline void PcgCallipepla_WriteVectorStopProbe(
+    tapa::ostream<PcgCallipeplaVectorCommand> &Vector_Command_out,
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out,
+    INDEX_TYPE &vector_command_count,
+    INDEX_TYPE &vector_command_attempt_count,
+    INDEX_TYPE &vector_command_full_count,
+    INDEX_TYPE &probe_event_drop_count) {
+#pragma HLS inline
+    INDEX_TYPE stop_attempt_count = 0;
+    bool stop_accepted = false;
+    PcgCallipepla_ControllerProbeTryWrite(
+        Probe_Event_out,
+        probe_event_drop_count,
+        kPcgCallipeplaProbeEventStopEnter,
+        kPcgCallipeplaProbePhaseStop,
+        vector_command_attempt_count,
+        pcg_callipepla_pack_controller_probe_value(
+            vector_command_full_count, false, probe_event_drop_count));
+
+write_vector_stop_probe:
+    while (!stop_accepted) {
+#pragma HLS loop_flatten off
+#pragma HLS pipeline off
+        const bool full_before = Vector_Command_out.full();
+        ++vector_command_attempt_count;
+        ++stop_attempt_count;
+        if (full_before) {
+            ++vector_command_full_count;
+        }
+        stop_accepted =
+            Vector_Command_out.try_write(pcg_callipepla_make_vector_stop());
+        if (stop_accepted) {
+            ++vector_command_count;
+            PcgCallipepla_ControllerProbeTryWrite(
+                Probe_Event_out,
+                probe_event_drop_count,
+                kPcgCallipeplaProbeEventStopAccepted,
+                kPcgCallipeplaProbePhaseStop,
+                vector_command_attempt_count,
+                pcg_callipepla_pack_controller_probe_value(
+                    vector_command_full_count,
+                    full_before,
+                    probe_event_drop_count));
+        } else if (stop_attempt_count == 1 ||
+                   (stop_attempt_count & 0x000fffff) == 0) {
+            PcgCallipepla_ControllerProbeTryWrite(
+                Probe_Event_out,
+                probe_event_drop_count,
+                kPcgCallipeplaProbeEventCommandBlocked,
+                kPcgCallipeplaProbePhaseStop,
+                vector_command_attempt_count,
+                pcg_callipepla_pack_controller_probe_value(
+                    vector_command_full_count,
+                    full_before,
+                    probe_event_drop_count));
+        }
+    }
+}
+#endif
 
 void PcgCallipepla_Controller(
     tapa::ostream<CuperSpmvServiceCommand> &Ptr_Command_out,
@@ -218,6 +351,8 @@ void PcgCallipepla_Controller(
     tapa::ostream<PcgCallipeplaStatusWrite> &Status_Write_out,
     tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out,
     tapa::ostream<INDEX_TYPE> &Debug_Stop_out,
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    tapa::ostream<PcgCallipeplaProbeEvent> &Controller_Probe_Event_out,
 #else
     tapa::mmap<INDEX_TYPE> Status,
 #endif
@@ -249,8 +384,12 @@ void PcgCallipepla_Controller(
     INDEX_TYPE vector_result_count = 0;
 
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    INDEX_TYPE vector_command_attempt_count = 0;
+    INDEX_TYPE vector_command_full_count = 0;
+    INDEX_TYPE controller_probe_drop_count = 0;
 #define PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(CODE, DETAIL0, DETAIL1) \
-    PcgCallipepla_WriteProbeControllerCheckpoint(Status, CODE)
+    do {                                                                  \
+    } while (false)
 #endif
 
     unsigned long long init_spmv_work = 0;
@@ -277,6 +416,14 @@ void PcgCallipepla_Controller(
                                 kPcgCallipeplaTracePhaseEntry,
                                 0,
                                 Row_num);
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PcgCallipepla_ControllerProbeTryWrite(
+        Controller_Probe_Event_out,
+        controller_probe_drop_count,
+        kPcgCallipeplaProbeEventControllerStart,
+        -1,
+        Row_num,
+        Max_iters);
 #else
     PcgCallipepla_WriteLiveStatus(Status,
                                   1,
@@ -288,7 +435,7 @@ void PcgCallipepla_Controller(
                                   float_packet_count,
                                   Matrix_len);
 #endif
-#ifdef CUPER_CALLIPEPLA_PROBE_ENABLED
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID != 2
     PcgCallipepla_WriteProbeControllerHeader(Status,
                                              1,
                                              float_packet_count,
@@ -329,10 +476,24 @@ void PcgCallipepla_Controller(
         PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(15,
                                             kPcgCallipeplaStatusBreakdown,
                                             0);
+        PcgCallipepla_ControllerProbeTryWrite(
+            Controller_Probe_Event_out,
+            controller_probe_drop_count,
+            kPcgCallipeplaProbeEventValidationFailed,
+            -1,
+            dimensions_valid ? 1 : 0,
+            tau_valid ? 1 : 0);
 #endif
         status_code = kPcgCallipeplaStatusBreakdown;
     } else {
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        PcgCallipepla_ControllerProbeTryWrite(
+            Controller_Probe_Event_out,
+            controller_probe_drop_count,
+            kPcgCallipeplaProbeEventValidationPassed,
+            kPcgCallipeplaPhaseInitSpmv,
+            Row_num,
+            Max_iters);
         PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(20,
                                             kPcgCallipeplaStageInitSpmv,
                                             kPcgCallipeplaStageBegin);
@@ -365,6 +526,13 @@ void PcgCallipepla_Controller(
         PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(51,
                                             kPcgCallipeplaVectorSourceX,
                                             x_bank);
+        PcgCallipepla_ControllerProbeTryWrite(
+            Controller_Probe_Event_out,
+            controller_probe_drop_count,
+            kPcgCallipeplaProbeEventInitFanoutDone,
+            kPcgCallipeplaPhaseInitSpmv,
+            HBM_CHANNEL_NUM,
+            x_bank);
 #else
         pcg_callipepla_send_spmv_command(Ptr_Command_out,
                                          Matrix_Command_out,
@@ -400,8 +568,11 @@ void PcgCallipepla_Controller(
                                                    0.0),
                 vector_command_count,
                 vector_result_count
-                PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                    Status, 61, 70, 71));
+                PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                    Controller_Probe_Event_out,
+                    vector_command_attempt_count,
+                    vector_command_full_count,
+                    controller_probe_drop_count));
         (void)init_spmv_result;
         ++spmv_rounds;
         init_spmv_work += static_cast<unsigned long long>(float_packet_count) +
@@ -434,6 +605,8 @@ void PcgCallipepla_Controller(
                                     kPcgCallipeplaTracePhaseDone,
                                     kPcgCallipeplaPhaseInitSpmv,
                                     spmv_rounds);
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+        (void)spmv_rounds;
 #else
         PcgCallipepla_WriteLiveStatus(Status,
                                       2,
@@ -470,8 +643,11 @@ void PcgCallipepla_Controller(
                                                    0.0),
                 vector_command_count,
                 vector_result_count
-                PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                    Status, 91, 100, 101));
+                PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                    Controller_Probe_Event_out,
+                    vector_command_attempt_count,
+                    vector_command_full_count,
+                    controller_probe_drop_count));
         rz = init_result.rz;
         rr = init_result.rr;
         Residuals[0] = rr;
@@ -506,6 +682,8 @@ void PcgCallipepla_Controller(
                                         kPcgCallipeplaTracePhaseProgress,
                                         kPcgCallipeplaPhaseIterDot,
                                         iter);
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+            (void)iter;
 #else
             PcgCallipepla_WriteLiveStatus(Status,
                                           10,
@@ -549,8 +727,11 @@ void PcgCallipepla_Controller(
                                                        0.0),
                     vector_command_count,
                     vector_result_count
-                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                        Status, -1, -1, -1));
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                        Controller_Probe_Event_out,
+                        vector_command_attempt_count,
+                        vector_command_full_count,
+                        controller_probe_drop_count));
             p_ap = iter_dot.p_ap;
             ++spmv_rounds;
             iter_spmv_work +=
@@ -610,8 +791,11 @@ void PcgCallipepla_Controller(
                                                        0.0),
                     vector_command_count,
                     vector_result_count
-                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                        Status, -1, -1, -1));
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                        Controller_Probe_Event_out,
+                        vector_command_attempt_count,
+                        vector_command_full_count,
+                        controller_probe_drop_count));
             (void)update_x_result;
             x_bank = x_next_bank;
             update_x_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
@@ -638,8 +822,11 @@ void PcgCallipepla_Controller(
                                                        0.0),
                     vector_command_count,
                     vector_result_count
-                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                        Status, -1, -1, -1));
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                        Controller_Probe_Event_out,
+                        vector_command_attempt_count,
+                        vector_command_full_count,
+                        controller_probe_drop_count));
             (void)update_r_result;
             r_bank = r_next_bank;
             update_r_work += static_cast<unsigned long long>(float_packet_count) +
@@ -668,8 +855,11 @@ void PcgCallipepla_Controller(
                         0.0),
                     vector_command_count,
                     vector_result_count
-                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                        Status, -1, -1, -1));
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                        Controller_Probe_Event_out,
+                        vector_command_attempt_count,
+                        vector_command_full_count,
+                        controller_probe_drop_count));
             const double rz_new = rz_result.rz;
             const double rr_new = rz_result.rr;
             apply_m_inv_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
@@ -730,6 +920,8 @@ void PcgCallipepla_Controller(
                                           spmv_rounds,
                                           float_packet_count,
                                           Matrix_len);
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+            (void)iterations;
 #else
             PcgCallipepla_WriteLiveStatus(Status,
                                           20,
@@ -769,8 +961,11 @@ void PcgCallipepla_Controller(
                                                        beta),
                     vector_command_count,
                     vector_result_count
-                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS(
-                        Status, -1, -1, -1));
+                    PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS(
+                        Controller_Probe_Event_out,
+                        vector_command_attempt_count,
+                        vector_command_full_count,
+                        controller_probe_drop_count));
             (void)update_p_result;
             p_bank = p_next_bank;
             update_p_work += 3ULL * static_cast<unsigned long long>(double_packet_count);
@@ -823,7 +1018,16 @@ send_matrix_stop_probe:
                                         kPcgCallipeplaPhaseInitSpmv,
                                         vector_command_count);
 #endif
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PcgCallipepla_WriteVectorStopProbe(Vector_Command_out,
+                                       Controller_Probe_Event_out,
+                                       vector_command_count,
+                                       vector_command_attempt_count,
+                                       vector_command_full_count,
+                                       controller_probe_drop_count);
+#else
     PcgCallipepla_WriteVectorStop(Vector_Command_out, vector_command_count);
+#endif
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
     PCG_CALLIPEPLA_CMD_DRAIN_CHECKPOINT(141,
                                         kPcgCallipeplaPhaseInitSpmv,
@@ -925,6 +1129,25 @@ write_stage_metrics:
                                   float_packet_count,
                                   Matrix_len);
     Debug_Stop_out.write(1);
+#elif defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    PcgCallipepla_ControllerProbeWrite(
+        Controller_Probe_Event_out,
+        kPcgCallipeplaProbeEventControllerFinalStatus,
+        status_code,
+        iterations,
+        pcg_callipepla_pack_controller_done_value(
+            x_bank,
+            r_bank,
+            p_bank,
+            spmv_rounds,
+            controller_probe_drop_count));
+    PcgCallipepla_ControllerProbeWrite(
+        Controller_Probe_Event_out,
+        kPcgCallipeplaProbeEventControllerDone,
+        -1,
+        vector_command_count,
+        pcg_callipepla_pack_controller_counts_value(
+            vector_result_count, controller_probe_drop_count));
 #else
     PcgCallipepla_WriteStatusSlot(Status, 0, status_code);
     PcgCallipepla_WriteStatusSlot(Status, 1, iterations);
@@ -964,4 +1187,4 @@ write_stage_metrics:
 #endif
 }
 
-#undef PCG_CALLIPEPLA_VECTOR_TRANSACTION_CHECKPOINT_ARGS
+#undef PCG_CALLIPEPLA_VECTOR_TRANSACTION_PROBE_ARGS

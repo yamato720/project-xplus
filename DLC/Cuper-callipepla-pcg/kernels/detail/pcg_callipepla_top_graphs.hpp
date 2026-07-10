@@ -115,6 +115,13 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<PcgCallipeplaStageEvent, 32> Stage_Event_Stream("Stage_Event_Stream");
     tapa::stream<ap_uint<64>, 16> Stage_Ticks_Stream("Stage_Ticks_Stream");
 
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+    tapa::stream<PcgCallipeplaProbeEvent, 32> Controller_Probe_Event_Stream(
+        "Controller_Probe_Event_Stream");
+    tapa::stream<PcgCallipeplaProbeEvent, 16> Ack_Probe_Event_Stream(
+        "Ack_Probe_Event_Stream");
+#endif
+
 #if CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
     tapa::stream<INDEX_TYPE, 128> PE_Param_Probe("PE_Param_Probe");
 #ifdef JACOBI_SPMV_STRIP_PADDING
@@ -137,7 +144,11 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Stage_Ticks_Stream,
                 Vector_Command_Stream,
                 Vector_Result_Stream,
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+                Controller_Probe_Event_Stream,
+#else
                 Status,
+#endif
                 Residuals,
                 Metrics,
                 Batch_num,
@@ -151,7 +162,19 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Stage_Ticks_Stream)
         .invoke(PcgCallipepla_Probe_VectorPhaseAck,
                 Vector_Command_Stream,
-                Vector_Result_Stream)
+                Vector_Result_Stream
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+                ,
+                Ack_Probe_Event_Stream)
+        .invoke(PcgCallipepla_Probe_HandshakeMonitor,
+                Controller_Probe_Event_Stream,
+                Ack_Probe_Event_Stream,
+                Status,
+                Matrix_len,
+                Row_num)
+#else
+                )
+#endif
 #if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
         .invoke(PcgCallipepla_Probe_TouchIndex,
                 SpElement_list_ptr)
