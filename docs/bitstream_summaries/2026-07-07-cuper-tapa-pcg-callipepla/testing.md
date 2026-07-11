@@ -1187,4 +1187,53 @@ XO/RTL 静态审查：
   仍全部为常量 0；
 - monitor RTL 保留 `Vector_Event_in`、vector command/round/HBM-word counters、event 64
   stop 判定以及 Status 47/48/49 写回；
-- XO packaging 成功。下一步使用同一 XO 启动 100 MHz Vitis link。
+- XO packaging 成功；同一 XO 的 100 MHz Vitis link 结果记录在下一节。
+
+## 2026-07-11 loader-drain level 2 硬件构建与同步
+
+完整 Vitis link：
+
+```text
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/
+log: logs/cuper_tapa_pcg_callipepla_loader_monitor_level2_hw_20260711_134233.log
+start: 2026-07-11 13:42:33 +0800
+xclbin generated: 2026-07-11 15:36:17 +0800
+v++ total elapsed: 1h53m45s
+build exit code: 0
+VPL/POST-VPL checks: 0 errors
+Run vpl: impl Complete
+```
+
+产物：
+
+```text
+sync path: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin
+UUID: 04f7d703-2011-fd0a-6c43-aa158ddfbd12
+xclbin SHA256: a9844caf9e07084e8d518a6e4c5a2c6e36a652aff3f39af978b4a78ef35446a1
+xclbin.info SHA256: 65f0ff445c74aab369a7294d8e44a7f2a32e5aea21f73b2f2df991b2dad81975
+requested/constrained DATA/KERNEL/HBM: 100/500/450 MHz
+xclbin metadata DATA/KERNEL/HBM: 100/500/447 MHz
+```
+
+Routed timing：
+
+```text
+WNS: -0.014 ns
+TNS: -0.053 ns
+setup failing endpoints: 10
+WHS: 0.009 ns
+THS: 0.000 ns
+hold failing endpoints: 0
+```
+
+10 个 setup endpoint 都位于平台 `hmss_0` 的 450 MHz HBM inter-SLR response
+pipeline；100 MHz DATA clock domain 的 WNS 为 `1.774 ns`，500 MHz KERNEL clock
+domain 的 WNS 为 `0.621 ns`。因此本次 link 虽然 `impl Complete` 并生成可加载 xclbin，
+但不满足原定的 routed `WNS>=0` 验收条件，也不是 timing-clean artifact。用户明确要求
+直接同步和 push，因此同主线 `20260711-demo` 槽已由 level 2 覆盖，文档和 HTML 均按
+“服务器 debug artifact、timing 未完全收敛”记录，不把它写成正式通过版。
+
+当前尚无 level-2 服务器 raw log 或上板反馈。建议上板仍从
+`thermal2_n16 MAX_ITERS=0/1` 开始，验收 `event=99`、vector/ptr/PE 计数、full/drop=0、
+`flags=0x7e`、XRT error 为空和 CU IDLE。该数据仍不进入 PCG correctness、分段时间或
+性能图表；正式 `source.diff` 不更新。

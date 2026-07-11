@@ -5,21 +5,20 @@
 - 主线：`cuper-tapa-pcg`
 - 新源码目录：`DLC/Cuper-callipepla-pcg/`
 - 顶层 kernel：`CuperPcgCallipepla`
-- 状态：`loader_drain level=1` timing-clean debug artifact 已完成构建并同步。UUID
-  `fdbc2e10-20ea-8e78-6b3c-72a01803cde1`，恢复真实 strip ptr HBM 读取、16 路
-  matrix-length fanout 和 `PE_Param` drain；Matrix_data/vector/SpMV datapath 仍关闭并
-  使用 fake-ack。最终 DATA/KERNEL/HBM 为 `100/500/450 MHz`，routed WNS
-  `0.002 ns`、TNS `0`、WHS `0.009 ns`、THS `0`。服务器侧反馈已按约定验收口径通过
+- 状态：`loader_drain level=2` debug artifact 已完成构建并按用户要求同步。UUID
+  `04f7d703-2011-fd0a-6c43-aa158ddfbd12`，在已通过的 ptr/PE level 1 基线上恢复真实
+  X/P vector HBM 读取和 vector drain；Matrix_data/SpMV core 仍关闭并使用 fake-ack。
+  请求/约束 DATA/KERNEL/HBM 为 `100/500/450 MHz`，xclbin metadata 为
+  `100/500/447 MHz`；impl complete，但 routed WNS `-0.014 ns`、TNS `-0.053 ns`，
+  不是 timing-clean artifact
 - 本轮 XO/硬件目录：
-  `cuper-tapa-pcg-callipepla-loader-monitor-level1-xo-build/`
+  `cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/`
 - 本轮硬件日志：
-  `logs/cuper_tapa_pcg_callipepla_loader_monitor_level1_hw_20260711_004344.log`
+  `logs/cuper_tapa_pcg_callipepla_loader_monitor_level2_hw_20260711_134233.log`
 - 当前同步文件：
   `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`
-- 下一构建：`loader_drain level=2` 已完成源码、软件回归和 XO/RTL 审查；独立目录
-  `cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/`
-- 构建 tmux 会话：
-  `project-xplus-cuper-tapa-pcg-callipepla-loader-monitor-level1-hw`
+- 下一步：服务器侧按 level-2 计数和 done/drop 口径做 demo-only 上板；当前无运行中的
+  构建 tmux
 - 默认配置：`CUPER_CALLIPEPLA_HBM_CHANNELS=16`，
   `CUPER_CALLIPEPLA_SPMV_STRIP_PADDING=1`，
   `CUPER_CALLIPEPLA_SPMV_ACC_WINDOW=10`
@@ -44,15 +43,18 @@
 xclbin。
 
 当前同步文件为 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`，UUID
-`fdbc2e10-20ea-8e78-6b3c-72a01803cde1`，SHA256
-`0e0e7e832b24afff008665f45ea0020c9cb121cfcf3c2c0f1cf20ea13ee76fe0`，`.xclbin.info`
-SHA256 `5527fd3c42add486a2a193bdc7d08e209efb0d91c89e9ec75aaae62fd83cd2ea`。
-DATA/KERNEL/HBM clock 为 `100/500/450 MHz`。Vitis link `impl Complete`，
-VPL/POST-VPL 0 errors，总耗时 `2h38m33s`；routed timing 已收敛：WNS
-`0.002 ns`、TNS `0.000 ns`、setup failing endpoints `0`、WHS `0.009 ns`、THS
-`0.000 ns`。
+`04f7d703-2011-fd0a-6c43-aa158ddfbd12`，SHA256
+`a9844caf9e07084e8d518a6e4c5a2c6e36a652aff3f39af978b4a78ef35446a1`，`.xclbin.info`
+SHA256 `65f0ff445c74aab369a7294d8e44a7f2a32e5aea21f73b2f2df991b2dad81975`。
+请求/约束 DATA/KERNEL/HBM clock 为 `100/500/450 MHz`，xclbin metadata 为
+`100/500/447 MHz`。Vitis link `impl Complete`，VPL/POST-VPL 0 errors，总耗时
+`1h53m45s`；routed timing 未完全收敛：WNS `-0.014 ns`、TNS `-0.053 ns`、setup
+failing endpoints `10`、WHS `0.009 ns`、THS `0.000 ns`。失败路径在平台 HBM
+inter-SLR response pipeline。该 artifact 按用户要求直接同步用于 debug，不写成
+timing-clean 版本。
 
-该版使用 `CUPER_CALLIPEPLA_PROBE_MODE=loader_drain`、
+上一同步的 timing-clean level-1 artifact 使用
+`CUPER_CALLIPEPLA_PROBE_MODE=loader_drain`、
 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1`。controller/fake-ack 沿用 mode-2 事件握手，
 真实 strip ptr loader 读取 16 路 matrix length 和每轮 boundary table，16 路 matrix
 drain 消费 command/length 但生成 RTL 中不发 `Matrix_data` request，真实
@@ -68,16 +70,19 @@ flags=`0x3e`、三类 event drop=0。mode 2 `cmd_drain` 与无 probe full graph 
 `event=99`、预期计数闭合、full/drop 为 0、controller/ack/ptr/PE done flag 全部置位，
 XRT error 为空且 CU 回到 IDLE。本地没有服务器 raw log，本记录按用户反馈登记。它仍是
 fake-ack debug artifact，不做 PCG correctness 或性能结论，不更新正式
-`source.diff`。下一定位边界进入 `loader_drain level=2`，恢复真实 X/P vector loader
-和向量 stream drain，Matrix_data 与 SpMV core 仍不恢复。
+`source.diff`。该 level-1 结果随后作为进入 `loader_drain level=2` 的历史基线；
+level 2 恢复真实 X/P vector loader 和向量 stream drain，Matrix_data 与 SpMV core
+仍不恢复。
 
-level 2 源码已经接入真实 `PcgCallipepla_Vector_Loader`：按 SpMV command 从 X/P 当前
+当前 level 2 已接入真实 `PcgCallipepla_Vector_Loader`：按 SpMV command 从 X/P 当前
 bank 读取 `double_v8`，转换为 `float_v16` 后由 tail drain 消费。mode-3 monitor 新增
 vector command/round/HBM-word 计数、vector stop flag 和 event-drop 汇总；level 1 的
 `Status[50..63]` 保持不变，level 2 使用 `Status[47..49]` 扩展字段。软件回归已通过
 `thermal2_n16 MAX_ITERS=0/1/10`，vector commands/rounds/HBM words 分别为
 `2/1/2`、`3/2/4`、`12/11/22`，所有点 `flags=0x7e`、full/drop=0。Matrix_data request
-仍关闭，SpMV core 仍未接入。
+仍关闭，SpMV core 仍未接入。完整 level-2 xclbin 已按上述 UUID/SHA 覆盖同主线 demo
+槽，等待服务器侧上板；由于仍是 fake-ack debug boundary，不做 PCG correctness 或
+性能结论。
 
 2026-07-11 服务器侧反馈确认上一握手 artifact 已通过以下 demo-only 覆盖：
 
@@ -108,7 +113,7 @@ checkpoint cmd-drain UUID `ea2f5c5a-f0f9-c536-8caf-7faa82aa4107` 停在
 `CUPER_CALLIPEPLA_PROBE_MODE=loader_drain`、
 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1`，并在 `100/500/450 MHz` 下通过 routed
 timing。上一 `20260710-demo` 文件已从同步目录删除，但其 Git 历史和服务器侧测试记录
-继续保留。当前 level-1 artifact 不晋级标准版，也不更新正式 `source.diff`。
+继续保留。当前 level-2 artifact 不晋级标准版，也不更新正式 `source.diff`。
 
 2026-07-10 对 thin-status 同步版的后续上板反馈显示 timeout 稳定停在
 `Status[52]=14`。同一源码生成的旧 `cmd_drain` 与正式 full-graph RTL 都在 valid 分支

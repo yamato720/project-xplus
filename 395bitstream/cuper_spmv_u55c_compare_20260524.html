@@ -1278,16 +1278,15 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         controller、command FIFO、fake-ack、result FIFO 和 stop/finalization 已排除死锁。
         该数据不进入 <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、
         correctness 或性能曲线。该握手基线的下一定位边界
-        <code>loader_drain level=1</code> 已由下一节当前 demo 实现。
+        <code>loader_drain level=1</code> 已由下一节历史基线实现。
       </p>
     </section>
 
     <section>
-      <h2>2026-07-11 Callipepla Loader-Drain Level 1 Demo-Only 定位版</h2>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 1 Demo-Only 历史基线</h2>
       <p>
-        当前 TAPA full-PCG demo 槽为
-        <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
-        <code>CuperPcgCallipepla</code>，UUID 为
+        该 TAPA full-PCG demo 槽上一同步内容的 kernel 为 <code>CuperPcgCallipepla</code>，
+        UUID 为
         <code>fdbc2e10-20ea-8e78-6b3c-72a01803cde1</code>，SHA256 为
         <code>0e0e7e832b24afff008665f45ea0020c9cb121cfcf3c2c0f1cf20ea13ee76fe0</code>，
         DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>。routed timing 已收敛：WNS
@@ -1329,6 +1328,52 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或
         性能曲线。下一定位边界为 <code>loader_drain level=2</code>，恢复真实 X/P vector
         loader 和向量 stream drain，Matrix_data 与 SpMV core 仍不恢复。
+      </p>
+    </section>
+
+    <section>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 2 当前 Demo-Only 定位版</h2>
+      <p>
+        当前 TAPA full-PCG demo 槽为
+        <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
+        <code>CuperPcgCallipepla</code>，UUID 为
+        <code>04f7d703-2011-fd0a-6c43-aa158ddfbd12</code>，SHA256 为
+        <code>a9844caf9e07084e8d518a6e4c5a2c6e36a652aff3f39af978b4a78ef35446a1</code>。
+        请求/约束 DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>，xclbin metadata 为
+        <code>100/500/447 MHz</code>。
+      </p>
+      <p class="callout">
+        该版在已通过的 level-1 ptr/PE loader 基线上恢复真实 X/P vector HBM 读取：
+        <code>double_v8</code> 转为 <code>float_v16</code> 后由 tail drain 消费。
+        Matrix_data request、SpMV core、accumulator、checker 和 sort 仍关闭，vector phase
+        继续 fake-ack。它只用于定位 vector loader/control/finalization，不提供 PCG
+        correctness 或性能结论。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Software/TAPA simulation</th>
+              <th>vector commands</th>
+              <th>vector rounds</th>
+              <th>vector HBM words</th>
+              <th>event / full / drops</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16 MAX_ITERS=0</code></td><td class="num">2</td><td class="num">1</td><td class="num">2</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=1</code></td><td class="num">3</td><td class="num">2</td><td class="num">4</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=10</code></td><td class="num">12</td><td class="num">11</td><td class="num">22</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Vitis link 已 <code>impl Complete</code> 且退出码为 0，总耗时
+        <code>1h53m45s</code>；但 routed setup 未完全收敛：WNS
+        <code>-0.014 ns</code>、TNS <code>-0.053 ns</code>、10 个 failing endpoints，hold
+        clean。违例位于平台 <code>hmss_0</code> 的 450 MHz HBM 跨 SLR response pipeline，
+        不是 100 MHz DATA 或 500 MHz KERNEL 路径。本 artifact 按用户要求同步用于服务器
+        debug，明确不是 timing-clean 版本；当前尚无 level-2 上板结论。
       </p>
     </section>
 

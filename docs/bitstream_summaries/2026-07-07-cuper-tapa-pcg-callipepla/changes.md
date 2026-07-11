@@ -150,6 +150,14 @@
 - Host 增加 loader level、vector commands/rounds/HBM words 和 vector done 解码。
 - 顶层 ABI、AXI-Lite offsets、HBM mapping、Tau/dimension 判断和 probe mode 名称不变。
   level 2 仍是 fake-ack debug boundary，不做 PCG correctness 或性能结论。
+- level-2 XO 复用 `100 MHz` DATA / `500 MHz` KERNEL 配置完成 Vitis link，生成 UUID
+  `04f7d703-2011-fd0a-6c43-aa158ddfbd12`。link 退出码为 0、`impl Complete`，但
+  450 MHz HBM platform inter-SLR path 的 routed WNS 为 `-0.014 ns`、TNS
+  `-0.053 ns`，xclbin metadata 因此记录 HBM `447 MHz`。按用户要求覆盖同主线
+  `20260711-demo` 槽，用于服务器侧 debug；明确不标记为 timing-clean。
+- 上一 level-1 UUID `fdbc2e10-20ea-8e78-6b3c-72a01803cde1` 的服务器通过结论继续
+  作为历史基线保留。当前 level 2 尚无服务器 raw log 或上板结论，正式
+  `source.diff` 不更新。
 
 ## Host
 
