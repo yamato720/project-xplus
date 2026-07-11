@@ -1233,7 +1233,66 @@ domain 的 WNS 为 `0.621 ns`。因此本次 link 虽然 `impl Complete` 并生�
 直接同步和 push，因此同主线 `20260711-demo` 槽已由 level 2 覆盖，文档和 HTML 均按
 “服务器 debug artifact、timing 未完全收敛”记录，不把它写成正式通过版。
 
-当前尚无 level-2 服务器 raw log 或上板反馈。建议上板仍从
-`thermal2_n16 MAX_ITERS=0/1` 开始，验收 `event=99`、vector/ptr/PE 计数、full/drop=0、
-`flags=0x7e`、XRT error 为空和 CU IDLE。该数据仍不进入 PCG correctness、分段时间或
-性能图表；正式 `source.diff` 不更新。
+用户随后反馈 level 2 上板成功；本地没有服务器 raw log 或完整计数，因此不补写未提供的
+验证数字。该数据仍不进入 PCG correctness、分段时间或性能图表，正式 `source.diff`
+不更新；level 3 上板应仍从 `thermal2_n16 MAX_ITERS=0/1` 开始。
+
+## 2026-07-11 loader-drain level 3 软件回归、硬件构建与同步
+
+构建参数：
+
+```text
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain
+CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=3
+CLOCK_PERIOD=10.0
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level3-xo-build/
+```
+
+`thermal2_n16` software/TAPA simulation：
+
+```text
+MAX_ITERS=0:
+  vector commands/rounds/HBM words=2/1/2
+  ptr commands=2, PE rounds=1, ptr HBM words=48
+  event=99, full=0, flags=0x7e, drops=0/0/0
+
+MAX_ITERS=1:
+  vector commands/rounds/HBM words=3/2/4
+  ptr commands=3, PE rounds=2, ptr HBM words=80
+  event=99, full=0, flags=0x7e, drops=0/0/0
+```
+
+level 3 的 source/生成 C++/HLS 审查确认：`PcgCallipepla_Probe_MatrixLoaderStripDrain`
+只在 `Debug_channel == 0 || Debug_channel == 15` 时执行 `probe_read_matrix`，其中
+`Matrix_data.read_addr.try_write()` 和 `Matrix_data.read_data.try_read()` 均存在；其他
+14 路只消费 command 和 matrix length。当前 monitor 尚未记录 matrix HBM word count，
+所以本轮用生成 task 与上板返回状态验证端点，而不是把虚构的矩阵读计数写入 Status。
+
+完整 Vitis link：
+
+```text
+log: logs/cuper_tapa_pcg_callipepla_loader_monitor_level3_hw_20260711_185146.log
+v++ total elapsed: 2h16m59s
+build exit code: 0
+Run vpl: impl Complete
+VPL/POST-VPL checks: 0 errors
+```
+
+产物与 routed timing：
+
+```text
+sync path: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin
+UUID: 02db72cc-c208-7772-4df4-3757a606929f
+xclbin SHA256: bdf6552a7fb0ef1f87bbf7f1cea82ec796398dce16d9b5bbce140e96cacbdc16
+xclbin.info SHA256: 7aedf3a7f89c520bb8d01efdb7d800155e320d8cad93513b4413bc24e25cec8d
+DATA/KERNEL/HBM: 100/500/450 MHz
+WNS/TNS: 0.003 ns / 0.000 ns
+WHS/THS: 0.009 ns / 0.000 ns
+setup/hold failing endpoints: 0 / 0
+```
+
+该 level-3 artifact 已按用户要求覆盖同主线 demo 槽，仍是 fake-ack loader debug
+artifact。服务器侧应先跑 `thermal2_n16 MAX_ITERS=0/1`，验收 `event=99`、full/drop=0、
+controller/ack/ptr/PE/vector done flag、XRT error 为空和 CU IDLE；当前不做 PCG diff、
+分段时间或性能结论，正式 `source.diff` 不更新。

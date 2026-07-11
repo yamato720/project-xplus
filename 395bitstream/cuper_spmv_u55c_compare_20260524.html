@@ -1332,11 +1332,10 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     </section>
 
     <section>
-      <h2>2026-07-11 Callipepla Loader-Drain Level 2 当前 Demo-Only 定位版</h2>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 2 Demo-Only 历史边界</h2>
       <p>
-        当前 TAPA full-PCG demo 槽为
-        <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
-        <code>CuperPcgCallipepla</code>，UUID 为
+        该 TAPA full-PCG demo 槽上一同步内容的 kernel 为 <code>CuperPcgCallipepla</code>，
+        UUID 为
         <code>04f7d703-2011-fd0a-6c43-aa158ddfbd12</code>，SHA256 为
         <code>a9844caf9e07084e8d518a6e4c5a2c6e36a652aff3f39af978b4a78ef35446a1</code>。
         请求/约束 DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>，xclbin metadata 为
@@ -1373,7 +1372,52 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         <code>-0.014 ns</code>、TNS <code>-0.053 ns</code>、10 个 failing endpoints，hold
         clean。违例位于平台 <code>hmss_0</code> 的 450 MHz HBM 跨 SLR response pipeline，
         不是 100 MHz DATA 或 500 MHz KERNEL 路径。本 artifact 按用户要求同步用于服务器
-        debug，明确不是 timing-clean 版本；当前尚无 level-2 上板结论。
+        debug，明确不是 timing-clean 版本。用户随后反馈该 level-2 边界成功；本地没有
+        服务器 raw log 或完整计数，因此它只作为进入 level 3 的历史依据。
+      </p>
+    </section>
+
+    <section>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 3 当前 Demo-Only 定位版</h2>
+      <p>
+        当前 TAPA full-PCG demo 槽为
+        <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
+        <code>CuperPcgCallipepla</code>，UUID 为
+        <code>02db72cc-c208-7772-4df4-3757a606929f</code>，SHA256 为
+        <code>bdf6552a7fb0ef1f87bbf7f1cea82ec796398dce16d9b5bbce140e96cacbdc16</code>。
+        DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>。
+      </p>
+      <p class="callout">
+        该版在已通过的 ptr/PE 和 X/P vector loader 基线上，让 Matrix_data ch0/ch15
+        真实发出 HBM read request 并 drain response；其余 14 路只消费 command/length。
+        SpMV core、accumulator、checker、sort 和真实 vector phases 仍未恢复，vector result
+        继续 fake-ack。它验证的是 Matrix HBM 两端与 loader/control/finalization 边界，
+        不是完整 SpMV 或真实 PCG。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Software/TAPA simulation</th>
+              <th>vector commands / rounds / words</th>
+              <th>ptr commands / PE rounds / words</th>
+              <th>Matrix_data</th>
+              <th>event / full / drops</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16 MAX_ITERS=0</code></td><td class="num"><code>2 / 1 / 2</code></td><td class="num"><code>2 / 1 / 48</code></td><td>ch0/ch15 read-drain</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=1</code></td><td class="num"><code>3 / 2 / 4</code></td><td class="num"><code>3 / 2 / 80</code></td><td>ch0/ch15 read-drain</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Vitis link 已 <code>impl Complete</code> 且退出码为 0，总耗时
+        <code>2h16m59s</code>。routed timing clean：WNS <code>0.003 ns</code>、TNS
+        <code>0</code>、WHS <code>0.009 ns</code>、THS <code>0</code>，所有 clock domain
+        均无 setup/hold failing endpoint。当前尚无 level-3 上板结论；本轮数据不进入
+        <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或
+        性能曲线。
       </p>
     </section>
 

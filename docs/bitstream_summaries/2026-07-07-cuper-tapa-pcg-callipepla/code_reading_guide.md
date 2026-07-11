@@ -80,7 +80,10 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   level 2 继续启用真实 `PcgCallipepla_Vector_Loader`，从 X/P 当前 bank 读取
   `double_v8` 并转换成 `float_v16`，链尾由 `PcgCallipepla_DestroyFloatV16` drain。
   vector loader 也向同一个 monitor 报告 command、round、HBM words 和 stop；
-  Matrix_data request 仍为 0。
+  level 3 保留上述路径，并只让 `PcgCallipepla_Probe_MatrixLoaderStripDrain` 的 ch0/ch15
+  进入 `probe_read_matrix`，发 Matrix_data read address 并 drain read response；ch1..14
+  仍只消费 command/length。Matrix HBM word count 尚未加入 Status，不能把 level-3
+  的返回误读成完整 16 路 Matrix_data 或真实 SpMV 已通过。
 
 ## Metrics
 

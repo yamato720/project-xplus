@@ -156,8 +156,23 @@
   `-0.053 ns`，xclbin metadata 因此记录 HBM `447 MHz`。按用户要求覆盖同主线
   `20260711-demo` 槽，用于服务器侧 debug；明确不标记为 timing-clean。
 - 上一 level-1 UUID `fdbc2e10-20ea-8e78-6b3c-72a01803cde1` 的服务器通过结论继续
-  作为历史基线保留。当前 level 2 尚无服务器 raw log 或上板结论，正式
-  `source.diff` 不更新。
+  作为历史基线保留。用户随后反馈 level 2 也成功，但本地没有服务器 raw log 或完整计数；
+  两者均不构成 PCG correctness 结论，正式 `source.diff` 不更新。
+
+## 2026-07-11 loader-drain level 3 matrix endpoints
+
+- level 3 复用 level 2 的 controller、fake-ack、ptr/PE 与 X/P vector loader，只将
+  `PcgCallipepla_Probe_MatrixLoaderStripDrain` 的 ch0/ch15 从 command/length drain
+  提升为真实 Matrix_data 读地址和读响应 drain；ch1..14 仍不发 Matrix_data request。
+  SpMV core、accumulator、checker、sort 和真实 vector phases 均不恢复。
+- 软件/TAPA simulation 的 `thermal2_n16 MAX_ITERS=0/1` 均返回 `event=99`、
+  `flags=0x7e`、full/drop=0。`MAX_ITERS=1` 的数值 diff 继续由 fake-ack 决定，不作为
+  correctness 结论。
+- level-3 XO/link 生成 UUID `02db72cc-c208-7772-4df4-3757a606929f`，DATA/KERNEL/HBM
+  为 `100/500/450 MHz`，routed WNS `0.003 ns`、TNS `0`、WHS `0.009 ns`、THS `0`。
+  `impl Complete`、VPL/POST-VPL 0 errors，总耗时 `2h16m59s`。按用户要求覆盖同主线
+  `20260711-demo` 槽，等待服务器 demo-only 上板；不替换标准 bitstream，不更新正式
+  `source.diff`。
 
 ## Host
 
