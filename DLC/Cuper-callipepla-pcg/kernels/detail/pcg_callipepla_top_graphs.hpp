@@ -115,14 +115,25 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<PcgCallipeplaStageEvent, 32> Stage_Event_Stream("Stage_Event_Stream");
     tapa::stream<ap_uint<64>, 16> Stage_Ticks_Stream("Stage_Ticks_Stream");
 
-#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+#ifdef CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+    tapa::stream<PcgCallipeplaProbeEvent, 128> Controller_Probe_Event_Stream(
+        "Controller_Probe_Event_Stream");
+    tapa::stream<PcgCallipeplaProbeEvent, 64> Ack_Probe_Event_Stream(
+        "Ack_Probe_Event_Stream");
+#else
     tapa::stream<PcgCallipeplaProbeEvent, 32> Controller_Probe_Event_Stream(
         "Controller_Probe_Event_Stream");
     tapa::stream<PcgCallipeplaProbeEvent, 16> Ack_Probe_Event_Stream(
         "Ack_Probe_Event_Stream");
 #endif
+#endif
 
 #if CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+    tapa::stream<PcgCallipeplaProbeEvent, 16> Ptr_Probe_Event_Stream(
+        "Ptr_Probe_Event_Stream");
+    tapa::stream<PcgCallipeplaProbeEvent, 16> Pe_Probe_Event_Stream(
+        "Pe_Probe_Event_Stream");
     tapa::stream<INDEX_TYPE, 128> PE_Param_Probe("PE_Param_Probe");
 #ifdef JACOBI_SPMV_STRIP_PADDING
     tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2> Matrix_Len_Stream("Matrix_Len_Stream");
@@ -144,7 +155,7 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Stage_Ticks_Stream,
                 Vector_Command_Stream,
                 Vector_Result_Stream,
-#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+#ifdef CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR
                 Controller_Probe_Event_Stream,
 #else
                 Status,
@@ -163,15 +174,26 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
         .invoke(PcgCallipepla_Probe_VectorPhaseAck,
                 Vector_Command_Stream,
                 Vector_Result_Stream
-#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
+#ifdef CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR
                 ,
                 Ack_Probe_Event_Stream)
+#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 2
         .invoke(PcgCallipepla_Probe_HandshakeMonitor,
                 Controller_Probe_Event_Stream,
                 Ack_Probe_Event_Stream,
                 Status,
                 Matrix_len,
                 Row_num)
+#elif CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+        .invoke(PcgCallipepla_Probe_LoaderLevel1Monitor,
+                Controller_Probe_Event_Stream,
+                Ack_Probe_Event_Stream,
+                Ptr_Probe_Event_Stream,
+                Pe_Probe_Event_Stream,
+                Status,
+                Matrix_len,
+                Row_num)
+#endif
 #else
                 )
 #endif
@@ -237,7 +259,8 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 SpElement_list_ptr,
                 Ptr_Command_Stream,
                 PE_Param_Probe,
-                Matrix_Len_Stream)
+                Matrix_Len_Stream,
+                Ptr_Probe_Event_Stream)
         .invoke<tapa::join, HBM_CHANNEL_NUM>(PcgCallipepla_Probe_MatrixLoaderStripDrain,
                                              Matrix_data,
                                              Matrix_Command_Stream,
@@ -258,7 +281,8 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                                              tapa::seq())
 #endif
         .invoke(PcgCallipepla_Probe_PEParamDrain,
-                PE_Param_Probe)
+                PE_Param_Probe,
+                Pe_Probe_Event_Stream)
 #if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
         .invoke(PcgCallipepla_Vector_Loader,
                 Batch_num,

@@ -9,6 +9,7 @@
 #include <tapa.h>
 
 #include "cuper_spmv_tasks.hpp"
+#include "pcg_callipepla_common.hpp"
 #include "pcg_callipepla_trace.hpp"
 #include "spmv_service_common.hpp"
 #ifdef JACOBI_TRACE_ENABLED
@@ -208,6 +209,11 @@ void SpmvService_StripPtrLoader(const INDEX_TYPE Batch_num,
                                 tapa::istream<CuperSpmvServiceCommand> &Command_in,
                                 tapa::ostream<INDEX_TYPE> &PE_Param,
                                 tapa::ostreams<INDEX_TYPE, HBM_CHANNEL_NUM> &Matrix_Len_Stream
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+                                ,
+                                tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
                                 ,
                                 tapa::ostream<PcgCallipeplaDebugEvent> &Trace_Event_out
@@ -215,6 +221,19 @@ void SpmvService_StripPtrLoader(const INDEX_TYPE Batch_num,
                                 ) {
     INDEX_TYPE matrix_len[HBM_CHANNEL_NUM];
 #pragma HLS array_partition variable=matrix_len complete
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+    INDEX_TYPE ptr_command_count = 0;
+    INDEX_TYPE ptr_hbm_word_count = 0;
+    INDEX_TYPE probe_event_drop_count = 0;
+    pcg_callipepla_probe_try_write_event(
+        Probe_Event_out,
+        probe_event_drop_count,
+        kPcgCallipeplaProbeEventPtrStart,
+        -1,
+        0,
+        HBM_CHANNEL_NUM);
+#endif
 
 read_strip_lengths:
     for (INDEX_TYPE i_request = 0, i_response = 0; i_response < HBM_CHANNEL_NUM;) {
@@ -229,8 +248,23 @@ read_strip_lengths:
             SpElement_list_ptr.read_data.try_read(value);
             matrix_len[i_response] = value;
             ++i_response;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+            ++ptr_hbm_word_count;
+#endif
         }
     }
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+    pcg_callipepla_probe_try_write_event(
+        Probe_Event_out,
+        probe_event_drop_count,
+        kPcgCallipeplaProbeEventPtrLengthsRead,
+        -1,
+        HBM_CHANNEL_NUM,
+        pcg_callipepla_pack_loader_count_value(
+            ptr_hbm_word_count, probe_event_drop_count));
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
     PcgCallipepla_DebugTryWrite(Trace_Event_out,
                                 kPcgCallipeplaTraceSourcePtrLoader,
@@ -243,6 +277,10 @@ read_strip_lengths:
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+            ++ptr_command_count;
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
             PcgCallipepla_DebugTryWrite(Trace_Event_out,
                                         kPcgCallipeplaTraceSourcePtrLoader,
@@ -251,8 +289,29 @@ read_strip_lengths:
                                         Batch_num);
 #endif
             PE_Param.write(kSpmvServiceStopToken);
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+            Probe_Event_out.write(pcg_callipepla_make_probe_event(
+                kPcgCallipeplaProbeEventPtrStop,
+                kPcgCallipeplaProbePhaseStop,
+                ptr_command_count,
+                pcg_callipepla_pack_loader_count_value(
+                    ptr_hbm_word_count, probe_event_drop_count)));
+#endif
             return;
         }
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+        ++ptr_command_count;
+        pcg_callipepla_probe_try_write_event(
+            Probe_Event_out,
+            probe_event_drop_count,
+            kPcgCallipeplaProbeEventPtrCommandReceived,
+            kPcgCallipeplaPhaseInitSpmv,
+            ptr_command_count,
+            pcg_callipepla_pack_loader_count_value(
+                ptr_hbm_word_count, probe_event_drop_count));
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_DebugTryWrite(Trace_Event_out,
                                     kPcgCallipeplaTraceSourcePtrLoader,
@@ -286,8 +345,33 @@ read_strip_lengths:
                 SpElement_list_ptr.read_data.try_read(value);
                 PE_Param.try_write(value);
                 ++i_response;
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+                ++ptr_hbm_word_count;
+                if ((i_response & 0x00000fff) == 0) {
+                    pcg_callipepla_probe_try_write_event(
+                        Probe_Event_out,
+                        probe_event_drop_count,
+                        kPcgCallipeplaProbeEventPtrBoundaryProgress,
+                        kPcgCallipeplaPhaseInitSpmv,
+                        i_response,
+                        pcg_callipepla_pack_loader_count_value(
+                            ptr_hbm_word_count, probe_event_drop_count));
+                }
+#endif
             }
         }
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
+        pcg_callipepla_probe_try_write_event(
+            Probe_Event_out,
+            probe_event_drop_count,
+            kPcgCallipeplaProbeEventPtrRoundDone,
+            kPcgCallipeplaPhaseInitSpmv,
+            ptr_command_count,
+            pcg_callipepla_pack_loader_count_value(
+                ptr_hbm_word_count, probe_event_drop_count));
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_DebugTryWrite(Trace_Event_out,
                                     kPcgCallipeplaTraceSourcePtrLoader,

@@ -73,6 +73,10 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   每次 command attempt 前直接读取 `Vector_Command_out.full()`，因此 timeout 时可区分
   FIFO full、command 已接受、ack 未读、result 未写或 controller 未读。
 - `loader_drain`：逐档恢复真实 ptr/vector/matrix loader；core/acc/checker/sort 仍不接。
+  level 1 使用真实 `SpmvService_StripPtrLoader`、16 路 matrix-length fanout 和
+  `PcgCallipepla_Probe_PEParamDrain`。16 路 matrix drain 只消费 command/length，
+  `Matrix_data` request enable 为 0。controller、fake-ack、ptr loader 和 PE drain 分别
+  发事件，`PcgCallipepla_Probe_LoaderLevel1Monitor` 是唯一 Status writer。
 
 ## Metrics
 
@@ -84,8 +88,13 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   `53` monitor heartbeat、`54` command attempts、`55` command full observations、
   `56` command accepted、`57` ack command received、`58` ack result sent、`59`
   controller result received、`60` current phase、`61` controller transaction state、
-  `62` ack heartbeat、`63` flags/drop counters。正常完成时 `52=99`；mode 1/3 保持旧
-  probe counter 布局。
+  `62` ack heartbeat、`63` flags/drop counters。正常完成时 `52=99`。
+- mode 3 的 `Status[50..63]` 为：`50/51` magic/mode，`52` controller/ack last event，
+  `53` monitor heartbeat，`54..59` command attempts/full/accepted、ack command/result、
+  controller result，`60` loader last event，`61[15:0]` ptr commands（含 stop），
+  `61[31:16]` PE rounds，`62` ptr HBM words，`63[5:0]` full/write/controller/ack/ptr/PE
+  flags，`63[15:8]` controller drops，`63[23:16]` ack drops，`63[31:24]` loader drops。
+  正常完成时 `52=99`，所有 done flag 置位。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。

@@ -60,6 +60,15 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeEventAckStart = 30;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventAckCommandReceived = 31;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventAckResultSent = 32;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventAckStop = 33;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrStart = 40;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrLengthsRead = 41;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrCommandReceived = 42;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrBoundaryProgress = 43;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrRoundDone = 44;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrStop = 45;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeStart = 50;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeRoundDone = 51;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeStop = 52;
 
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxSend = 0;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxWaitResult = 1;
@@ -73,6 +82,15 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagControllerDone = 1 << 2;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagAckStop = 1 << 3;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagControllerDrop = 1 << 4;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagAckDrop = 1 << 5;
+
+static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPtrDone = 1 << 4;
+static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPeDone = 1 << 5;
+
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    (CUPER_CALLIPEPLA_PROBE_MODE_ID == 2 || \
+     CUPER_CALLIPEPLA_PROBE_MODE_ID == 3)
+#define CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR 1
+#endif
 
 struct PcgCallipeplaSpmvVectorCommand {
     INDEX_TYPE stop;
@@ -134,6 +152,21 @@ inline INDEX_TYPE pcg_callipepla_probe_saturating_increment(
     return value < limit ? value + 1 : limit;
 }
 
+inline void pcg_callipepla_probe_try_write_event(
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out,
+    INDEX_TYPE &drop_count,
+    const INDEX_TYPE event,
+    const INDEX_TYPE phase,
+    const INDEX_TYPE value0,
+    const INDEX_TYPE value1) {
+#pragma HLS inline
+    if (!Probe_Event_out.try_write(
+            pcg_callipepla_make_probe_event(event, phase, value0, value1))) {
+        drop_count = pcg_callipepla_probe_saturating_increment(
+            drop_count, 0xff);
+    }
+}
+
 inline INDEX_TYPE pcg_callipepla_pack_controller_probe_value(
     const INDEX_TYPE full_count,
     const bool full_before,
@@ -184,6 +217,19 @@ inline INDEX_TYPE pcg_callipepla_pack_controller_counts_value(
     const INDEX_TYPE drop_count) {
 #pragma HLS inline
     return pcg_callipepla_pack_ack_stop_value(result_count, drop_count);
+}
+
+inline INDEX_TYPE pcg_callipepla_pack_loader_count_value(
+    const INDEX_TYPE count,
+    const INDEX_TYPE drop_count) {
+#pragma HLS inline
+    const INDEX_TYPE saturated_count =
+        count < 0x01000000 ? count : 0x00ffffff;
+    const INDEX_TYPE saturated_drop_count =
+        drop_count < 0x100 ? drop_count : 0xff;
+    ap_uint<32> packed = static_cast<unsigned int>(saturated_count);
+    packed.range(31, 24) = saturated_drop_count;
+    return static_cast<INDEX_TYPE>(packed.to_uint());
 }
 
 inline INDEX_TYPE pcg_callipepla_num_float_v16_packets(const INDEX_TYPE element_count) {

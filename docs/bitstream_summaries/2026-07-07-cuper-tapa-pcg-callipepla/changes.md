@@ -102,6 +102,36 @@
   clock 为 `138/500/450 MHz`；请求 500 MHz DATA 下 routed timing 未收敛，WNS
   `-5.200 ns`、TNS `-26783.914 ns`，因此该文件只作为待上板的 debug artifact。
 
+## 2026-07-11 loader-drain level 1 monitor
+
+- mode 3 复用 mode 2 的 controller/fake-ack 事件握手；controller 在
+  `loader_drain` 下也不再持有 Status mmap。新增
+  `PcgCallipepla_Probe_LoaderLevel1Monitor`，它是 mode 3 唯一 Status writer。
+- 真实 `SpmvService_StripPtrLoader` 增加启动长度读取、command 接收、boundary 读取
+  进度、每轮完成和 stop 事件。进度事件全部使用 `try_write()`，最终 stop 事件使用
+  blocking `write()`；ptr command 计数包含 stop，HBM word 计数包含启动时的 16 路
+  matrix length。
+- `PcgCallipepla_Probe_PEParamDrain` 真实消费 `Batch/Row/Column` 和
+  `(Batch_num+1)*16` 个 boundary word，每轮报告 round done，stop 事件可靠送达。
+- 16 路 matrix drain 继续消费各自 command 和 `Matrix_Len_Stream`，但 level 1 的
+  `Matrix_data` read/write request enable 在生成 RTL 中全部 tied low；vector loader、
+  SpMV core、accumulator、checker 和 sort tree 仍未恢复。
+- mode 3 的 `Status[50..63]` 固定为：magic/mode、controller/ack last event、monitor
+  heartbeat、六个 command/result counter、loader last event、ptr command + PE round
+  packed counter、ptr HBM word count，以及 full/write/controller/ack/ptr/PE done flags 和
+  controller/ack/loader 三类 event-drop counter。mode 2 布局不变。
+- mode 3 controller/ack 事件 FIFO 单独扩到 128/64，避免软件仿真中短消息 burst 丢失
+  stop-accepted 进度事件；mode 2 仍保持原 32/16 深度。
+- Host 新增 mode 3 字段解码；顶层 kernel 名、参数顺序、AXI-Lite offsets、HBM mapping、
+  Tau/dimension 判断和 probe mode 名称均不变。
+- 100 MHz link 已完成并同步为
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`。UUID 为
+  `fdbc2e10-20ea-8e78-6b3c-72a01803cde1`，DATA/KERNEL/HBM 为
+  `100/500/450 MHz`；routed WNS `0.002 ns`、TNS `0`、WHS `0.009 ns`、THS `0`。
+  同主线上一 `20260710-demo` 文件已从同步目录删除，历史握手板测记录保留。
+- 该版本仍是 fake-ack debug artifact，等待服务器侧 loader level-1 demo-only 上板；
+  不替换标准 bitstream，不更新正式 `source.diff`。
+
 ## Host
 
 - 默认加载 Project-XPlus CSR dataset，并直接打包原始矩阵 `A`，不拆 `A=D+R`。

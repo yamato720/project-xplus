@@ -57,6 +57,13 @@ if [[ "$probe_mode" != "" ]]; then
   esac
 fi
 
+if [[ "$probe_mode" == "loader_drain" &&
+      ( "${CUPER_CALLIPEPLA_SPMV_STRIP_PADDING:-0}" == "0" ||
+        "${CUPER_CALLIPEPLA_SPMV_STRIP_PADDING:-}" == "" ) ]]; then
+  echo "CUPER_CALLIPEPLA_PROBE_MODE=loader_drain requires CUPER_CALLIPEPLA_SPMV_STRIP_PADDING=1." >&2
+  exit 1
+fi
+
 loader_level="${CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL:-1}"
 case "$loader_level" in
   1|ptr)

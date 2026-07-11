@@ -484,6 +484,38 @@ void print_status_range(const char* label,
 void print_callipepla_probe_fields(std::ostream& output,
                                    const char* label,
                                    const AlignedVector<INDEX_TYPE>& status) {
+    if (status[51] == 3) {
+        const uint32_t packed_rounds = static_cast<uint32_t>(status[61]);
+        const uint32_t flags = static_cast<uint32_t>(status[63]);
+        output << "[" << label << "] magic=0x" << std::hex << status[50]
+               << std::dec
+               << " mode_id=" << status[51]
+               << " event=" << status[52]
+               << " monitor_heartbeat=" << status[53]
+               << " command_attempts=" << status[54]
+               << " command_full=" << status[55]
+               << " command_accepted=" << status[56]
+               << " ack_command_received=" << status[57]
+               << " ack_result_sent=" << status[58]
+               << " controller_result_received=" << status[59]
+               << " loader_event=" << status[60]
+               << " ptr_commands=" << (packed_rounds & 0xffff)
+               << " pe_param_rounds=" << ((packed_rounds >> 16) & 0xffff)
+               << " ptr_hbm_words=" << status[62]
+               << " flags=0x" << std::hex << flags << std::dec
+               << " last_full=" << ((flags >> 0) & 1)
+               << " last_write_success=" << ((flags >> 1) & 1)
+               << " controller_done=" << ((flags >> 2) & 1)
+               << " ack_stop=" << ((flags >> 3) & 1)
+               << " ptr_done=" << ((flags >> 4) & 1)
+               << " pe_done=" << ((flags >> 5) & 1)
+               << " controller_event_drops=" << ((flags >> 8) & 0xff)
+               << " ack_event_drops=" << ((flags >> 16) & 0xff)
+               << " loader_event_drops=" << ((flags >> 24) & 0xff)
+               << "\n";
+        return;
+    }
+
     if (status[51] != 2) {
         output << "[" << label << "] magic=0x" << std::hex << status[50]
                << std::dec

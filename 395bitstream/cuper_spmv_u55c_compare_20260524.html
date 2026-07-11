@@ -1230,16 +1230,18 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     </section>
 
     <section>
-      <h2>2026-07-11 Callipepla Cmd-Drain Demo-Only 握手定位</h2>
+      <h2>2026-07-11 Callipepla Cmd-Drain 上一 Demo 握手定位</h2>
       <p>
-        本节只记录当前 TAPA full-PCG demo 槽中的 Callipepla debug artifact：
+        本节保留上一 TAPA full-PCG demo 槽中的 Callipepla debug artifact 历史记录：
         <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin</code>，kernel 为
         <code>CuperPcgCallipepla</code>，UUID 为
         <code>4a272f84-1e4d-fdb8-0cfa-1fa5e77f433c</code>，SHA256 为
         <code>840018ee2c1cb30e7e8ed6f5f6c815e9abf830f9e060de850bfc6aeecb17198c</code>，
         DATA/KERNEL/HBM 为 <code>138/500/450 MHz</code>。它使用
         <code>CUPER_CALLIPEPLA_PROBE_MODE=cmd_drain</code>：controller 是真实控制器，
-        vector phase 是 fake-ack，ptr/matrix/vector datapath 未恢复。
+        vector phase 是 fake-ack，ptr/matrix/vector datapath 未恢复。该文件已由下面的
+        <code>20260711-demo</code> 覆盖，不再位于同步目录；UUID 和板测结论继续作为历史
+        基线保留。
       </p>
       <p class="callout">
         服务器侧反馈显示，五组数据集的 <code>MAX_ITERS=0/1</code> 以及
@@ -1275,8 +1277,56 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         结论：command/result 计数满足 <code>5*I+3</code> / <code>5*I+2</code>，
         controller、command FIFO、fake-ack、result FIFO 和 stop/finalization 已排除死锁。
         该数据不进入 <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、
-        correctness 或性能曲线。下一定位边界是 <code>loader_drain level=1</code>，只恢复
-        真实 ptr HBM 读取、matrix-length fanout 和 <code>PE_Param</code> drain。
+        correctness 或性能曲线。该握手基线的下一定位边界
+        <code>loader_drain level=1</code> 已由下一节当前 demo 实现。
+      </p>
+    </section>
+
+    <section>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 1 Demo-Only 定位版</h2>
+      <p>
+        当前 TAPA full-PCG demo 槽为
+        <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
+        <code>CuperPcgCallipepla</code>，UUID 为
+        <code>fdbc2e10-20ea-8e78-6b3c-72a01803cde1</code>，SHA256 为
+        <code>0e0e7e832b24afff008665f45ea0020c9cb121cfcf3c2c0f1cf20ea13ee76fe0</code>，
+        DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>。routed timing 已收敛：WNS
+        <code>0.002 ns</code>、TNS <code>0</code>、WHS <code>0.009 ns</code>、THS
+        <code>0</code>。
+      </p>
+      <p class="callout">
+        该版使用 <code>loader_drain level=1</code>：恢复真实 strip ptr HBM 读取、16 路
+        matrix-length fanout 和 <code>PE_Param</code> drain。16 路 matrix drain 只消费
+        command/length，生成 RTL 不发 <code>Matrix_data</code> request；vector loader、
+        SpMV core、accumulator、checker 和 sort 仍关闭，vector phase 继续 fake-ack。
+        mode-3 monitor 是唯一 Status writer。它只用于 loader/control/finalization 定位，
+        不提供 PCG correctness 或性能结论。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Software/TAPA simulation</th>
+              <th>command / result</th>
+              <th>ptr commands</th>
+              <th>PE rounds</th>
+              <th>ptr HBM words</th>
+              <th>event / full / drops</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16 MAX_ITERS=0</code></td><td class="num"><code>3 / 2</code></td><td class="num">2</td><td class="num">1</td><td class="num">48</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=1</code></td><td class="num"><code>8 / 7</code></td><td class="num">3</td><td class="num">2</td><td class="num">80</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=10</code></td><td class="num"><code>53 / 52</code></td><td class="num">12</td><td class="num">11</td><td class="num">368</td><td class="num"><code>99 / 0 / 0-0-0</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        当前仅完成软件回归、XO/RTL 审查和 timing-clean xclbin 构建，服务器侧 demo-only
+        上板待补。板测先跑 <code>thermal2_n16 MAX_ITERS=0/1</code>，通过后覆盖五组数据集
+        的 0/1iter，最后补 n16 的 10/100iter 压测。该数据不进入
+        <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或
+        性能曲线。
       </p>
     </section>
 

@@ -988,3 +988,107 @@ finalization 已排除死锁。该 artifact 仍不读取真实 ptr/matrix/vector
 结果不用于 PCG correctness、分段时间或性能结论，也不更新正式 `source.diff`。下一步
 进入 `loader_drain level=1`，只恢复真实 strip ptr HBM 读取、matrix-length fanout 和
 `PE_Param` drain。
+
+## 2026-07-11 loader-drain level 1 软件与 XO 验证
+
+固定参数：
+
+```text
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain
+CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1
+CLOCK_PERIOD=10.0
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level1-xo-build/
+```
+
+`thermal2_n16` software/TAPA simulation：
+
+```text
+MAX_ITERS=0:
+  commands/results=3/2, ack=2/2, ptr_commands=2, PE rounds=1
+  ptr_hbm_words=48, event=99, full=0, flags=0x3e, drops=0/0/0
+
+MAX_ITERS=1:
+  commands/results=8/7, ack=7/7, ptr_commands=3, PE rounds=2
+  ptr_hbm_words=80, event=99, full=0, flags=0x3e, drops=0/0/0
+
+MAX_ITERS=10:
+  commands/results=53/52, ack=52/52, ptr_commands=12, PE rounds=11
+  ptr_hbm_words=368, event=99, full=0, flags=0x3e, drops=0/0/0
+```
+
+该数据集 `Batch_num=1`，因此 word 计数满足
+`16 + (I+1)*(Batch_num+1)*16`。同时回归：
+
+- mode 2 `cmd_drain MAX_ITERS=0/1` 保持 `3/2`、`8/7` command/result，
+  `command_full=0`、drop=`0/0`；
+- 无 probe full graph `MAX_ITERS=0` 保持 `rr=110.4105301696`、diff=0；
+- 无 probe full graph `MAX_ITERS=1` 保持 converged，
+  `max_abs_diff=1.086781531434e-08`。
+
+XO 生成日志：
+
+```text
+logs/cuper_tapa_pcg_callipepla_loader_monitor_level1_xo_20260711_003347.log
+XO generated: 2026-07-11 00:42:50
+```
+
+XO/RTL 静态审查：
+
+- `PcgCallipepla_Controller.v` 不含 `Status` / `m_axi_Status`；
+- 只有 `PcgCallipepla_Probe_LoaderLevel1Monitor.v` 含 Status read/write port；
+- `PcgCallipepla_Probe_MatrixLoaderStripDrain.v` 中
+  `Matrix_data_read_addr_s_write=0`、`Matrix_data_read_data_s_read=0`，write request/resp
+  也全部为 0；HLS report 仍显示 command 和 `Matrix_Len_Stream` read mux；
+- ptr loader、PE drain、mode-3 monitor 和 controller 均完成 HLS，XO packaging 成功。
+
+使用该 XO 启动 100 MHz link：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-loader-monitor-level1-hw
+log: logs/cuper_tapa_pcg_callipepla_loader_monitor_level1_hw_20260711_004344.log
+status: Vitis link Run completed, impl Complete, VPL/POST-VPL 0 errors
+```
+
+最终构建结果：
+
+```text
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level1-xo-build/
+file: 395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin
+UUID: fdbc2e10-20ea-8e78-6b3c-72a01803cde1
+SHA256: 0e0e7e832b24afff008665f45ea0020c9cb121cfcf3c2c0f1cf20ea13ee76fe0
+INFO SHA256: 5527fd3c42add486a2a193bdc7d08e209efb0d91c89e9ec75aaae62fd83cd2ea
+DATA/KERNEL/HBM: 100/500/450 MHz
+Vitis link elapsed: 2h38m33s
+```
+
+routed timing report：
+
+```text
+cuper-tapa-pcg-callipepla-loader-monitor-level1-xo-build/
+  reports/link/imp/impl_1_hw_bb_locked_timing_summary_routed.rpt
+
+WNS 0.002 ns
+TNS 0.000 ns
+setup failing endpoints 0
+WHS 0.009 ns
+THS 0.000 ns
+hold failing endpoints 0
+All user specified timing constraints are met.
+```
+
+最终 xclbin info 确认 requested/achieved DATA 为 `100/100 MHz`，KERNEL 为
+`500/500 MHz`，HBM 为 `450 MHz`。同步时用 `20260711-demo` 替换同主线
+`20260710-demo` 文件；上一握手 artifact 的 Git 历史和服务器侧测试记录保留。
+
+服务器侧待验收顺序：
+
+1. `thermal2_n16 MAX_ITERS=0`，再跑 `MAX_ITERS=1`；
+2. 通过后覆盖 `thermal2_n65536`、`thermal2_n131072`、`thermal2_n262144` 和完整
+   `thermal2` 的 `0/1iter`；
+3. 最后补 `thermal2_n16 MAX_ITERS=10/100`。
+
+验收要求：`event=99`，vector command/result、ptr command、PE round 和 ptr HBM word
+计数符合公式，`command_full=0`，controller/ack/loader event drop 均为 0，
+controller/ack/ptr/PE done flags 全部置位，XRT error 为空且 CU 回到 IDLE。该 artifact
+仍不做 PCG correctness 或性能结论，不更新正式 `source.diff`。
