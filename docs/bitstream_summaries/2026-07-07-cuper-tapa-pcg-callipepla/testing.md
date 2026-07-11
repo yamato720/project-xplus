@@ -1112,3 +1112,79 @@ ptr HBM 读取、matrix-length fanout、`PE_Param` drain 和 stop/finalization �
 由于 Matrix_data、vector loader 和 SpMV core 仍未恢复，不做 PCG correctness 或性能
 结论。下一定位边界为 `loader_drain level=2`：恢复真实 X/P vector loader 和向量 stream
 drain，继续保持 Matrix_data request 关闭、SpMV core 未接入。
+
+## 2026-07-11 loader-drain level 2 软件回归
+
+构建参数：
+
+```text
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain
+CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=2
+CLOCK_PERIOD=10.0
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/
+```
+
+`thermal2_n16` software/TAPA simulation：
+
+```text
+MAX_ITERS=0:
+  vector commands/rounds/HBM words=2/1/2
+  ptr commands=2, PE rounds=1, ptr HBM words=48
+  event=99, full=0, flags=0x7e, drops=0/0/0
+
+MAX_ITERS=1:
+  vector commands/rounds/HBM words=3/2/4
+  ptr commands=3, PE rounds=2, ptr HBM words=80
+  event=99, full=0, flags=0x7e, drops=0/0/0
+
+MAX_ITERS=10:
+  vector commands/rounds/HBM words=12/11/22
+  ptr commands=12, PE rounds=11, ptr HBM words=368
+  event=99, full=0, flags=0x7e, drops=0/0/0
+```
+
+计数公式：
+
+```text
+vector commands including stop = I + 2
+vector rounds                 = I + 1
+vector HBM double_v8 words    = (I + 1) * ceil(Column_num / 8)
+```
+
+同时回归：
+
+- level 1 `MAX_ITERS=0/1` 保持 vector 扩展计数为 0，原 ptr/PE 计数、`flags=0x3e`
+  和 `Status[50..63]` 语义不变；
+- mode 2 `cmd_drain MAX_ITERS=0/1` 保持 `3/2`、`8/7` command/result，full/drop=0；
+- 无 probe full graph `MAX_ITERS=0` 保持 `rr=110.4105301696`、diff=0；
+- 无 probe full graph `MAX_ITERS=1` 保持 converged，
+  `max_abs_diff=1.086781531434e-08`。
+
+level 2 仍继续使用 fake vector-phase ack，Matrix_data request 和 SpMV core 未恢复；
+软件 diff 不作为 PCG correctness 结论。下一步生成并审查独立 level-2 XO，确认
+controller 无 Status、loader monitor 是唯一 Status writer、X/P 有真实 read request，
+Matrix_data read request 仍全部为 0。
+
+level-2 XO 已生成：
+
+```text
+XO: cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/CuperPcgCallipepla.xo
+generated: 2026-07-11 13:40:19
+size: 437647 bytes
+log: logs/cuper_tapa_pcg_callipepla_loader_monitor_level2_xo_20260711_133343.log
+build exit code: 0
+```
+
+XO/RTL 静态审查：
+
+- `PcgCallipepla_Controller.v` 不含 `Status` / `m_axi_Status`；
+- 只有顶层 wrapper 和 `PcgCallipepla_Probe_LoaderMonitor.v` 含 Status AXI port，monitor
+  是唯一子任务 Status master；
+- `PcgCallipepla_Vector_Loader.v` 包含 X0/X1/P0/P1 四组 512-bit m_axi read channel，
+  `ARVALID/RREADY` 均连接到真实 pipeline logic；HLS resource report 也保留四组 m_axi；
+- `PcgCallipepla_Probe_MatrixLoaderStripDrain.v` 的 read/write request 和 response enable
+  仍全部为常量 0；
+- monitor RTL 保留 `Vector_Event_in`、vector command/round/HBM-word counters、event 64
+  stop 判定以及 Status 47/48/49 写回；
+- XO packaging 成功。下一步使用同一 XO 启动 100 MHz Vitis link。

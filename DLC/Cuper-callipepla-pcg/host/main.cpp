@@ -485,11 +485,16 @@ void print_callipepla_probe_fields(std::ostream& output,
                                    const char* label,
                                    const AlignedVector<INDEX_TYPE>& status) {
     if (status[51] == 3) {
+        const uint32_t packed_vector = static_cast<uint32_t>(status[48]);
         const uint32_t packed_rounds = static_cast<uint32_t>(status[61]);
         const uint32_t flags = static_cast<uint32_t>(status[63]);
         output << "[" << label << "] magic=0x" << std::hex << status[50]
                << std::dec
                << " mode_id=" << status[51]
+               << " loader_level=" << status[47]
+               << " vector_commands=" << (packed_vector & 0xffff)
+               << " vector_rounds=" << ((packed_vector >> 16) & 0xffff)
+               << " vector_hbm_words=" << status[49]
                << " event=" << status[52]
                << " monitor_heartbeat=" << status[53]
                << " command_attempts=" << status[54]
@@ -509,6 +514,7 @@ void print_callipepla_probe_fields(std::ostream& output,
                << " ack_stop=" << ((flags >> 3) & 1)
                << " ptr_done=" << ((flags >> 4) & 1)
                << " pe_done=" << ((flags >> 5) & 1)
+               << " vector_done=" << ((flags >> 6) & 1)
                << " controller_event_drops=" << ((flags >> 8) & 0xff)
                << " ack_event_drops=" << ((flags >> 16) & 0xff)
                << " loader_event_drops=" << ((flags >> 24) & 0xff)

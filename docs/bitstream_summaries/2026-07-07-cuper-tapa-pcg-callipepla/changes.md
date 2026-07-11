@@ -132,6 +132,25 @@
 - 该版本仍是 fake-ack debug artifact，等待服务器侧 loader level-1 demo-only 上板；
   不替换标准 bitstream，不更新正式 `source.diff`。
 
+## 2026-07-11 loader-drain level 2 vector monitor
+
+- level 2 在 level 1 的真实 ptr/PE 路径上恢复 `PcgCallipepla_Vector_Loader`，按
+  `Spmv_Vector_Command_Stream` 从 X/P 双 bank 读取 `double_v8`，转换为 `float_v16`
+  后交给 `PcgCallipepla_DestroyFloatV16` drain；Matrix_data 和 SpMV core 仍不恢复。
+- vector loader 新增 start、command receive、HBM progress、round done 和 stop 事件。
+  进度事件使用 non-blocking write，最终 stop 使用 blocking write，并携带 commands
+  （含 stop）、rounds 和累计 HBM words。
+- mode-3 monitor 统一改名为 `PcgCallipepla_Probe_LoaderMonitor`。level 2 等待
+  controller/ack/ptr/PE/vector 五类 stop/done；`Status[47]` 记录 loader level，
+  `Status[48]` 低/高 16 位记录 vector commands/rounds，`Status[49]` 记录 vector HBM
+  words，`Status[63].bit6` 是 vector done。既有 `Status[50..63]` level-1 字段不变，
+  高 8 位 loader drop 现在汇总 ptr/PE/vector。
+- controller/ack event FIFO 在 mode 2 和 mode 3 均使用 128/64 深度，避免 software
+  simulation 中 producer burst 依赖线程调度；mode-2 Status 字段和板测语义不变。
+- Host 增加 loader level、vector commands/rounds/HBM words 和 vector done 解码。
+- 顶层 ABI、AXI-Lite offsets、HBM mapping、Tau/dimension 判断和 probe mode 名称不变。
+  level 2 仍是 fake-ack debug boundary，不做 PCG correctness 或性能结论。
+
 ## Host
 
 - 默认加载 Project-XPlus CSR dataset，并直接打包原始矩阵 `A`，不拆 `A=D+R`。

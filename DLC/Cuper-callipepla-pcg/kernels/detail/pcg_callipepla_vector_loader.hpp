@@ -30,6 +30,10 @@ void PcgCallipepla_Vector_Loader(
     tapa::mmap<double_v8> P1,
     tapa::istream<PcgCallipeplaSpmvVectorCommand> &Command_in,
     tapa::ostream<float_v16> &Vector_X_Stream
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+    ,
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
     ,
     tapa::ostream<PcgCallipeplaDebugEvent> &Debug_Event_out
@@ -39,12 +43,35 @@ void PcgCallipepla_Vector_Loader(
         pcg_callipepla_num_float_v16_packets(Column_num);
     const INDEX_TYPE double_packet_count =
         pcg_callipepla_num_double_v8_packets(Column_num);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+    INDEX_TYPE command_count = 0;
+    INDEX_TYPE hbm_word_count = 0;
+    INDEX_TYPE probe_event_drop_count = 0;
+    pcg_callipepla_probe_try_write_event(
+        Probe_Event_out,
+        probe_event_drop_count,
+        kPcgCallipeplaProbeEventVectorStart,
+        -1,
+        0,
+        0);
+#endif
 
 vector_loader_loop:
     for (;;) {
 #pragma HLS loop_flatten off
         const PcgCallipeplaSpmvVectorCommand command = Command_in.read();
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+        ++command_count;
+#endif
         if (command.stop != 0) {
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+            Probe_Event_out.write(pcg_callipepla_make_probe_event(
+                kPcgCallipeplaProbeEventVectorStop,
+                kPcgCallipeplaProbePhaseStop,
+                command_count,
+                pcg_callipepla_pack_loader_count_value(
+                    hbm_word_count, probe_event_drop_count)));
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
             PcgCallipepla_DebugTryWrite(Debug_Event_out,
                                         kPcgCallipeplaTraceSourceVectorLoader,
@@ -54,6 +81,15 @@ vector_loader_loop:
 #endif
             return;
         }
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+        pcg_callipepla_probe_try_write_event(
+            Probe_Event_out,
+            probe_event_drop_count,
+            kPcgCallipeplaProbeEventVectorCommandReceived,
+            command.vector_source,
+            command_count,
+            command.bank);
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_DebugTryWrite(Debug_Event_out,
                                     kPcgCallipeplaTraceSourceVectorLoader,
@@ -74,13 +110,25 @@ vector_loader_loop:
             double_v8 hi;
             if (command.vector_source == kPcgCallipeplaVectorSourceP) {
                 lo = PcgCallipepla_ReadPBank(P0, P1, command.bank, double_index);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+                ++hbm_word_count;
+#endif
                 if (double_index + 1 < double_packet_count) {
                     hi = PcgCallipepla_ReadPBank(P0, P1, command.bank, double_index + 1);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+                    ++hbm_word_count;
+#endif
                 }
             } else {
                 lo = PcgCallipepla_ReadDoubleBank(X0, X1, command.bank, double_index);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+                ++hbm_word_count;
+#endif
                 if (double_index + 1 < double_packet_count) {
                     hi = PcgCallipepla_ReadDoubleBank(X0, X1, command.bank, double_index + 1);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+                    ++hbm_word_count;
+#endif
                 }
             }
 
@@ -101,7 +149,29 @@ vector_loader_loop:
                         : 0.0f;
             }
             Vector_X_Stream.write(out);
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+            if ((packet & 0x0fff) == 0x0fff) {
+                pcg_callipepla_probe_try_write_event(
+                    Probe_Event_out,
+                    probe_event_drop_count,
+                    kPcgCallipeplaProbeEventVectorHbmProgress,
+                    command.vector_source,
+                    command_count,
+                    pcg_callipepla_pack_loader_count_value(
+                        hbm_word_count, probe_event_drop_count));
+            }
+#endif
         }
+#ifdef CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS
+        pcg_callipepla_probe_try_write_event(
+            Probe_Event_out,
+            probe_event_drop_count,
+            kPcgCallipeplaProbeEventVectorRoundDone,
+            command.vector_source,
+            command_count,
+            pcg_callipepla_pack_loader_count_value(
+                hbm_word_count, probe_event_drop_count));
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
         PcgCallipepla_DebugTryWrite(Debug_Event_out,
                                     kPcgCallipeplaTraceSourceVectorLoader,

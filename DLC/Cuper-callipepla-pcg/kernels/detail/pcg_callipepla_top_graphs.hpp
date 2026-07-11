@@ -116,17 +116,10 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<ap_uint<64>, 16> Stage_Ticks_Stream("Stage_Ticks_Stream");
 
 #ifdef CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR
-#if CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
     tapa::stream<PcgCallipeplaProbeEvent, 128> Controller_Probe_Event_Stream(
         "Controller_Probe_Event_Stream");
     tapa::stream<PcgCallipeplaProbeEvent, 64> Ack_Probe_Event_Stream(
         "Ack_Probe_Event_Stream");
-#else
-    tapa::stream<PcgCallipeplaProbeEvent, 32> Controller_Probe_Event_Stream(
-        "Controller_Probe_Event_Stream");
-    tapa::stream<PcgCallipeplaProbeEvent, 16> Ack_Probe_Event_Stream(
-        "Ack_Probe_Event_Stream");
-#endif
 #endif
 
 #if CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
@@ -140,6 +133,8 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
 #endif
 #if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
     tapa::stream<float_v16, 256> Vector_X_Probe_Stream("Vector_X_Probe_Stream");
+    tapa::stream<PcgCallipeplaProbeEvent, 16> Vector_Probe_Event_Stream(
+        "Vector_Probe_Event_Stream");
 #endif
 #endif
 
@@ -185,11 +180,14 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Matrix_len,
                 Row_num)
 #elif CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
-        .invoke(PcgCallipepla_Probe_LoaderLevel1Monitor,
+        .invoke(PcgCallipepla_Probe_LoaderMonitor,
                 Controller_Probe_Event_Stream,
                 Ack_Probe_Event_Stream,
                 Ptr_Probe_Event_Stream,
                 Pe_Probe_Event_Stream,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+                Vector_Probe_Event_Stream,
+#endif
                 Status,
                 Matrix_len,
                 Row_num)
@@ -292,7 +290,8 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 P_0,
                 P_1,
                 Spmv_Vector_Command_Stream,
-                Vector_X_Probe_Stream)
+                Vector_X_Probe_Stream,
+                Vector_Probe_Event_Stream)
         .invoke(PcgCallipepla_DestroyFloatV16,
                 Batch_num,
                 Column_num,

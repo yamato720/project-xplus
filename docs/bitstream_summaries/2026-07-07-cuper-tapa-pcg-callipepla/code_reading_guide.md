@@ -76,7 +76,11 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   level 1 使用真实 `SpmvService_StripPtrLoader`、16 路 matrix-length fanout 和
   `PcgCallipepla_Probe_PEParamDrain`。16 路 matrix drain 只消费 command/length，
   `Matrix_data` request enable 为 0。controller、fake-ack、ptr loader 和 PE drain 分别
-  发事件，`PcgCallipepla_Probe_LoaderLevel1Monitor` 是唯一 Status writer。
+  发事件，`PcgCallipepla_Probe_LoaderMonitor` 是唯一 Status writer。
+  level 2 继续启用真实 `PcgCallipepla_Vector_Loader`，从 X/P 当前 bank 读取
+  `double_v8` 并转换成 `float_v16`，链尾由 `PcgCallipepla_DestroyFloatV16` drain。
+  vector loader 也向同一个 monitor 报告 command、round、HBM words 和 stop；
+  Matrix_data request 仍为 0。
 
 ## Metrics
 
@@ -95,6 +99,10 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   `61[31:16]` PE rounds，`62` ptr HBM words，`63[5:0]` full/write/controller/ack/ptr/PE
   flags，`63[15:8]` controller drops，`63[23:16]` ack drops，`63[31:24]` loader drops。
   正常完成时 `52=99`，所有 done flag 置位。
+- mode 3 level 2 额外使用 `Status[47]` 记录 loader level，`Status[48][15:0]` 记录
+  vector commands（含 stop），`Status[48][31:16]` 记录 vector rounds，`Status[49]`
+  记录 vector HBM `double_v8` words，`Status[63].bit6` 记录 vector done。level 1
+  这些扩展字段为 0，不改变既有 `Status[50..63]` 语义。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。

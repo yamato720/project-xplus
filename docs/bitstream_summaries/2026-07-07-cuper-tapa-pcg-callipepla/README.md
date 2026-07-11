@@ -16,6 +16,8 @@
   `logs/cuper_tapa_pcg_callipepla_loader_monitor_level1_hw_20260711_004344.log`
 - 当前同步文件：
   `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`
+- 下一构建：`loader_drain level=2` 已完成源码、软件回归和 XO/RTL 审查；独立目录
+  `cuper-tapa-pcg-callipepla-loader-monitor-level2-xo-build/`
 - 构建 tmux 会话：
   `project-xplus-cuper-tapa-pcg-callipepla-loader-monitor-level1-hw`
 - 默认配置：`CUPER_CALLIPEPLA_HBM_CHANNELS=16`，
@@ -68,6 +70,14 @@ XRT error 为空且 CU 回到 IDLE。本地没有服务器 raw log，本记录�
 fake-ack debug artifact，不做 PCG correctness 或性能结论，不更新正式
 `source.diff`。下一定位边界进入 `loader_drain level=2`，恢复真实 X/P vector loader
 和向量 stream drain，Matrix_data 与 SpMV core 仍不恢复。
+
+level 2 源码已经接入真实 `PcgCallipepla_Vector_Loader`：按 SpMV command 从 X/P 当前
+bank 读取 `double_v8`，转换为 `float_v16` 后由 tail drain 消费。mode-3 monitor 新增
+vector command/round/HBM-word 计数、vector stop flag 和 event-drop 汇总；level 1 的
+`Status[50..63]` 保持不变，level 2 使用 `Status[47..49]` 扩展字段。软件回归已通过
+`thermal2_n16 MAX_ITERS=0/1/10`，vector commands/rounds/HBM words 分别为
+`2/1/2`、`3/2/4`、`12/11/22`，所有点 `flags=0x7e`、full/drop=0。Matrix_data request
+仍关闭，SpMV core 仍未接入。
 
 2026-07-11 服务器侧反馈确认上一握手 artifact 已通过以下 demo-only 覆盖：
 

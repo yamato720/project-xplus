@@ -431,6 +431,10 @@ probe_handshake_monitor_loop:
     CUPER_CALLIPEPLA_PROBE_MODE_ID == 3
 inline void PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
     tapa::mmap<INDEX_TYPE> &Status,
+    const INDEX_TYPE loader_level,
+    const INDEX_TYPE vector_command_count,
+    const INDEX_TYPE vector_round_count,
+    const INDEX_TYPE vector_hbm_word_count,
     const INDEX_TYPE last_controller_ack_event,
     const INDEX_TYPE monitor_heartbeat,
     const INDEX_TYPE producer_attempts,
@@ -448,7 +452,13 @@ inline void PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
     ap_uint<32> packed_rounds = 0;
     packed_rounds.range(15, 0) = ptr_command_count & 0xffff;
     packed_rounds.range(31, 16) = pe_round_count & 0xffff;
+    ap_uint<32> packed_vector = 0;
+    packed_vector.range(15, 0) = vector_command_count & 0xffff;
+    packed_vector.range(31, 16) = vector_round_count & 0xffff;
 
+    Status[47] = loader_level;
+    Status[48] = static_cast<INDEX_TYPE>(packed_vector.to_uint());
+    Status[49] = vector_hbm_word_count;
     Status[50] = kPcgCallipeplaProbeMagic;
     Status[51] = CUPER_CALLIPEPLA_PROBE_MODE_ID;
     Status[52] = last_controller_ack_event;
@@ -465,11 +475,14 @@ inline void PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
     Status[63] = flags;
 }
 
-void PcgCallipepla_Probe_LoaderLevel1Monitor(
+void PcgCallipepla_Probe_LoaderMonitor(
     tapa::istream<PcgCallipeplaProbeEvent> &Controller_Event_in,
     tapa::istream<PcgCallipeplaProbeEvent> &Ack_Event_in,
     tapa::istream<PcgCallipeplaProbeEvent> &Ptr_Event_in,
     tapa::istream<PcgCallipeplaProbeEvent> &Pe_Event_in,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+    tapa::istream<PcgCallipeplaProbeEvent> &Vector_Event_in,
+#endif
     tapa::mmap<INDEX_TYPE> Status,
     const INDEX_TYPE Matrix_len,
     const INDEX_TYPE Row_num) {
@@ -488,10 +501,14 @@ void PcgCallipepla_Probe_LoaderLevel1Monitor(
     INDEX_TYPE ptr_command_count = 0;
     INDEX_TYPE pe_round_count = 0;
     INDEX_TYPE ptr_hbm_word_count = 0;
+    INDEX_TYPE vector_command_count = 0;
+    INDEX_TYPE vector_round_count = 0;
+    INDEX_TYPE vector_hbm_word_count = 0;
     INDEX_TYPE controller_drop_count = 0;
     INDEX_TYPE ack_drop_count = 0;
     INDEX_TYPE ptr_drop_count = 0;
     INDEX_TYPE pe_drop_count = 0;
+    INDEX_TYPE vector_drop_count = 0;
     ap_uint<32> flags = 0;
     ap_uint<22> heartbeat_divider = 0;
 
@@ -505,6 +522,9 @@ void PcgCallipepla_Probe_LoaderLevel1Monitor(
     bool ack_stop_seen = false;
     bool ptr_stop_seen = false;
     bool pe_stop_seen = false;
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+    bool vector_stop_seen = false;
+#endif
 
     Status[0] = kPcgCallipeplaStatusMaxIter;
     Status[1] = 0;
@@ -524,6 +544,10 @@ void PcgCallipepla_Probe_LoaderLevel1Monitor(
     Status[15] = Matrix_len;
     PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
         Status,
+        CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL,
+        vector_command_count,
+        vector_round_count,
+        vector_hbm_word_count,
         last_controller_ack_event,
         monitor_heartbeat,
         producer_attempts,
@@ -538,9 +562,13 @@ void PcgCallipepla_Probe_LoaderLevel1Monitor(
         ptr_hbm_word_count,
         flags.to_uint());
 
-probe_loader_level1_monitor_loop:
+probe_loader_monitor_loop:
     while (!controller_done || !ack_stop_seen || !ptr_stop_seen ||
-           !pe_stop_seen) {
+           !pe_stop_seen
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+           || !vector_stop_seen
+#endif
+           ) {
 #pragma HLS loop_flatten off
 #pragma HLS pipeline off
         bool snapshot_changed = false;
@@ -648,9 +676,39 @@ probe_loader_level1_monitor_loop:
             }
         }
 
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+        if (Vector_Event_in.try_read(event)) {
+            loader_last_event = event.event;
+            snapshot_changed = true;
+            if (event.event == kPcgCallipeplaProbeEventVectorCommandReceived ||
+                event.event == kPcgCallipeplaProbeEventVectorHbmProgress ||
+                event.event == kPcgCallipeplaProbeEventVectorRoundDone ||
+                event.event == kPcgCallipeplaProbeEventVectorStop) {
+                vector_command_count = event.value0;
+            }
+            if (event.event == kPcgCallipeplaProbeEventVectorHbmProgress ||
+                event.event == kPcgCallipeplaProbeEventVectorRoundDone ||
+                event.event == kPcgCallipeplaProbeEventVectorStop) {
+                const ap_uint<32> packed =
+                    static_cast<unsigned int>(event.value1);
+                vector_hbm_word_count = packed.range(23, 0).to_uint();
+                vector_drop_count = packed.range(31, 24).to_uint();
+            }
+            if (event.event == kPcgCallipeplaProbeEventVectorRoundDone) {
+                vector_round_count = event.value0;
+            }
+            if (event.event == kPcgCallipeplaProbeEventVectorStop) {
+                vector_stop_seen = true;
+                flags[6] = 1;
+            }
+        }
+#endif
+
+        const INDEX_TYPE loader_drop_sum =
+            ptr_drop_count + pe_drop_count + vector_drop_count;
         const INDEX_TYPE loader_drop_count =
-            ptr_drop_count + pe_drop_count < 0x100
-                ? ptr_drop_count + pe_drop_count
+            loader_drop_sum < 0x100
+                ? loader_drop_sum
                 : 0xff;
         flags.range(15, 8) = controller_drop_count & 0xff;
         flags.range(23, 16) = ack_drop_count & 0xff;
@@ -665,6 +723,10 @@ probe_loader_level1_monitor_loop:
         if (snapshot_changed) {
             PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
                 Status,
+                CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL,
+                vector_command_count,
+                vector_round_count,
+                vector_hbm_word_count,
                 last_controller_ack_event,
                 monitor_heartbeat,
                 producer_attempts,
@@ -695,6 +757,10 @@ probe_loader_level1_monitor_loop:
     last_controller_ack_event = 99;
     PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
         Status,
+        CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL,
+        vector_command_count,
+        vector_round_count,
+        vector_hbm_word_count,
         last_controller_ack_event,
         monitor_heartbeat,
         producer_attempts,

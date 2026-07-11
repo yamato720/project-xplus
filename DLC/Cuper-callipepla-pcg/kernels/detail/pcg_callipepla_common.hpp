@@ -69,6 +69,11 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPtrStop = 45;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeStart = 50;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeRoundDone = 51;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventPeStop = 52;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorStart = 60;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorCommandReceived = 61;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorHbmProgress = 62;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorRoundDone = 63;
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorStop = 64;
 
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxSend = 0;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxWaitResult = 1;
@@ -85,11 +90,18 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagAckDrop = 1 << 5;
 
 static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPtrDone = 1 << 4;
 static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPeDone = 1 << 5;
+static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagVectorDone = 1 << 6;
 
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
     (CUPER_CALLIPEPLA_PROBE_MODE_ID == 2 || \
      CUPER_CALLIPEPLA_PROBE_MODE_ID == 3)
 #define CUPER_CALLIPEPLA_PROBE_EVENT_MONITOR 1
+#endif
+
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
+#define CUPER_CALLIPEPLA_PROBE_VECTOR_LOADER_EVENTS 1
 #endif
 
 struct PcgCallipeplaSpmvVectorCommand {
