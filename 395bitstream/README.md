@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla `loader_drain level=1` 定位 artifact；恢复真实 strip ptr HBM 读取、16 路 matrix-length fanout 和 `PE_Param` drain，matrix drain 不发 `Matrix_data` request，vector/SpMV datapath 仍关闭并继续 fake-ack；mode-3 monitor 是唯一 Status writer；最终 DATA/KERNEL/HBM 为 100/500/450 MHz，routed timing clean，等待服务器侧 demo-only 上板 |
+| `cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla `loader_drain level=1` 定位 artifact；恢复真实 strip ptr HBM 读取、16 路 matrix-length fanout 和 `PE_Param` drain，matrix drain 不发 `Matrix_data` request，vector/SpMV datapath 仍关闭并继续 fake-ack；mode-3 monitor 是唯一 Status writer；最终 DATA/KERNEL/HBM 为 100/500/450 MHz，routed timing clean；服务器侧反馈已按约定验收口径通过 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -993,9 +993,11 @@ mode 3 的 `Status[50..63]` 记录 controller/ack/ptr/PE 事件与计数。软�
 simulation 已覆盖 `thermal2_n16 MAX_ITERS=0/1/10`：vector command/result 为
 `3/2`、`8/7`、`53/52`，ptr commands（含 stop）为 `2/3/12`，PE rounds 为
 `1/2/11`，ptr HBM words 为 `48/80/368`，所有点 `event=99`、full=0、flags=`0x3e`、
-三类 event drop 为 0。当前同步文件等待服务器侧 demo-only 上板；由于 vector phase
-仍是 fake-ack，不做 PCG correctness、分段时间或性能结论，也不更新正式
-`source.diff`。
+三类 event drop 为 0。2026-07-11 用户反馈服务器侧已按约定的 level-1 验收口径通过：
+`event=99`、各项计数符合预期、`command_full=0`、三类 event drop 为 0，
+controller/ack/ptr/PE done flag 全部置位，XRT error 为空且 CU 回到 IDLE。本地没有
+服务器 raw log，本记录按用户提供的结论登记。由于 vector phase 仍是 fake-ack，不做
+PCG correctness、分段时间或性能结论，也不更新正式 `source.diff`。
 
 上一同步文件 `cuper-tapa-pcg-fpga-u55c-20260710-demo.xclbin` 是 cmd-drain 独立握手
 monitor artifact，UUID `4a272f84-1e4d-fdb8-0cfa-1fa5e77f433c`，SHA256

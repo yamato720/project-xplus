@@ -1092,3 +1092,23 @@ All user specified timing constraints are met.
 计数符合公式，`command_full=0`，controller/ack/loader event drop 均为 0，
 controller/ack/ptr/PE done flags 全部置位，XRT error 为空且 CU 回到 IDLE。该 artifact
 仍不做 PCG correctness 或性能结论，不更新正式 `source.diff`。
+
+## 2026-07-11 loader-drain level 1 服务器侧验收
+
+用户反馈本版已在服务器侧通过。按本轮约定的验收口径，结果为：
+
+```text
+event=99
+vector command/result、ptr command、PE round、ptr HBM word 计数符合预期
+command_full=0
+controller/ack/loader event drop=0/0/0
+controller/ack/ptr/PE done flags=1
+XRT error empty
+CU IDLE
+```
+
+本地没有同步服务器 raw log，本节按用户提供的服务器侧结论登记。该结果把真实 strip
+ptr HBM 读取、matrix-length fanout、`PE_Param` drain 和 stop/finalization 定性为通过；
+由于 Matrix_data、vector loader 和 SpMV core 仍未恢复，不做 PCG correctness 或性能
+结论。下一定位边界为 `loader_drain level=2`：恢复真实 X/P vector loader 和向量 stream
+drain，继续保持 Matrix_data request 关闭、SpMV core 未接入。

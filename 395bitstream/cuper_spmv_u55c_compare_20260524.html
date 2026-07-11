@@ -1322,11 +1322,13 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         </table>
       </div>
       <p>
-        当前仅完成软件回归、XO/RTL 审查和 timing-clean xclbin 构建，服务器侧 demo-only
-        上板待补。板测先跑 <code>thermal2_n16 MAX_ITERS=0/1</code>，通过后覆盖五组数据集
-        的 0/1iter，最后补 n16 的 10/100iter 压测。该数据不进入
+        2026-07-11 用户反馈服务器侧已按约定的 level-1 验收口径通过：
+        <code>event=99</code>、预期计数闭合、<code>command_full=0</code>、三类 event drop
+        为 0，controller/ack/ptr/PE done flag 全部置位，XRT error 为空且 CU 回到 IDLE。
+        本地没有服务器 raw log，本节按用户提供的结论登记。该数据不进入
         <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或
-        性能曲线。
+        性能曲线。下一定位边界为 <code>loader_drain level=2</code>，恢复真实 X/P vector
+        loader 和向量 stream drain，Matrix_data 与 SpMV core 仍不恢复。
       </p>
     </section>
 

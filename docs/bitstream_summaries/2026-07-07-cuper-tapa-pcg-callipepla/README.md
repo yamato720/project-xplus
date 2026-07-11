@@ -9,7 +9,7 @@
   `fdbc2e10-20ea-8e78-6b3c-72a01803cde1`，恢复真实 strip ptr HBM 读取、16 路
   matrix-length fanout 和 `PE_Param` drain；Matrix_data/vector/SpMV datapath 仍关闭并
   使用 fake-ack。最终 DATA/KERNEL/HBM 为 `100/500/450 MHz`，routed WNS
-  `0.002 ns`、TNS `0`、WHS `0.009 ns`、THS `0`，等待服务器侧 demo-only 上板
+  `0.002 ns`、TNS `0`、WHS `0.009 ns`、THS `0`。服务器侧反馈已按约定验收口径通过
 - 本轮 XO/硬件目录：
   `cuper-tapa-pcg-callipepla-loader-monitor-level1-xo-build/`
 - 本轮硬件日志：
@@ -62,9 +62,12 @@ PCG/SpMV datapath。
 command/result 为 `3/2`、`8/7`、`53/52`，ptr commands 为 `2/3/12`，PE rounds
 为 `1/2/11`，ptr HBM words 为 `48/80/368`；均为 `event=99`、full=0、
 flags=`0x3e`、三类 event drop=0。mode 2 `cmd_drain` 与无 probe full graph 回归也保持
-既有数值。当前 artifact 等待服务器侧先跑 `thermal2_n16 MAX_ITERS=0/1`，再扩到五组
-数据集和 n16 `10/100` 压测。它仍是 fake-ack debug artifact，不做 PCG correctness
-或性能结论，不更新正式 `source.diff`。
+既有数值。2026-07-11 用户反馈该 artifact 已在服务器侧按约定验收口径通过：
+`event=99`、预期计数闭合、full/drop 为 0、controller/ack/ptr/PE done flag 全部置位，
+XRT error 为空且 CU 回到 IDLE。本地没有服务器 raw log，本记录按用户反馈登记。它仍是
+fake-ack debug artifact，不做 PCG correctness 或性能结论，不更新正式
+`source.diff`。下一定位边界进入 `loader_drain level=2`，恢复真实 X/P vector loader
+和向量 stream drain，Matrix_data 与 SpMV core 仍不恢复。
 
 2026-07-11 服务器侧反馈确认上一握手 artifact 已通过以下 demo-only 覆盖：
 
