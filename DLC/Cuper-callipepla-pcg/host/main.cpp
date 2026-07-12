@@ -495,6 +495,13 @@ void print_callipepla_probe_fields(std::ostream& output,
                << " vector_commands=" << (packed_vector & 0xffff)
                << " vector_rounds=" << ((packed_vector >> 16) & 0xffff)
                << " vector_hbm_words=" << status[49]
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+               << " matrix_hbm_words=" << status[44]
+               << " matrix_done_channels=" << status[45]
+               << " matrix_event_drops=" << status[46]
+#endif
                << " event=" << status[52]
                << " monitor_heartbeat=" << status[53]
                << " command_attempts=" << status[54]
@@ -515,6 +522,11 @@ void print_callipepla_probe_fields(std::ostream& output,
                << " ptr_done=" << ((flags >> 4) & 1)
                << " pe_done=" << ((flags >> 5) & 1)
                << " vector_done=" << ((flags >> 6) & 1)
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+               << " matrix_done=" << ((flags >> 7) & 1)
+#endif
                << " controller_event_drops=" << ((flags >> 8) & 0xff)
                << " ack_event_drops=" << ((flags >> 16) & 0xff)
                << " loader_event_drops=" << ((flags >> 24) & 0xff)
@@ -565,6 +577,39 @@ void print_callipepla_probe_fields(std::ostream& output,
            << " controller_event_drops=" << ((flags >> 8) & 0xff)
            << " ack_event_drops=" << ((flags >> 16) & 0xff)
            << "\n";
+}
+
+bool verify_callipepla_loader_drain_level4(
+    const AlignedVector<INDEX_TYPE>& status,
+    const CuperTapaMatrix& matrix,
+    const int max_iters) {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    const long long expected_matrix_hbm_words =
+        static_cast<long long>(matrix.stripped_matrix_len_total) *
+        static_cast<long long>(max_iters + 1);
+    const uint32_t flags = static_cast<uint32_t>(status[63]);
+    const bool event_done = status[52] == 99;
+    const bool matrix_words_match =
+        static_cast<long long>(status[44]) == expected_matrix_hbm_words;
+    const bool matrix_channels_done = status[45] == HBM_CHANNEL_NUM;
+    const bool full_clear = status[55] == 0 && ((flags >> 0) & 1) == 0;
+    const bool drops_clear = status[46] == 0 &&
+                             ((flags >> 8) & 0xffffff) == 0;
+    const bool all_done = (flags & 0xfeu) == 0xfeu;
+    const bool passed = event_done && matrix_words_match && matrix_channels_done &&
+                        full_clear && drops_clear && all_done;
+    std::cout << "[probe-check] loader_level=4"
+              << " expected_matrix_hbm_words=" << expected_matrix_hbm_words
+              << " result=" << (passed ? "passed" : "failed") << "\n";
+    return passed;
+#else
+    (void)status;
+    (void)matrix;
+    (void)max_iters;
+    return true;
+#endif
 }
 
 void print_callipepla_snapshot(const char* label,
@@ -923,6 +968,11 @@ int main(int argc, char** argv) {
 
         if (callipepla_probe_present(status)) {
             print_callipepla_probe_fields(std::cout, "probe", status);
+            if (!verify_callipepla_loader_drain_level4(status,
+                                                        matrix,
+                                                        options.max_iters)) {
+                return 5;
+            }
             return 0;
         }
 

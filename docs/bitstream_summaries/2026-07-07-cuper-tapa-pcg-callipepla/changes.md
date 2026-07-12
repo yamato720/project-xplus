@@ -16,10 +16,10 @@
   编译开关，并与 `CUPER_CALLIPEPLA_TRACE_LIGHT` 互斥。probe 版保持 kernel 名、
   host 参数顺序、AXI-Lite offsets 和 HBM mapping 不变，用于先定位 entry/Status
   mmap/controller fanout/loader HBM read 边界。
-- `loader_drain` 额外支持 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1|2|3`：
+- `loader_drain` 额外支持 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=1|2|3|4`：
   level 1 恢复真实 ptr loader 并 drain `PE_Param`；level 2 再恢复真实 vector loader
   并 drain `Vector_X`；level 3 只让 matrix loader ch0/ch15 读取 HBM，其它 matrix
-  command 仍 drain。
+  command 仍 drain；level 4 恢复全部 16 路真实 Matrix loader 和 `Matrix_A` drain。
 
 ## Kernel ABI 和 HBM 映射
 
@@ -173,6 +173,26 @@
   `impl Complete`、VPL/POST-VPL 0 errors，总耗时 `2h16m59s`。按用户要求覆盖同主线
   `20260711-demo` 槽，等待服务器 demo-only 上板；不替换标准 bitstream，不更新正式
   `source.diff`。
+
+## 2026-07-11 loader-drain level 4 全 16 路 Matrix loader/drain
+
+- 扩展 `CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=4|matrix_full`，不改变顶层 ABI、HBM
+  mapping、probe mode 或 level 1-3 Status 字段语义。
+- level 4 以 16 个真实 `SpmvService_MatrixLoaderStrip` 取代 level-3 专用的两端
+  read-drain。每个 loader 输出独立 `Matrix_A_Stream` 和 stop token；配对 drain 持续
+  消费 beat，只有在收到该 loader stop 且 FIFO 已空时才发最终完成事件。
+- `PcgCallipepla_Probe_LoaderMonitor` 等待全部 16 个 Matrix drain final event。新增
+  `Status[44]` Matrix HBM words、`Status[45]` done channels、`Status[46]` matrix event
+  drops、`Status[63].bit7` matrix done；高 8 bit loader drops 继续汇总所有 loader。
+- host 增加 level-4 字段解码和返回前检查：word 总数必须等于
+  `stripped_matrix_len_total*(MAX_ITERS+1)`，并要求 event/done/full/drop 全部闭合。
+- TAPA software simulation 已通过 `thermal2_n16 MAX_ITERS=0/1/10`。2026-07-12 已完成
+  XO/Vitis link：UUID `3625c6a3-d725-db95-e0f5-27dc644edd61`，DATA/KERNEL/HBM
+  `100/500/450 MHz`，`impl Complete`，routed WNS/TNS/WHS/THS `0.003/0/0.008/0 ns`。
+  生成 RTL 确认 16 个真实 Matrix loader 和 16 个 drain，且未接 core/accumulator/checker/sort。
+  新 artifact 覆盖同主线 demo 槽为 `20260712-demo`，尚未硬件运行。用户反馈 level 3
+  已上板成功，但未提供 raw log，故不补写未提供的 count。该改动是 loader 边界定位，不更新
+  正式 `source.diff`。
 
 ## Host
 

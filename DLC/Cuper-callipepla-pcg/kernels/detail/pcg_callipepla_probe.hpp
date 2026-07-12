@@ -435,6 +435,11 @@ inline void PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
     const INDEX_TYPE vector_command_count,
     const INDEX_TYPE vector_round_count,
     const INDEX_TYPE vector_hbm_word_count,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    const INDEX_TYPE matrix_hbm_word_count,
+    const INDEX_TYPE matrix_done_channel_count,
+    const INDEX_TYPE matrix_drop_count,
+#endif
     const INDEX_TYPE last_controller_ack_event,
     const INDEX_TYPE monitor_heartbeat,
     const INDEX_TYPE producer_attempts,
@@ -459,6 +464,11 @@ inline void PcgCallipepla_ProbeLoaderMonitorWriteSnapshot(
     Status[47] = loader_level;
     Status[48] = static_cast<INDEX_TYPE>(packed_vector.to_uint());
     Status[49] = vector_hbm_word_count;
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    Status[44] = matrix_hbm_word_count;
+    Status[45] = matrix_done_channel_count;
+    Status[46] = matrix_drop_count;
+#endif
     Status[50] = kPcgCallipeplaProbeMagic;
     Status[51] = CUPER_CALLIPEPLA_PROBE_MODE_ID;
     Status[52] = last_controller_ack_event;
@@ -483,6 +493,9 @@ void PcgCallipepla_Probe_LoaderMonitor(
 #if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
     tapa::istream<PcgCallipeplaProbeEvent> &Vector_Event_in,
 #endif
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    tapa::istreams<PcgCallipeplaProbeEvent, HBM_CHANNEL_NUM> &Matrix_Event_in,
+#endif
     tapa::mmap<INDEX_TYPE> Status,
     const INDEX_TYPE Matrix_len,
     const INDEX_TYPE Row_num) {
@@ -504,11 +517,19 @@ void PcgCallipepla_Probe_LoaderMonitor(
     INDEX_TYPE vector_command_count = 0;
     INDEX_TYPE vector_round_count = 0;
     INDEX_TYPE vector_hbm_word_count = 0;
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    INDEX_TYPE matrix_hbm_word_count = 0;
+    INDEX_TYPE matrix_done_channel_count = 0;
+    INDEX_TYPE matrix_drop_count = 0;
+#endif
     INDEX_TYPE controller_drop_count = 0;
     INDEX_TYPE ack_drop_count = 0;
     INDEX_TYPE ptr_drop_count = 0;
     INDEX_TYPE pe_drop_count = 0;
     INDEX_TYPE vector_drop_count = 0;
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    INDEX_TYPE matrix_event_drop_count = 0;
+#endif
     ap_uint<32> flags = 0;
     ap_uint<22> heartbeat_divider = 0;
 
@@ -548,6 +569,11 @@ void PcgCallipepla_Probe_LoaderMonitor(
         vector_command_count,
         vector_round_count,
         vector_hbm_word_count,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+        matrix_hbm_word_count,
+        matrix_done_channel_count,
+        matrix_drop_count,
+#endif
         last_controller_ack_event,
         monitor_heartbeat,
         producer_attempts,
@@ -567,6 +593,9 @@ probe_loader_monitor_loop:
            !pe_stop_seen
 #if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
            || !vector_stop_seen
+#endif
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+           || matrix_done_channel_count != HBM_CHANNEL_NUM
 #endif
            ) {
 #pragma HLS loop_flatten off
@@ -704,12 +733,38 @@ probe_loader_monitor_loop:
         }
 #endif
 
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    probe_loader_matrix_events:
+        for (INDEX_TYPE channel = 0; channel < HBM_CHANNEL_NUM; ++channel) {
+#pragma HLS unroll
+            if (Matrix_Event_in[channel].try_read(event)) {
+                loader_last_event = event.event;
+                snapshot_changed = true;
+                if (event.event == kPcgCallipeplaProbeEventMatrixDrainDone) {
+                    matrix_hbm_word_count += event.value0;
+                    matrix_event_drop_count += event.value1;
+                    ++matrix_done_channel_count;
+                }
+            }
+        }
+#endif
+
         const INDEX_TYPE loader_drop_sum =
-            ptr_drop_count + pe_drop_count + vector_drop_count;
+            ptr_drop_count + pe_drop_count + vector_drop_count
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+            + matrix_event_drop_count
+#endif
+            ;
         const INDEX_TYPE loader_drop_count =
             loader_drop_sum < 0x100
                 ? loader_drop_sum
                 : 0xff;
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+        matrix_drop_count = matrix_event_drop_count < 0x100
+                                ? matrix_event_drop_count
+                                : 0xff;
+        flags[7] = matrix_done_channel_count == HBM_CHANNEL_NUM;
+#endif
         flags.range(15, 8) = controller_drop_count & 0xff;
         flags.range(23, 16) = ack_drop_count & 0xff;
         flags.range(31, 24) = loader_drop_count & 0xff;
@@ -727,6 +782,11 @@ probe_loader_monitor_loop:
                 vector_command_count,
                 vector_round_count,
                 vector_hbm_word_count,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+                matrix_hbm_word_count,
+                matrix_done_channel_count,
+                matrix_drop_count,
+#endif
                 last_controller_ack_event,
                 monitor_heartbeat,
                 producer_attempts,
@@ -761,6 +821,11 @@ probe_loader_monitor_loop:
         vector_command_count,
         vector_round_count,
         vector_hbm_word_count,
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+        matrix_hbm_word_count,
+        matrix_done_channel_count,
+        matrix_drop_count,
+#endif
         last_controller_ack_event,
         monitor_heartbeat,
         producer_attempts,
@@ -909,6 +974,46 @@ probe_pe_param_rounds:
 }
 
 #ifdef JACOBI_SPMV_STRIP_PADDING
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+// 消费真实 Matrix_A_Stream 的所有 beat。loader 只会在接收 stop 后写
+// Matrix_Stop_in，因此完成事件不会抢在在途 Matrix_data response 或 FIFO 残留 beat 前。
+void PcgCallipepla_Probe_MatrixStreamDrain(
+    tapa::istream<ap_uint<512>> &Matrix_A_in,
+    tapa::istream<INDEX_TYPE> &Matrix_Stop_in,
+    const INDEX_TYPE Debug_channel,
+    tapa::ostream<PcgCallipeplaProbeEvent> &Probe_Event_out) {
+    INDEX_TYPE matrix_hbm_word_count = 0;
+    INDEX_TYPE probe_event_drop_count = 0;
+    bool loader_stop_seen = false;
+
+probe_matrix_stream_drain:
+    while (!loader_stop_seen || !Matrix_A_in.empty()) {
+#pragma HLS loop_flatten off
+#pragma HLS pipeline II=1
+        if (!Matrix_A_in.empty()) {
+            ap_uint<512> packet = 0;
+            Matrix_A_in.try_read(packet);
+            ++matrix_hbm_word_count;
+        }
+        if (!loader_stop_seen && !Matrix_Stop_in.empty()) {
+            INDEX_TYPE stop_token = 0;
+            Matrix_Stop_in.try_read(stop_token);
+            loader_stop_seen = stop_token == kSpmvServiceStopToken;
+        }
+    }
+
+    // 唯一最终事件使用 blocking write，monitor 不会漏掉任何 channel。
+    Probe_Event_out.write(pcg_callipepla_make_probe_event(
+        kPcgCallipeplaProbeEventMatrixDrainDone,
+        kPcgCallipeplaProbePhaseStop,
+        matrix_hbm_word_count,
+        probe_event_drop_count));
+    (void)Debug_channel;
+}
+#endif
+
 void PcgCallipepla_Probe_MatrixLoaderStripDrain(
     tapa::async_mmap<ap_uint<512>> &Matrix_data,
     tapa::istream<CuperSpmvServiceCommand> &Command_in,

@@ -136,6 +136,14 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
     tapa::stream<PcgCallipeplaProbeEvent, 16> Vector_Probe_Event_Stream(
         "Vector_Probe_Event_Stream");
 #endif
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    tapa::streams<ap_uint<512>, HBM_CHANNEL_NUM, 1024> Matrix_A_Probe_Stream(
+        "Matrix_A_Probe_Stream");
+    tapa::streams<INDEX_TYPE, HBM_CHANNEL_NUM, 2> Matrix_Stop_Probe_Stream(
+        "Matrix_Stop_Probe_Stream");
+    tapa::streams<PcgCallipeplaProbeEvent, HBM_CHANNEL_NUM, 2>
+        Matrix_Probe_Event_Stream("Matrix_Probe_Event_Stream");
+#endif
 #endif
 
     tapa::task()
@@ -187,6 +195,9 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 Pe_Probe_Event_Stream,
 #if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 2
                 Vector_Probe_Event_Stream,
+#endif
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+                Matrix_Probe_Event_Stream,
 #endif
                 Status,
                 Matrix_len,
@@ -259,11 +270,28 @@ void CuperPcgCallipepla(tapa::mmap<INDEX_TYPE> SpElement_list_ptr,
                 PE_Param_Probe,
                 Matrix_Len_Stream,
                 Ptr_Probe_Event_Stream)
+#if CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+        // 恢复所有 Matrix_data reader；Core/Accumulator/Checker/Sort 仍不接入，
+        // 每条 Matrix_A stream 都由对应 drain 消费。
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(SpmvService_MatrixLoaderStrip,
+                                             Matrix_data,
+                                             Matrix_Command_Stream,
+                                             Matrix_Len_Stream,
+                                             Matrix_A_Probe_Stream,
+                                             Matrix_Stop_Probe_Stream,
+                                             tapa::seq())
+        .invoke<tapa::join, HBM_CHANNEL_NUM>(PcgCallipepla_Probe_MatrixStreamDrain,
+                                             Matrix_A_Probe_Stream,
+                                             Matrix_Stop_Probe_Stream,
+                                             tapa::seq(),
+                                             Matrix_Probe_Event_Stream)
+#else
         .invoke<tapa::join, HBM_CHANNEL_NUM>(PcgCallipepla_Probe_MatrixLoaderStripDrain,
                                              Matrix_data,
                                              Matrix_Command_Stream,
                                              Matrix_Len_Stream,
                                              tapa::seq())
+#endif
 #else
         .invoke(SpmvService_SpElementPtrLoader,
                 Batch_num,

@@ -387,6 +387,12 @@ void SpmvService_MatrixLoaderStrip(
     tapa::istream<CuperSpmvServiceCommand> &Command_in,
     tapa::istream<INDEX_TYPE> &Matrix_Len_Stream,
     tapa::ostream<ap_uint<512>> &Matrix_A_Stream
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+    ,
+    tapa::ostream<INDEX_TYPE> &Matrix_Stop_out
+#endif
     ,
     const INDEX_TYPE Debug_channel
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
@@ -404,6 +410,12 @@ void SpmvService_MatrixLoaderStrip(
 #pragma HLS loop_flatten off
         const CuperSpmvServiceCommand command = Command_in.read();
         if (command.stop != 0) {
+#if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
+    CUPER_CALLIPEPLA_PROBE_MODE_ID == 3 && \
+    CUPER_CALLIPEPLA_PROBE_LOADER_LEVEL >= 4
+            // 只有本 loader 接收 stop 后，配对 drain 才能看到停止通知。
+            Matrix_Stop_out.write(kSpmvServiceStopToken);
+#endif
 #ifdef CUPER_CALLIPEPLA_TRACE_ENABLED
             if (Trace_source >= 0) {
                 PcgCallipepla_DebugTryWrite(Trace_Event_out,

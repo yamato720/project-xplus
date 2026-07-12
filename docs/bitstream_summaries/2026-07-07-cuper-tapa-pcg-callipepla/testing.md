@@ -1296,3 +1296,71 @@ setup/hold failing endpoints: 0 / 0
 artifact。服务器侧应先跑 `thermal2_n16 MAX_ITERS=0/1`，验收 `event=99`、full/drop=0、
 controller/ack/ptr/PE/vector done flag、XRT error 为空和 CU IDLE；当前不做 PCG diff、
 分段时间或性能结论，正式 `source.diff` 不更新。
+
+## 2026-07-11 loader-drain level 3 服务器反馈
+
+用户反馈 level 3 已成功；本地没有原始服务器日志或可复核的 Matrix count。因此仅登记
+“level 3 服务器成功”这一边界，不补写未提供的计数，也不把它解释为完整 SpMV/PCG
+correctness、性能或 bitstream 晋级结果。
+
+## 2026-07-11 loader-drain level 4 软件回归
+
+构建配置：
+
+```text
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain
+CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=4
+CUPER_CALLIPEPLA_SPMV_STRIP_PADDING=1
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level4-sw-build/
+```
+
+`thermal2_n16` TAPA software simulation：
+
+| MAX_ITERS | stripped matrix words | Matrix HBM words | done channels | event / flags / drops | host check |
+| ---: | ---: | ---: | ---: | --- | --- |
+| 0 | 88 | 88 | 16 | `99 / 0xfe / 0-0-0-0` | pass |
+| 1 | 88 | 176 | 16 | `99 / 0xfe / 0-0-0-0` | pass |
+| 10 | 88 | 968 | 16 | `99 / 0xfe / 0-0-0-0` | pass |
+
+其中 Matrix HBM words 必须等于 `stripped_matrix_len_total*(MAX_ITERS+1)`；本轮三点均为
+`matrix_event_drops=0`、`command_full=0`，并同时置 controller/ack/ptr/PE/vector/matrix
+done。Level 3 `MAX_ITERS=0/1`、cmd-drain `MAX_ITERS=0/1` 和无 probe full graph
+`MAX_ITERS=0/1` 也已本地回归；无 probe 的 1iter 继续通过数值 diff。
+
+## 2026-07-12 loader-drain level 4 XO、Vitis link 与同步
+
+构建配置：
+
+```text
+tmux: project-xplus-cuper-tapa-pcg-callipepla-hw (已正常结束)
+log: logs/cuper_tapa_pcg_callipepla_hw_20260711_223213.log
+build dir: cuper-tapa-pcg-callipepla-loader-monitor-level4-xo-build/
+CUPER_CALLIPEPLA_PROBE_MODE=loader_drain
+CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL=4
+CLOCK_PERIOD=10.0
+CUPER_CALLIPEPLA_KERNEL_FREQUENCY=100
+```
+
+构建退出码为 0；日志记录 `impl Complete`、VPL/POST-VPL 0 errors、`Run completed`，总耗时
+`2h48m55s`。产物为 `CuperPcgCallipepla.xo` 和 `CuperPcgCallipepla.xclbin`。xclbin UUID
+`3625c6a3-d725-db95-e0f5-27dc644edd61`，xclbin SHA256
+`4f1b70e779e94a2a6e005e6ac03373a99a9651709da8ef54d9e909cb5652c123`，info SHA256
+`a3a8796c91b438dc13cea1bdf4f5a4f822918fc874a3563c62e8465e6a98df6c`。路由后时序报告为：
+
+```text
+DATA/KERNEL/HBM: 100/500/450 MHz
+WNS/TNS: 0.003 ns / 0.000 ns
+WHS/THS: 0.008 ns / 0.000 ns
+setup/hold failing endpoints: 0 / 0
+```
+
+对生成 RTL 的静态审查确认 `SpmvService_MatrixLoaderStrip_0..15` 与
+`PcgCallipepla_Probe_MatrixStreamDrain_0..15` 均存在，16 个 Matrix HBM 端口均含 AR/R
+读通道，未发现 core、accumulator、checker 或 sort 顶层实例。新 demo 同步至
+`395bitstream/cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin`；旧 level-3 `20260711-demo`
+退出同步槽，历史服务器反馈仍只对应旧 artifact。
+
+本轮没有启动 demo-only 硬件运行。后续应先跑 `thermal2_n16 MAX_ITERS=0/1`，验收
+`event=99`、Matrix words、16 done channels、full/drop=0、`flags=0xfe`、XRT error 为空和
+CU IDLE，再依次覆盖 `thermal2_n65536`、`n131072`、`n262144`、完整 `thermal2` 的
+`MAX_ITERS=0/1` 与 n16 `10/100` 压力点。正式 `source.diff` 不更新。

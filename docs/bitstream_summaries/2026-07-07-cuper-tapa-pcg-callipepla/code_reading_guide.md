@@ -84,6 +84,10 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   进入 `probe_read_matrix`，发 Matrix_data read address 并 drain read response；ch1..14
   仍只消费 command/length。Matrix HBM word count 尚未加入 Status，不能把 level-3
   的返回误读成完整 16 路 Matrix_data 或真实 SpMV 已通过。
+  level 4 改为 16 个真实 `SpmvService_MatrixLoaderStrip`，每路连接专属
+  `Matrix_A_Stream` drain 和 loader-stop stream。drain 先看到对应 loader 已接收 stop，
+  再确认 `Matrix_A_Stream` 为空后才向 monitor 发送其消费 word 数；core、accumulator、
+  checker、sort 和真实 vector phases 仍不接入。
 
 ## Metrics
 
@@ -106,6 +110,11 @@ host argument order、AXI-Lite offsets 或 HBM mapping。probe 只在 top graph 
   vector commands（含 stop），`Status[48][31:16]` 记录 vector rounds，`Status[49]`
   记录 vector HBM `double_v8` words，`Status[63].bit6` 记录 vector done。level 1
   这些扩展字段为 0，不改变既有 `Status[50..63]` 语义。
+- mode 3 level 4 使用此前未占用的 `Status[44]` Matrix HBM word total、`[45]` matrix
+  done channel count、`[46]` matrix event drops；`Status[63].bit7` 是 matrix done，
+  `Status[63][31:24]` 为 ptr/PE/vector/matrix 的总 loader drops。host 只在编译为
+  level 4 时检查 total=`stripped_matrix_len_total*(MAX_ITERS+1)`、16 channel done、
+  `event=99`、`flags=0xfe`、full/drop=0。
 - `Metrics[0..4]` 是最终 `rz/rr/p_ap/alpha/beta`。
 - `Metrics[5..15]` 是 packet/work counters。
 - `Metrics[16..31]` 是 stage cycle 和 vector work 拆分。

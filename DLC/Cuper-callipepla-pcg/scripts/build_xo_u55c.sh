@@ -75,8 +75,11 @@ case "$loader_level" in
   3|matrix)
     cflags+=("-DCUPER_CALLIPEPLA_PROBE_LOADER_LEVEL=3")
     ;;
+  4|matrix_full)
+    cflags+=("-DCUPER_CALLIPEPLA_PROBE_LOADER_LEVEL=4")
+    ;;
   *)
-    echo "CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL must be 1/ptr, 2/vector, or 3/matrix." >&2
+    echo "CUPER_CALLIPEPLA_LOADER_DRAIN_LEVEL must be 1/ptr, 2/vector, 3/matrix, or 4/matrix_full." >&2
     exit 1
     ;;
 esac

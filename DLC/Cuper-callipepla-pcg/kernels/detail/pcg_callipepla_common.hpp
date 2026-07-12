@@ -74,6 +74,9 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorCommandReceived = 61;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorHbmProgress = 62;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorRoundDone = 63;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeEventVectorStop = 64;
+// Level 4 在真实 loader 停止且配对 stream drain 清空后，为每条 Matrix_data
+// channel 发送一条可靠的最终事件。
+static constexpr INDEX_TYPE kPcgCallipeplaProbeEventMatrixDrainDone = 70;
 
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxSend = 0;
 static constexpr INDEX_TYPE kPcgCallipeplaProbeTxWaitResult = 1;
@@ -91,6 +94,7 @@ static constexpr INDEX_TYPE kPcgCallipeplaProbeFlagAckDrop = 1 << 5;
 static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPtrDone = 1 << 4;
 static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagPeDone = 1 << 5;
 static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagVectorDone = 1 << 6;
+static constexpr INDEX_TYPE kPcgCallipeplaLoaderProbeFlagMatrixDone = 1 << 7;
 
 #if defined(CUPER_CALLIPEPLA_PROBE_ENABLED) && \
     (CUPER_CALLIPEPLA_PROBE_MODE_ID == 2 || \

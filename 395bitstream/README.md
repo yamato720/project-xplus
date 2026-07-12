@@ -52,7 +52,7 @@ Jacobi 和 SpMV demo/实验 artifact；`cuper-tapa-jacobi` 还没有标准 bitst
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-demo.xclbin` | TAPA Cuper / single SpMV experiment | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | 8 路 lane-static real + RTL owner-bank accumulator，`thermal2_n16` 通过但 `thermal2_n1024` 300s timeout，保留为失败边界 |
 | `cuper-tapa-spmv-u55c-20260701-ownerbank8-lighttrace-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 最小 lighttrace 调试版，保持同一 ABI 和 8-HBM bank mapping，150 MHz routed timing clean，等待服务器侧 `thermal2_n16`/`thermal2_n1024` 上板定位 |
 | `cuper-tapa-spmv-u55c-20260703-ownerbank8-entryprobe-yout-demo.xclbin` | TAPA Cuper / single SpMV debug demo | host 或不跑 PCG | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperSpmvServiceOnly` | ownerbank8 entry-probe/yout 调试版，只验证 entry、Status/Metrics mmap、ptr/matrix/X first-read 和 scalar `Y_out` ABI，150 MHz routed timing clean，等待服务器侧上板 |
-| `cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla `loader_drain level=3` 定位 artifact；在已通过的 ptr/PE/X-P vector loader 基线上，仅恢复 Matrix_data ch0/ch15 的真实 HBM read-drain，其余 14 路仍 drain，SpMV core/accumulator/vector phases 继续关闭或 fake-ack；DATA/KERNEL/HBM 为 100/500/450 MHz，routed timing clean，等待 level-3 demo-only 上板 |
+| `cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin` | TAPA Cuper / FPGA-PCG debug demo | FPGA kernel | `DLC/Cuper-callipepla-pcg/kernels/Cuper.cpp` / `CuperPcgCallipepla` | Callipepla `loader_drain level=4` 定位 artifact；在真实 ptr/PE/X-P vector loader 基线上恢复全部 16 路 `Matrix_data -> Matrix_A_Stream` 读取和专用 drain；SpMV core/accumulator/checker/sort/真实 vector phases 继续关闭或 fake-ack；DATA/KERNEL/HBM 为 100/500/450 MHz，routed timing clean，尚未上板 |
 | `cuper-tapa-jacobi-u55c-20260615-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | master-controller full graph light-trace debug demo，150 MHz timing-clean，demo-only 上板已通过单轮和完整固定轮数，未晋级标准 |
 | `cuper-tapa-jacobi-u55c-20260616-demo.xclbin` | TAPA Cuper / Jacobi wide-HBM experiment | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 24 路 Matrix_data wide-HBM no-debug 实验版，服务器侧 smoke 已失败，保留为失败边界 artifact |
 | `cuper-tapa-jacobi-u55c-20260617-demo.xclbin` | TAPA Cuper / Jacobi iteration demo | FPGA kernel | `DLC/Cuper-jacobi-iteration/kernels/Cuper.cpp` / `CuperJacobiIteration` | 16 路 light-trace restore 候选，待服务器上板；`20260615-demo` 仍是已验证 demo |
@@ -963,39 +963,40 @@ Cuper SpMV 标准略慢约 2.7% 到 8.1%，但成功边界从标准旧记录的
 TAPA Cuper / FPGA-PCG 当前 demo 候选文件：
 
 ```text
-cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin
+cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin
 ```
 
-这版是 2026-07-11 覆盖同一个 `cuper-tapa-pcg` demo 槽的
-`CuperPcgCallipepla` `loader_drain level=3` 定位 artifact。它保持 Callipepla
+这版是 2026-07-12 覆盖同一个 `cuper-tapa-pcg` demo 槽的
+`CuperPcgCallipepla` `loader_drain level=4` 定位 artifact。它保持 Callipepla
 full-PCG 顶层 kernel 名、host 参数顺序、AXI-Lite register offsets、HBM mapping、
-Tau/dimension 判断和 probe mode 名称不变。在 level 1 的真实 ptr/PE 路径与 level 2
-的真实 X/P vector loader 基础上，16 路 matrix loader 继续消费 command/length，但只让
-ch0 和 ch15 发出真实 `Matrix_data` read request 并读取响应；另外 14 路保持 drain。
-SpMV core、accumulator、checker、sort 和真实 vector phases 仍未恢复，vector result
-继续 fake-ack。因此该文件只定位两端 Matrix HBM 读取与 control/finalization 边界，
+Tau/dimension 判断和 probe mode 名称不变。在真实 ptr/PE 路径和 X/P vector loader 的
+基础上，16 路 `SpmvService_MatrixLoaderStrip` 全部发出真实 `Matrix_data` read request，
+每路 `Matrix_A_Stream` 都由专属 drain 消费；drain 仅在收到 loader stop 且 stream 清空后
+报告完成。SpMV core、accumulator、checker、sort 和真实 vector phases 仍未恢复，vector
+result 继续 fake-ack。因此该文件只定位完整 Matrix HBM read-to-stream-drain 与
+control/finalization 边界，
 不执行完整 SpMV/PCG datapath，也不替换当前标准
 `cuper-tapa-pcg-fpga-u55c-20260525.xclbin`。
 
-当前 demo xclbin UUID 为 `02db72cc-c208-7772-4df4-3757a606929f`，SHA256 为
-`bdf6552a7fb0ef1f87bbf7f1cea82ec796398dce16d9b5bbce140e96cacbdc16`，
+当前 demo xclbin UUID 为 `3625c6a3-d725-db95-e0f5-27dc644edd61`，SHA256 为
+`4f1b70e779e94a2a6e005e6ac03373a99a9651709da8ef54d9e909cb5652c123`，
 `.xclbin.info` SHA256 为
-`7aedf3a7f89c520bb8d01efdb7d800155e320d8cad93513b4413bc24e25cec8d`。
+`a3a8796c91b438dc13cea1bdf4f5a4f822918fc874a3563c62e8465e6a98df6c`。
 DATA/KERNEL/HBM clock 为 `100/500/450 MHz`。Vitis link 退出码为 0，`impl Complete`，
-VPL 和 POST-VPL 均为 0 errors，总耗时 `2h16m59s`；routed timing clean：WNS
-`0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`、WHS `0.009 ns`、THS
+VPL 和 POST-VPL 均为 0 errors，总耗时 `2h48m55s`；routed timing clean：WNS
+`0.003 ns`、TNS `0.000 ns`、setup failing endpoints `0`、WHS `0.008 ns`、THS
 `0.000 ns`。构建日志为
-`logs/cuper_tapa_pcg_callipepla_loader_monitor_level3_hw_20260711_185146.log`，构建目录为
-`cuper-tapa-pcg-callipepla-loader-monitor-level3-xo-build/`。生成 C++/HLS 报告确认
-level-3 读取条件为 `Debug_channel == 0 || Debug_channel == 15`，并保留了
-`probe_read_matrix` 的 read-address/read-data loop。
+`logs/cuper_tapa_pcg_callipepla_hw_20260711_223213.log`，构建目录为
+`cuper-tapa-pcg-callipepla-loader-monitor-level4-xo-build/`。生成 RTL 确认
+`SpmvService_MatrixLoaderStrip_0..15` 与配对 `PcgCallipepla_Probe_MatrixStreamDrain_0..15`
+均存在，所有 Matrix HBM port 均有读通道；未实例化 core、accumulator、checker 或 sort。
 
-level 3 software/TAPA simulation 已覆盖 `thermal2_n16 MAX_ITERS=0/1`。两点均为
-`event=99`、full=0、flags=`0x7e`、三类 event drop 为 0；vector commands/rounds/HBM
-words 为 `2/1/2` 与 `3/2/4`，ptr commands/PE rounds/ptr HBM words 为 `2/1/48` 与
-`3/2/80`。`MAX_ITERS=1` 仍使用 fake-ack，数值 diff 不作为 PCG correctness 结论。
-当前 level-3 artifact 尚无服务器 raw log 或上板结论，不进入 PCG correctness、分段时间
-或性能图表，也不更新正式 `source.diff`。
+level 4 software/TAPA simulation 已覆盖 `thermal2_n16 MAX_ITERS=0/1/10`。Matrix HBM
+words 为 `88/176/968`，均满足 `stripped_matrix_len_total*(MAX_ITERS+1)`；16 个 channel
+均完成，`event=99`、full=0、flags=`0xfe`、四类 event drop 均为 0。`MAX_ITERS=1`
+仍使用 fake-ack，数值 diff 不作为 PCG correctness 结论。当前 level-4 artifact 尚无
+服务器 raw log 或上板结论，不进入 PCG correctness、分段时间或性能图表，也不更新正式
+`source.diff`。
 
 上一同步的 level-2 artifact UUID 为 `04f7d703-2011-fd0a-6c43-aa158ddfbd12`，SHA256
 为 `a9844caf9e07084e8d518a6e4c5a2c6e36a652aff3f39af978b4a78ef35446a1`。它恢复真实

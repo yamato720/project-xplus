@@ -5,19 +5,17 @@
 - 主线：`cuper-tapa-pcg`
 - 新源码目录：`DLC/Cuper-callipepla-pcg/`
 - 顶层 kernel：`CuperPcgCallipepla`
-- 状态：`loader_drain level=3` timing-clean debug artifact 已完成构建并按用户要求同步。
-  UUID `02db72cc-c208-7772-4df4-3757a606929f`；在已通过的 ptr/PE/X-P vector loader
-  基线上，只恢复 Matrix_data ch0/ch15 的真实 HBM read-drain，其他 14 路仍 drain。
-  SpMV core 与真实 vector phases 仍未恢复。DATA/KERNEL/HBM 为 `100/500/450 MHz`，
-  routed WNS `0.003 ns`、TNS `0`、WHS `0.009 ns`、THS `0`
-- 本轮 XO/硬件目录：
-  `cuper-tapa-pcg-callipepla-loader-monitor-level3-xo-build/`
-- 本轮硬件日志：
-  `logs/cuper_tapa_pcg_callipepla_loader_monitor_level3_hw_20260711_185146.log`
+- 状态：`loader_drain level=4` 源码、TAPA software simulation、XO 静态审查和 Vitis
+  硬件构建均通过。它恢复全部 16 路真实 `Matrix_data -> Matrix_A_Stream` loader/drain，
+  仍不接 SpMV core、accumulator、checker、sort 或真实 vector phases；尚未上板。
+- 当前同步文件是 level-4 timing-clean debug artifact：
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin`，UUID
+  `3625c6a3-d725-db95-e0f5-27dc644edd61`，DATA/KERNEL/HBM 为 `100/500/450 MHz`，
+  routed WNS/TNS/WHS/THS 为 `0.003/0/0.008/0`。
 - 当前同步文件：
-  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`
-- 下一步：服务器侧从 `thermal2_n16 MAX_ITERS=0/1` 验证 ch0/ch15 Matrix HBM drain、
-  event/done/drop 和 CU IDLE；当前无运行中的构建 tmux
+  `395bitstream/cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin`
+- 下一步：服务器侧从 `thermal2_n16 MAX_ITERS=0/1` 验证 16 路 Matrix HBM word count、
+  16 channel done、event/done/drop 和 CU IDLE；当前无运行中的 level-4 构建 tmux
 - 默认配置：`CUPER_CALLIPEPLA_HBM_CHANNELS=16`，
   `CUPER_CALLIPEPLA_SPMV_STRIP_PADDING=1`，
   `CUPER_CALLIPEPLA_SPMV_ACC_WINDOW=10`
@@ -41,7 +39,7 @@
 `CUPER_CALLIPEPLA_KERNEL_FREQUENCY=150`，Vitis link 已 `impl Complete` 并生成 demo
 xclbin。
 
-当前同步文件为 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`，UUID
+此前同步的 level-3 文件为 `395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin`，UUID
 `02db72cc-c208-7772-4df4-3757a606929f`，SHA256
 `bdf6552a7fb0ef1f87bbf7f1cea82ec796398dce16d9b5bbce140e96cacbdc16`，`.xclbin.info`
 SHA256 `7aedf3a7f89c520bb8d01efdb7d800155e320d8cad93513b4413bc24e25cec8d`。
@@ -121,3 +119,37 @@ result，因此形成真实调度死锁。本轮修复后，两份 controller �
 `Vector_Result_in_s_empty_n`。当前独立 monitor 版已覆盖同主线 demo 槽并完成上述
 服务器侧握手验证；HTML 只新增 debug demo-only 边界，不把 fake-ack 数据混入 PCG
 correctness/性能图表，也不更新正式 `source.diff`。
+
+## 2026-07-11 loader-drain level 4 全 16 路 Matrix loader/drain
+
+level 4 保留 level 3 的 controller fake-ack、真实 strip ptr/PE drain 与 X/P vector
+loader，但将 16 个 `PcgCallipepla_Probe_MatrixLoaderStripDrain` 全部替换成真实
+`SpmvService_MatrixLoaderStrip`。每路写入独立 `Matrix_A_Stream`，由配对 drain 消费。
+loader 接收 stop 后写专用 stop token；drain 只有在已看到该 token 且自己的
+`Matrix_A_Stream` 为空时才报告完成，因此不会提前截断 Matrix_data read response 或
+FIFO 中残留的 beat。
+
+mode-3 monitor 等待 16 个 drain 的可靠最终事件，再写 `event=99`。level 4 使用此前未占用的
+`Status[44..46]`：Matrix HBM word 总数、完成 channel 数、matrix event drop 数；
+`Status[63].bit7` 为 matrix done，`Status[63][31:24]` 继续汇总 ptr/PE/vector/matrix
+loader drop。host 对 level 4 额外验证 `event=99`、16 channel done、
+`matrix_words=stripped_matrix_len_total*(MAX_ITERS+1)`、full/drop=0，以及所有
+controller/ack/ptr/PE/vector/matrix done flag。
+
+本地 `thermal2_n16` TAPA simulation 的 Matrix HBM words 为：`MAX_ITERS=0/1/10` 分别
+`88/176/968`，均为 16 channels、`event=99`、`flags=0xfe`、full/drop=0。level 3
+服务器侧已按用户反馈成功，但本地没有 raw log，因此不补造其 Matrix count。level 4
+仍是 fake-ack debug artifact，不构成完整 SpMV/PCG correctness、性能或 bitstream 晋级结论；
+正式 `source.diff` 保持不更新。
+
+2026-07-12 的 level-4 Vitis build 已生成
+`395bitstream/cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin`。UUID 为
+`3625c6a3-d725-db95-e0f5-27dc644edd61`，xclbin SHA256 为
+`4f1b70e779e94a2a6e005e6ac03373a99a9651709da8ef54d9e909cb5652c123`，info SHA256 为
+`a3a8796c91b438dc13cea1bdf4f5a4f822918fc874a3563c62e8465e6a98df6c`。构建日志
+`logs/cuper_tapa_pcg_callipepla_hw_20260711_223213.log` 显示 `impl Complete`、VPL/POST-VPL
+均 0 errors、总耗时 `2h48m55s`。routed timing summary 为 WNS/TNS/WHS/THS
+`0.003/0/0.008/0 ns`，setup/hold failing endpoints 均为 0。生成 RTL 静态审查确认 16 个
+`SpmvService_MatrixLoaderStrip` 和 16 个配对 matrix drain，全部 Matrix HBM 读端口存在，
+且未接入 core/accumulator/checker/sort。该 demo 已同步但尚未上板，不能据此声称完整
+SpMV/PCG correctness 或性能。

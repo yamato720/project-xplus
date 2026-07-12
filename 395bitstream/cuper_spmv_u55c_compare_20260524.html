@@ -1378,7 +1378,7 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
     </section>
 
     <section>
-      <h2>2026-07-11 Callipepla Loader-Drain Level 3 当前 Demo-Only 定位版</h2>
+      <h2>2026-07-11 Callipepla Loader-Drain Level 3 已同步 Demo-Only 历史基线</h2>
       <p>
         当前 TAPA full-PCG demo 槽为
         <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260711-demo.xclbin</code>，kernel 为
@@ -1415,9 +1415,51 @@ timeout 180s make run-cuper-pcg-tapa-fpga \
         Vitis link 已 <code>impl Complete</code> 且退出码为 0，总耗时
         <code>2h16m59s</code>。routed timing clean：WNS <code>0.003 ns</code>、TNS
         <code>0</code>、WHS <code>0.009 ns</code>、THS <code>0</code>，所有 clock domain
-        均无 setup/hold failing endpoint。当前尚无 level-3 上板结论；本轮数据不进入
-        <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或
-        性能曲线。
+        均无 setup/hold failing endpoint。用户随后反馈 level 3 已成功，但本地没有原始
+        服务器日志或 Matrix count，故不补造计数。该数据仍不进入
+        <code>TAPA PCG 分段时间</code>、<code>Init 与 1iter 差值</code>、correctness 或性能曲线。
+      </p>
+    </section>
+
+    <section>
+      <h2>2026-07-12 Callipepla Loader-Drain Level 4 timing-clean demo</h2>
+      <p class="callout">
+        本次 demo 为 <code>395bitstream/cuper-tapa-pcg-fpga-u55c-20260712-demo.xclbin</code>，
+        UUID <code>3625c6a3-d725-db95-e0f5-27dc644edd61</code>，SHA256
+        <code>4f1b70e779e94a2a6e005e6ac03373a99a9651709da8ef54d9e909cb5652c123</code>。新源码以
+        16 个真实 <code>SpmvService_MatrixLoaderStrip</code> 读取全部
+        <code>Matrix_data[0..15]</code>，每路接独立 <code>Matrix_A_Stream</code> drain。
+        drain 必须先收到对应 loader 已接收 stop 的通知，再清空自身 FIFO 才报告完成。SpMV core、
+        accumulator、checker、sort 和真实 vector phases 继续关闭，vector result 为 fake-ack。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Software/TAPA simulation</th>
+              <th>stripped Matrix words</th>
+              <th>Matrix HBM words</th>
+              <th>done channels</th>
+              <th>event / flags / drops</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>thermal2_n16 MAX_ITERS=0</code></td><td class="num"><code>88</code></td><td class="num"><code>88</code></td><td class="num"><code>16</code></td><td class="num"><code>99 / 0xfe / 0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=1</code></td><td class="num"><code>88</code></td><td class="num"><code>176</code></td><td class="num"><code>16</code></td><td class="num"><code>99 / 0xfe / 0</code></td></tr>
+            <tr><td><code>thermal2_n16 MAX_ITERS=10</code></td><td class="num"><code>88</code></td><td class="num"><code>968</code></td><td class="num"><code>16</code></td><td class="num"><code>99 / 0xfe / 0</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        mode-3 monitor 新增 <code>Status[44..46]</code> 的 Matrix HBM word total、done channel
+        count 和 matrix event drops；<code>Status[63].bit7</code> 为 matrix done。host 检查
+        <code>words = stripped_matrix_len_total * (MAX_ITERS + 1)</code>、16 channel done、
+        full/drop=0 与全部 done flag。Vitis link 已 <code>impl Complete</code>，VPL/POST-VPL
+        0 errors，耗时 <code>2h48m55s</code>；DATA/KERNEL/HBM 为 <code>100/500/450 MHz</code>，
+        routed WNS/TNS/WHS/THS 为 <code>0.003/0/0.008/0 ns</code>，所有 setup/hold endpoint
+        均满足。RTL 静态审查确认 16 个 loader、16 个 drain 和全部 Matrix HBM 读端口，未接 core、
+        accumulator、checker 或 sort。本轮尚未上板，仅证明真实 Matrix loader 到 stream drain 的边界，
+        不构成完整 SpMV、PCG correctness、性能或 bitstream 晋级结论。
       </p>
     </section>
 
